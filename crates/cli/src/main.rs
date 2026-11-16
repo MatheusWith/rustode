@@ -21,7 +21,12 @@ fn parse(mut args: impl Iterator<Item = String>) -> Command {
 }
 
 fn main() -> ExitCode {
-    match parse(std::env::args().skip(1)) {
+    if let Err(err) = rustode_trace::init_from_env() {
+        eprintln!("warning: {err}");
+    }
+    let command = parse(std::env::args().skip(1));
+    tracing::debug!(command = ?command, "cli started");
+    match command {
         Command::Version => {
             println!("rustode {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS

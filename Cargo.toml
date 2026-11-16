@@ -9,6 +9,12 @@ rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/MatheusWith/rustode"
 
+[workspace.dependencies]
+rustode-trace = { path = "crates/trace" }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "env-filter", "fmt", "json", "std"] }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
@@ -25,6 +31,3 @@ unwrap_used = "warn"
 [profile.release]
 lto = "thin"
 codegen-units = 1
-
-[workspace.dependencies]
-serde_json = "1"
