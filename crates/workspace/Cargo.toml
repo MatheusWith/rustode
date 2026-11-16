@@ -8,5 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+rustode-core.workspace = true
+rustode-fs.workspace = true
+tracing.workspace = true
+
 [lints]
 workspace = true
