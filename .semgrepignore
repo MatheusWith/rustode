@@ -1,0 +1,14 @@
+# rule fixtures intentionally contain the patterns the rules look for
+.semgrep/
+# evidence and generated folders (never scanned, never versioned)
+/01-app/
+/02-engenharia-reversa/
+/03-documentos/
+/04-fotos/
+/05-qa/
+/06-port/
+/07-vscodium-origem/
+/08-testes-do-build/
+/target/
+/.codegraph/
+/.scratch/

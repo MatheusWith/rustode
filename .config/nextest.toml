@@ -1,0 +1,6 @@
+[profile.default]
+fail-fast = false
+
+# Fast tests for the pre-commit hook: everything except tests named `stress_*` or `slow_*`.
+[profile.fast]
+default-filter = "not test(/^(stress|slow)_/)"

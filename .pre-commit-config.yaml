@@ -1,0 +1,77 @@
+# Local hooks only (no hook repositories are downloaded). Install with:
+#   pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+# Conventions: CONTRIBUTING.md, "Editor code: commits, branches and checks".
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+repos:
+  - repo: local
+    hooks:
+      # --- commit ---
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --all --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy -D warnings
+        entry: cargo clippy --workspace --all-targets -j 4 -- -D warnings
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
+      - id: cargo-nextest-fast
+        name: cargo nextest (fast tests)
+        entry: cargo nextest run --workspace -j 4 --profile fast
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        entry: gitleaks git --pre-commit --staged --redact --no-banner
+        language: system
+        pass_filenames: false
+      - id: semgrep
+        name: semgrep (project rules, offline)
+        entry: semgrep scan --config .semgrep --metrics=off --disable-version-check --error --quiet
+        language: system
+        exclude: ^\.semgrep/
+      # --- commit message ---
+      - id: committed
+        name: committed (Conventional Commits)
+        entry: committed --commit-file
+        language: system
+        stages: [commit-msg]
+      - id: xtask-commit-msg
+        name: types, scopes and trailers
+        entry: cargo xtask commit-msg
+        language: system
+        stages: [commit-msg]
+      # --- push ---
+      - id: xtask-pre-push
+        name: branch name, target and pushed messages
+        entry: sh -c 'printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$PRE_COMMIT_TO_REF" "$PRE_COMMIT_REMOTE_BRANCH" "${PRE_COMMIT_FROM_REF:-0000000000000000000000000000000000000000}" | cargo xtask pre-push'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+      - id: cargo-nextest-full
+        name: cargo nextest (full suite)
+        entry: cargo nextest run --workspace -j 4
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+      - id: cargo-clippy-push
+        name: cargo clippy -D warnings
+        entry: cargo clippy --workspace --all-targets -j 4 -- -D warnings
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+      - id: cargo-deny
+        name: cargo deny (licenses, advisories, bans, sources)
+        entry: cargo deny --locked check
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,12 @@
+# Conventional Commits; types, scopes and trailers are also checked by `cargo xtask commit-msg`.
+style = "conventional"
+allowed_types = ["feat", "fix", "perf", "refactor", "test", "docs", "build", "ci", "chore", "revert"]
+subject_length = 72
+subject_capitalized = false
+subject_not_punctuated = true
+imperative_subject = true
+no_fixup = true
+no_wip = true
+merge_commit = false
+line_length = 72
+allowed_scopes = ["core", "syntax", "fs", "config", "workspace", "protocol", "trace", "cli", "tui", "gui", "xtask", "bench", "deps", "docs", "ci", "hooks"]

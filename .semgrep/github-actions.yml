@@ -1,0 +1,8 @@
+rules:
+  - id: rustode.actions-untrusted-input-in-run
+    languages: [yaml]
+    severity: ERROR
+    message: Untrusted event data is interpolated into a shell script; pass it through an environment variable instead.
+    patterns:
+      - pattern-inside: "run: ..."
+      - pattern-regex: \$\{\{\s*github\.(event\.(pull_request\.(title|body|head\.ref)|issue\.(title|body)|comment\.body|head_commit\.message)|head_ref)\s*\}\}

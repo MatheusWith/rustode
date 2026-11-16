@@ -1,0 +1,41 @@
+# Project-authored rules (the Semgrep registry rules are not vendored: their license
+# does not allow redistribution). Run offline: semgrep scan --config .semgrep --metrics=off
+rules:
+  - id: rustode.shell-command-with-interpolation
+    languages: [rust]
+    severity: ERROR
+    message: Running a shell with `-c` and a built string allows command injection; pass arguments to Command directly.
+    pattern-either:
+      - pattern: std::process::Command::new("sh").arg("-c").arg(format!(...))
+      - pattern: Command::new("sh").arg("-c").arg(format!(...))
+      - pattern: Command::new("bash").arg("-c").arg(format!(...))
+      - pattern: std::process::Command::new("bash").arg("-c").arg(format!(...))
+  - id: rustode.tls-verification-disabled
+    languages: [rust]
+    severity: ERROR
+    message: TLS certificate or hostname verification is disabled.
+    pattern-either:
+      - pattern: $X.danger_accept_invalid_certs(true)
+      - pattern: $X.danger_accept_invalid_hostnames(true)
+  - id: rustode.hardcoded-secret
+    languages: [rust]
+    severity: ERROR
+    message: A credential-like name is bound to a string literal; read secrets from the environment or a keyring.
+    patterns:
+      - pattern-either:
+          - pattern: 'let $NAME = "$VALUE";'
+          - pattern: 'const $NAME: &str = "$VALUE";'
+          - pattern: 'static $NAME: &str = "$VALUE";'
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(password|passwd|secret|api_?key|token|private_?key).*
+      - metavariable-regex:
+          metavariable: $VALUE
+          regex: .{8,}
+  - id: rustode.microsoft-marketplace-or-telemetry
+    languages: [generic]
+    severity: ERROR
+    message: rustode never contacts the Microsoft Marketplace or Microsoft telemetry endpoints (VSCodium stance; AGENTS.md §1.2).
+    paths:
+      include: ["*.rs", "*.toml", "*.json"]
+    pattern-regex: (marketplace\.visualstudio\.com|gallerycdn\.vsassets\.io|dc\.services\.visualstudio\.com|vortex\.data\.microsoft\.com|mobile\.events\.data\.microsoft\.com)
