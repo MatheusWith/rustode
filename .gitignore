@@ -1,0 +1,21 @@
+# Evidence folders 01 to 08 are copies that montar.sh rebuilds from the live sources (AGENTS.md §0.1).
+# They are never versioned: ~1.4 GB, regenerable, and some contain personal data (§2.1).
+/01-app/
+/02-engenharia-reversa/
+/03-documentos/
+/04-fotos/
+/05-qa/
+/06-port/
+/07-vscodium-origem/
+/08-testes-do-build/
+
+# personal data (AGENTS.md §2.1), wherever it shows up
+*.vscdb
+
+# local tool state
+/.codegraph/
+/.serena/cache/
+/.claude/settings.local.json
+
+# Rust build output
+/target/

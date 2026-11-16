@@ -1,0 +1,19 @@
+rustode
+Reverse-engineering project for a local build of VSCodium 1.147.0.
+
+This project's analysis documents (README.md, AGENTS.md, CLAUDE.md, ROADMAP.md, docs/, 09-analises/)
+do not have a license yet: the decision is pending with the project owner.
+
+Third-party material contained in the copies (01-app/, 02-engenharia-reversa/, 05-qa/, 06-port/, 07-vscodium-origem/):
+
+Code - OSS (VS Code) — MIT. Copyright (c) Microsoft Corporation. See 01-app/VSCode-linux-x64/resources/app/LICENSE.txt.
+VSCodium (patches, scripts, product.json) — MIT. Copyright (c) VSCodium contributors. See 07-vscodium-origem/LICENSE.
+Electron — MIT. Copyright (c) Electron contributors. The package does not ship Electron's LICENSE file;
+  text at https://github.com/electron/electron/blob/main/LICENSE.
+Chromium and the other Electron components — several free licenses. See 01-app/VSCode-linux-x64/LICENSES.chromium.html.
+VS Code runtime dependencies — their own licenses. See 01-app/VSCode-linux-x64/resources/app/ThirdPartyNotices.txt.
+
+Trademarks: "Visual Studio Code", "VS Code" and the Microsoft logos are trademarks of Microsoft Corporation.
+"VSCodium" and its logo belong to the VSCodium project. None of the licenses above covers trademarks.
+
+Detailed provenance list: ATTRIBUTION.md.

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Compare Builds"
+  short_description: "Check integrity and compare two builds"

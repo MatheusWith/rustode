@@ -1,0 +1,5 @@
+interface:
+  display_name: "Write Finding"
+  short_description: "Record a finding in 09-analises"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Reverse Engineer Anything"
+  short_description: "Reverse engineer the packaged app with REA (static JS/Electron, binaries, runtime evidence)"

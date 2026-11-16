@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "rea": {
+        "type": "local",
+        "command": ["/usr/bin/rea", "mcp"],
+        "environment": {
+          "NO_UPDATE_NOTIFIER": "1",
+          "JAVA_HOME": "/usr/lib/jvm/java-25-openjdk",
+          "GHIDRA_INSTALL_DIR": "/opt/ghidra"
+        }
+      }
+    }
+  }
+}

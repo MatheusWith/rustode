@@ -1,0 +1,5 @@
+interface:
+  display_name: "Launch Built App"
+  short_description: "Open the built app, isolated, for observation"
+policy:
+  allow_implicit_invocation: false

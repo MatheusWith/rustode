@@ -1,0 +1,3 @@
+interface:
+  display_name: "Find Minified Symbol"
+  short_description: "Link a minified snippet to its source .ts file"

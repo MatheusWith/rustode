@@ -1,0 +1,3 @@
+interface:
+  display_name: "Inspect Asar"
+  short_description: "Examine the runtime modules in node_modules.asar"
