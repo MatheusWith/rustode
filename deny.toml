@@ -9,6 +9,8 @@ yanked = "deny"
 [licenses]
 version = 2
 confidence-threshold = 0.9
+# the list is the policy for future crates, so licenses not used yet are fine
+unused-allowed-license = "allow"
 allow = [
   "MIT",
   "Apache-2.0",
