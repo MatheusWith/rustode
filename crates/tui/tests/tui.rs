@@ -7,7 +7,8 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Modifier;
-use rustode_tui::App;
+use rustode_tui::{App, ColorMode};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
@@ -143,6 +144,7 @@ fn typing_moves_the_cursor_and_ctrl_s_saves() {
 #[test]
 fn shift_arrows_select_and_the_selection_is_drawn_reversed() {
     let (mut app, _) = open_sample("select");
+    app.set_color_mode(ColorMode::None);
     let mut terminal = terminal(100, 12);
     let shift_right = Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
     send(&mut app, &mut terminal, &[shift_right.clone(), shift_right]);
@@ -412,5 +414,70 @@ fn ctrl_g_goes_to_a_line_and_escape_cancels() {
     assert!(
         text.ends_with("}\n") && text.contains("\ny}"),
         "typing goes to the editor again: {text:?}"
+    );
+}
+
+/// The screen with each row's style runs: `x0-x1 fg/bg modifiers`.
+fn styled_screen(terminal: &Terminal<TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
+    let mut out = String::new();
+    for y in 0..buffer.area.height {
+        let mut row = String::new();
+        let mut runs: Vec<(u16, u16, String)> = Vec::new();
+        let mut hidden = 0;
+        for x in 0..buffer.area.width {
+            let cell = &buffer[(x, y)];
+            if hidden > 0 {
+                hidden -= 1;
+            } else {
+                row.push_str(cell.symbol());
+                hidden = cell.symbol().width().saturating_sub(1);
+            }
+            let style = format!("{:?}/{:?} {:?}", cell.fg, cell.bg, cell.modifier);
+            match runs.last_mut() {
+                Some(last) if last.2 == style => last.1 = x,
+                _ => runs.push((x, x, style)),
+            }
+        }
+        let _ = writeln!(out, "{:>2}|{}", y, row.trim_end());
+        for (start, end, style) in runs {
+            let _ = writeln!(out, "   {start:>3}-{end:<3} {style}");
+        }
+    }
+    out
+}
+
+#[test]
+fn each_color_mode_has_its_styles() {
+    for (name, mode) in [
+        ("truecolor", ColorMode::TrueColor),
+        ("256", ColorMode::Ansi256),
+        ("16", ColorMode::Ansi16),
+        ("none", ColorMode::None),
+    ] {
+        let (mut app, _) = open_sample(&format!("colors-{name}"));
+        app.set_color_mode(mode);
+        let mut terminal = terminal(70, 10);
+        let shift_right = Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        send(&mut app, &mut terminal, &[shift_right.clone(), shift_right]);
+        assert_snapshot(&format!("colors-{name}-70x10"), &styled_screen(&terminal));
+    }
+}
+
+#[test]
+fn truecolor_selection_uses_the_dark_modern_selection_color() {
+    let (mut app, _) = open_sample("truecolor-selection");
+    app.set_color_mode(ColorMode::TrueColor);
+    let mut terminal = terminal(100, 12);
+    let shift_right = Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+    send(&mut app, &mut terminal, &[shift_right]);
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(5, 1)].bg,
+        ratatui::style::Color::Rgb(0x26, 0x4F, 0x78)
+    );
+    assert_eq!(
+        buffer[(6, 1)].bg,
+        ratatui::style::Color::Rgb(0x1F, 0x1F, 0x1F)
     );
 }

@@ -1,6 +1,7 @@
 //! The TUI's state and event handling.
 
 use crate::keys::{self, Command, ExplorerKey};
+use crate::theme::{ColorMode, Theme};
 use ratatui::backend::Backend;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -73,6 +74,8 @@ pub struct App {
     pub(crate) message: Option<String>,
     /// The open quick input box, if any.
     pub(crate) quick: Option<QuickInput>,
+    /// Colors for the terminal's color mode.
+    pub(crate) theme: Theme,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -118,11 +121,17 @@ impl App {
             explorer_height: 1,
             message: None,
             quick: None,
+            theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
             quit: false,
             latency: LatencyRecorder::new(),
         })
+    }
+
+    /// Draws with `mode`'s colors instead of the detected ones.
+    pub fn set_color_mode(&mut self, mode: ColorMode) {
+        self.theme = Theme::new(mode);
     }
 
     /// The workspace holding the documents.

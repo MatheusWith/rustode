@@ -1,0 +1,31 @@
+ 0| main.rs │
+     0-8   Indexed(231)/Indexed(234) BOLD
+     9-9   Indexed(235)/Indexed(234) NONE
+    10-69  Indexed(252)/Indexed(234) NONE
+ 1|   1 fn main() {
+     0-4   Indexed(252)/Indexed(234) BOLD
+     5-6   Indexed(252)/Indexed(24) NONE
+     7-69  Indexed(252)/Indexed(234) NONE
+ 2|   2     println!("héllo 日本");
+     0-4   Indexed(243)/Indexed(234) NONE
+     5-25  Indexed(252)/Indexed(234) NONE
+    26-26  Reset/Reset NONE
+    27-27  Indexed(252)/Indexed(234) NONE
+    28-28  Reset/Reset NONE
+    29-69  Indexed(252)/Indexed(234) NONE
+ 3|   3 }
+     0-4   Indexed(243)/Indexed(234) NONE
+     5-69  Indexed(252)/Indexed(234) NONE
+ 4|   4
+     0-4   Indexed(243)/Indexed(234) NONE
+     5-69  Indexed(252)/Indexed(234) NONE
+ 5|
+     0-69  Indexed(252)/Indexed(234) NONE
+ 6|
+     0-69  Indexed(252)/Indexed(234) NONE
+ 7|
+     0-69  Indexed(252)/Indexed(234) NONE
+ 8|
+     0-69  Indexed(252)/Indexed(234) NONE
+ 9| main.rs                                 Ln 1, Col 3  UTF-8  LF  Rust
+     0-69  Indexed(252)/Indexed(234) NONE

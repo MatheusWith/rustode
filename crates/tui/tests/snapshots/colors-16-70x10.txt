@@ -1,0 +1,27 @@
+ 0| main.rs │
+     0-8   Reset/Reset BOLD | REVERSED
+     9-9   DarkGray/Reset NONE
+    10-69  Reset/Reset NONE
+ 1|   1 fn main() {
+     0-4   Reset/Reset BOLD
+     5-6   Reset/Blue NONE
+     7-69  Reset/Reset NONE
+ 2|   2     println!("héllo 日本");
+     0-4   DarkGray/Reset NONE
+     5-69  Reset/Reset NONE
+ 3|   3 }
+     0-4   DarkGray/Reset NONE
+     5-69  Reset/Reset NONE
+ 4|   4
+     0-4   DarkGray/Reset NONE
+     5-69  Reset/Reset NONE
+ 5|
+     0-69  Reset/Reset NONE
+ 6|
+     0-69  Reset/Reset NONE
+ 7|
+     0-69  Reset/Reset NONE
+ 8|
+     0-69  Reset/Reset NONE
+ 9| main.rs                                 Ln 1, Col 3  UTF-8  LF  Rust
+     0-69  Reset/Reset REVERSED

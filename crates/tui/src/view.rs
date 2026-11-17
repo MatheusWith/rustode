@@ -9,10 +9,11 @@
 //! way so they cannot hide in a terminal.
 
 use crate::app::{App, Focus, QUICK_ROWS, QuickItem, Viewport};
+use crate::theme::Theme;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use rustode_workspace::{Document, DocumentId, Eol, Position, Selection};
@@ -20,8 +21,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Width of the sidebar.
 const SIDEBAR_WIDTH: u16 = 25;
-
-const SELECTED: Style = Style::new().add_modifier(Modifier::REVERSED);
 
 /// The screen's regions for its size; `None` below 40×10.
 struct Areas {
@@ -69,17 +68,22 @@ fn areas(area: Rect, explorer_focused: bool) -> Option<Areas> {
 }
 
 pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
-    let Some(areas) = areas(frame.area(), app.focus == Focus::Explorer) else {
+    let theme = app.theme;
+    let screen = frame.area();
+    frame.buffer_mut().set_style(screen, theme.editor);
+    let Some(areas) = areas(screen, app.focus == Focus::Explorer) else {
         draw_notice(frame);
         return;
     };
     if let Some(sidebar) = areas.sidebar {
+        frame.buffer_mut().set_style(sidebar, theme.sidebar);
         draw_sidebar(app, frame, sidebar);
     }
     if let Some(editor) = areas.editor {
         draw_editor_group(app, frame, editor);
     }
     if let Some(status) = areas.status {
+        frame.buffer_mut().set_style(status, theme.status);
         draw_status(app, frame, status);
     }
     if app.quick.is_some() {
@@ -104,8 +108,10 @@ fn draw_quick(app: &mut App, frame: &mut Frame) {
         width,
         height,
     };
+    let theme = app.theme;
     frame.render_widget(Clear, outer);
-    let block = Block::bordered();
+    frame.buffer_mut().set_style(outer, theme.quick);
+    let block = Block::bordered().border_style(theme.quick_border);
     let inner = block.inner(outer);
     frame.render_widget(block, outer);
     let selected = quick.selected.min(items.len().saturating_sub(1));
@@ -119,7 +125,7 @@ fn draw_quick(app: &mut App, frame: &mut Frame) {
         inner.width,
     );
     for (row, (index, item)) in items.iter().enumerate().skip(first).take(rows).enumerate() {
-        let line = quick_line(item, usize::from(inner.width), index == selected);
+        let line = quick_line(item, usize::from(inner.width), index == selected, &theme);
         buffer.set_line(inner.x, inner.y + 1 + to_u16(row), &line, inner.width);
     }
     let cursor_x = (inner.x + 1 + to_u16(text_width)).min(inner.right().saturating_sub(1));
@@ -127,11 +133,16 @@ fn draw_quick(app: &mut App, frame: &mut Frame) {
 }
 
 /// One row of the quick input list, padded to `width`.
-fn quick_line(item: &QuickItem, width: usize, selected: bool) -> Line<'static> {
-    let dim = Style::new().add_modifier(Modifier::DIM);
+fn quick_line(item: &QuickItem, width: usize, selected: bool, theme: &Theme) -> Line<'static> {
+    let dim = theme.description;
+    let highlight = theme.highlight;
     let (mut spans, right) = match item {
         QuickItem::File(file) => {
-            let mut spans = highlighted(&format!(" {}", file.label), &shift(&file.score.label));
+            let mut spans = highlighted(
+                &format!(" {}", file.label),
+                &shift(&file.score.label),
+                highlight,
+            );
             spans.push(Span::styled(format!("  {}", file.description), dim));
             (spans, String::new())
         }
@@ -139,6 +150,7 @@ fn quick_line(item: &QuickItem, width: usize, selected: bool) -> Line<'static> {
             highlighted(
                 &format!(" {}", found.command.label),
                 &shift(&found.positions),
+                highlight,
             ),
             found.keybinding.clone().unwrap_or_default(),
         ),
@@ -157,7 +169,7 @@ fn quick_line(item: &QuickItem, width: usize, selected: bool) -> Line<'static> {
     spans.push(Span::styled(format!("{right} "), dim));
     let mut line = Line::from(spans);
     if selected {
-        line = line.patch_style(SELECTED);
+        line = line.patch_style(theme.quick_selected);
     }
     line
 }
@@ -167,13 +179,12 @@ fn shift(positions: &[usize]) -> Vec<usize> {
     positions.iter().map(|p| p + 1).collect()
 }
 
-/// `text` with the chars at `positions` in bold.
-fn highlighted(text: &str, positions: &[usize]) -> Vec<Span<'static>> {
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+/// `text` with the chars at `positions` highlighted.
+fn highlighted(text: &str, positions: &[usize], highlight: Style) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (index, c) in text.chars().enumerate() {
         let style = if positions.contains(&index) {
-            bold
+            highlight
         } else {
             Style::new()
         };
@@ -213,11 +224,14 @@ fn to_u16(value: usize) -> u16 {
 }
 
 fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
-    let block = Block::new().borders(Borders::RIGHT);
+    let theme = app.theme;
+    let block = Block::new()
+        .borders(Borders::RIGHT)
+        .border_style(theme.separator);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let buffer = frame.buffer_mut();
-    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let bold = theme.sidebar_header;
     buffer.set_line(
         inner.x,
         inner.y,
@@ -260,10 +274,10 @@ fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
         let text = format!(" {}{marker}{}", "  ".repeat(row.depth), row.name);
         let mut style = Style::new();
         if active.as_deref() == Some(row.path.as_path()) {
-            style = style.add_modifier(Modifier::BOLD);
+            style = style.patch(theme.explorer_active);
         }
         if focused && offset == app.explorer_row {
-            style = style.patch(SELECTED);
+            style = style.patch(theme.explorer_selected);
         }
         let y = inner.y + 2 + to_u16(offset - app.explorer_top);
         let padded = format!("{text:<width$}", width = usize::from(inner.width));
@@ -300,7 +314,7 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
     let left = truncate(&left, room);
     let gap = " ".repeat(room - left.width());
     let bar = Line::from(format!("{left}{gap}{right}"));
-    frame.render_widget(Paragraph::new(bar).style(SELECTED), area);
+    frame.render_widget(Paragraph::new(bar).style(app.theme.status), area);
 }
 
 /// `text` cut to at most `width` columns.
@@ -372,15 +386,17 @@ fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) {
         skipped += labels[start].0.width() + 1;
         start += 1;
     }
+    let theme = app.theme;
+    buffer.set_style(area, theme.tab_bar);
     let mut spans = Vec::new();
     for (label, is_active) in labels.into_iter().skip(start) {
         let style = if is_active {
-            SELECTED.add_modifier(Modifier::BOLD)
+            theme.tab_active
         } else {
-            Style::new()
+            theme.tab_inactive
         };
         spans.push(Span::styled(label, style));
-        spans.push(Span::raw("│"));
+        spans.push(Span::styled("│", theme.separator));
     }
     buffer.set_line(area.x, area.y, &Line::from(spans), area.width);
 }
@@ -393,6 +409,8 @@ struct RowContext<'a> {
     tab_size: usize,
     left: usize,
     width: usize,
+    selection: Style,
+    secondary_cursor: Style,
 }
 
 fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
@@ -422,13 +440,15 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         tab_size,
         left: view.left,
         width,
+        selection: app.theme.selection,
+        secondary_cursor: app.theme.secondary_cursor,
     };
     let buffer = frame.buffer_mut();
     for (row, line) in (view.top..lines).take(height).enumerate() {
         let number_style = if line == cursor.line {
-            Style::new().add_modifier(Modifier::BOLD)
+            app.theme.gutter_active
         } else {
-            Style::new().add_modifier(Modifier::DIM)
+            app.theme.gutter
         };
         let number = Span::styled(format!("{:>w$} ", line + 1, w = gutter - 1), number_style);
         let mut spans = vec![number];
@@ -473,7 +493,7 @@ fn row_spans(context: &RowContext<'_>, line: usize) -> Vec<Span<'static>> {
     cells.spans
 }
 
-/// Selected text and secondary cursors are drawn reversed; the primary
+/// Selected text and secondary cursors get the theme's styles; the primary
 /// cursor is the terminal's own cursor.
 fn style_at(context: &RowContext<'_>, offset: usize) -> Style {
     let selected = context.selections.iter().any(|s| {
@@ -484,14 +504,16 @@ fn style_at(context: &RowContext<'_>, offset: usize) -> Style {
         .selections
         .iter()
         .any(|s| s.is_empty() && s.head == offset && *s != context.primary);
-    if selected || secondary_cursor {
-        SELECTED
+    if secondary_cursor {
+        context.secondary_cursor
+    } else if selected {
+        context.selection
     } else {
         Style::new()
     }
 }
 
-/// A reversed cell after the text when the line break is selected or a
+/// A highlighted cell after the text when the line break is selected or a
 /// secondary cursor sits at the end of the line.
 fn end_style(context: &RowContext<'_>, end: usize, breaks: bool) -> Option<Style> {
     let break_selected = breaks
@@ -503,7 +525,11 @@ fn end_style(context: &RowContext<'_>, end: usize, breaks: bool) -> Option<Style
         .selections
         .iter()
         .any(|s| s.is_empty() && s.head == end && *s != context.primary);
-    (break_selected || cursor).then_some(SELECTED)
+    if cursor {
+        Some(context.secondary_cursor)
+    } else {
+        break_selected.then_some(context.selection)
+    }
 }
 
 /// How a char is drawn: its symbol and the columns it takes.

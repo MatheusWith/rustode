@@ -8,6 +8,8 @@
 
 mod app;
 mod keys;
+mod theme;
 mod view;
 
 pub use app::App;
+pub use theme::ColorMode;
