@@ -39,4 +39,4 @@ Nothing reaches `main` that would fail a local hook, and no scan sends data out.
 - Not applied: the decision allows the registry rules in CI, but CI runs only the project rules (`.github/workflows/ci.yml:60-64`).
 - CI has never run, because the repository has not been pushed ([ADR 0007](0007-own-git-repository.md)).
 - CI pins gitleaks 8.28.0 (`.github/workflows/ci.yml:58`). The local gitleaks is whatever is installed (`gitleaks version` prints `version is set by build process`), so the two may differ.
-- The micro-benchmark gate ([ADR 0026](0026-micro-benchmark-gate.md)) is not part of the pipeline yet.
+- The micro-benchmark gate ([ADR 0026](0026-micro-benchmark-gate.md)) runs in CI on pull requests (the `bench-gate` job of `.github/workflows/ci.yml`) and, only when `RUSTODE_BENCH_GATE=1` is set, in the pre-push hook (`.pre-commit-config.yaml`).

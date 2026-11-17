@@ -72,6 +72,7 @@ These are the direct third-party dependencies of the rustode workspace members (
 
 | Crate | Version | License | Used by | What for |
 |---|---|---|---|---|
+| `criterion` | 0.8.2 (no default features, so neither plotters nor rayon; dev only) | Apache-2.0 OR MIT | `rustode-core` | the micro-benchmarks of buffer reads, edits and undo/redo (`crates/core/benches/core.rs`), whose saved estimates `cargo xtask bench-gate` compares (`xtask/src/bench_gate.rs`) |
 | `eframe` | 0.36.2 (features `accesskit`, `wayland`, `wgpu`, `x11`; no default features, so not egui's default fonts) | MIT OR Apache-2.0 | `rustode-gui` | the window, egui and wgpu rendering, and AccessKit for screen readers (`crates/gui/src/run.rs`, `crates/gui/src/app.rs`, `crates/gui/src/editor.rs`) |
 | `egui_kittest` | 0.36.2 (features `eframe`, `snapshot`, `wgpu`; dev only) | MIT OR Apache-2.0 | `rustode-gui` | input-to-frame tests: the AccessKit tree and image snapshots (`crates/gui/tests/editor.rs`) |
 | `encoding_rs` | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause | `rustode-fs` | decoding and encoding files that are not UTF-8 (`crates/fs/src/encoding.rs`) |

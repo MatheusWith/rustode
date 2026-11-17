@@ -72,12 +72,22 @@ Check a message before committing: `committed --commit-file <file>` and `cargo x
 |---|---|
 | commit | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo nextest` (fast tests), `gitleaks`, `semgrep` (rules in `.semgrep/`, offline, metrics off) |
 | commit message | `committed` and `cargo xtask commit-msg` (types, scopes, trailers) |
-| push | branch name and target, every commit message in the range, full test suite, `clippy`, `cargo deny` |
-| pull request (CI) | all of the above, the pull request title, coverage gates, `cargo audit` |
+| push | branch name and target, every commit message in the range, full test suite, `clippy`, `cargo deny`; the micro-benchmark gate at 5% only with `RUSTODE_BENCH_GATE=1` |
+| pull request (CI) | all of the above, the pull request title, coverage gates, `cargo audit`, the micro-benchmark gate at 10% against the base commit |
 
 Do not bypass hooks with `--no-verify`: CI runs the same checks and will fail the pull request.
 
-Not applied yet: the micro-benchmark gate, where a regression above 5% against `main` fails locally and above 10% fails in CI ([ADR 0026](docs/adr/0026-micro-benchmark-gate.md)). This section will say how to run it once it lands.
+### Micro-benchmark gate
+
+A change may not make a benchmarked core operation slower than on `main`: more than 5% fails the local gate, and more than 10% fails CI ([ADR 0026](docs/adr/0026-micro-benchmark-gate.md)).
+
+- **The benchmarks** are criterion benchmarks in `crates/core/benches/core.rs`, written against the public API of `rustode-core`, with fixed seeds: building a 1 MiB buffer; line and position lookups; inserting and deleting a char at random offsets; typing a word with one cursor and with 64; undoing and redoing 100 typed words, and a word typed at 64 cursors. `cargo nextest` never runs them. To run them alone: `cargo bench -p rustode-core --bench core`.
+- **Run the gate before pushing a change that can affect the core:** `cargo xtask bench-gate`. It compares with `main` at 5%; `--base <rev>` picks another base (for example `origin/main` after a fetch), and `--threshold <percent>` another limit. It checks the base out in a git worktree under `<target>/bench-gate/`, builds both trees, then measures the base and then the working tree (uncommitted changes included), one after the other on your machine. It prints a table of the mean times and exits with 1 when a benchmark is slower than the limit, or 2 when it could not run.
+- **In the pre-push hook** the gate is opt-in, because it takes minutes: `RUSTODE_BENCH_GATE=1 git push`. Without the variable the hook passes at once.
+- **In CI**, the `bench-gate` job runs on every pull request: `cargo xtask bench-gate --base <base commit> --threshold 10`, with both trees measured on the same runner.
+- **Measure on a quiet machine.** The gate compares two runs made minutes apart, so a build or another editor running at the same time shows up as a change. Close them first, as for any benchmark (AGENTS.md §11.5). BENCH_NOISE_PLACEHOLDER
+- **When the gate fails**, run it again. If the same benchmark is still slower, the slowdown is real, and the fix belongs in the same pull request. The gate has no override.
+- **When a pull request changes what a benchmark measures**, it renames the benchmark. The gate then reports it as new, instead of comparing two different workloads. Reviewers check such renames.
 
 ### Exceptions
 
@@ -96,7 +106,7 @@ Every pull request is reviewed against this list. The pull request template ([`.
 - [ ] New dependencies pass `cargo deny`, have MIT-compatible licenses and are listed in `ATTRIBUTION.md` (ADR 0010)
 - [ ] Coverage gates hold; any exception is justified in a comment on this pull request (ADR 0020)
 - [ ] Every lint exception is justified next to its `allow` (ADR 0021)
-- [ ] Every number is labeled measured (with its command, folder and commit) or estimated (with its source); no regression beyond the benchmark gate once it exists (ADR 0026)
+- [ ] Every number is labeled measured (with its command, folder and commit) or estimated (with its source); no regression beyond the micro-benchmark gate (ADR 0026)
 - [ ] Benchmarks against the App ran on a verified temporary copy, one editor instance at a time, under the memory guard (AGENTS.md §11.5)
 - [ ] Nothing written to folders 01 to 08; no personal data
 - [ ] Docs, ADRs and the roadmap's milestones and Gap Analysis are updated where the change affects them

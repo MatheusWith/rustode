@@ -76,3 +76,12 @@ repos:
         stages: [pre-push]
         pass_filenames: false
         always_run: true
+      - id: xtask-bench-gate
+        name: micro-benchmark gate (only with RUSTODE_BENCH_GATE=1)
+        # Measures main and the working tree for a few minutes (ADR 0026), so it
+        # is opt-in: `RUSTODE_BENCH_GATE=1 git push`. Otherwise it passes at once.
+        entry: sh -c '[ "${RUSTODE_BENCH_GATE:-0}" = 1 ] || exit 0; exec cargo xtask bench-gate'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
