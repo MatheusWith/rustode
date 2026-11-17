@@ -1,7 +1,13 @@
 //! The single in-process API that every frontend uses.
 
+mod config;
 mod document;
 mod external;
+
+pub use config::{
+    Chord, Config, ConfigChange, ConfigFile, Diagnostic, DiagnosticKind, Keybinding, Location,
+    SettingChange, Severity, Value, When,
+};
 
 pub use document::{Document, DocumentId};
 pub use external::Resolution;
@@ -105,6 +111,8 @@ pub struct Workspace {
     /// Watches the files of open documents; `None` until the first open, or
     /// if the platform watcher could not be created.
     watcher: Option<rustode_fs::Watcher>,
+    /// Settings and keybindings (`load_config`, `reload_config`).
+    config: Config,
 }
 
 impl Workspace {

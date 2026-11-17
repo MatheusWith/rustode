@@ -310,6 +310,7 @@ version = "0.1.0"
 name = "rustode-workspace"
 version = "0.1.0"
 dependencies = [
+ "rustode-config",
  "rustode-core",
  "rustode-fs",
  "tracing",

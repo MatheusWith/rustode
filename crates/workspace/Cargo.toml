@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+rustode-config.workspace = true
 rustode-core.workspace = true
 rustode-fs.workspace = true
 tracing.workspace = true
