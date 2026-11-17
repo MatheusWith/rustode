@@ -110,6 +110,10 @@ pub struct App {
     pub(crate) quick: Option<QuickInput>,
     /// Colors for the terminal's color mode.
     pub(crate) theme: Theme,
+    /// The find widget's state, kept when closed so F3 repeats the search.
+    pub(crate) find: Option<crate::find::FindWidget>,
+    /// Whether the find widget is shown.
+    pub(crate) find_visible: bool,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -158,6 +162,8 @@ impl App {
             explorer_height: 1,
             message: None,
             quick: None,
+            find: None,
+            find_visible: false,
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
@@ -273,6 +279,9 @@ impl App {
     /// false `when` falls through), then the default keys unless the user
     /// removed them (`"-command"`).
     fn key(&mut self, key: KeyEvent) {
+        if self.find_visible && self.focus == Focus::Editor && self.find_key(key) {
+            return;
+        }
         if let Some(id) = self.user_binding(key) {
             self.message = None;
             self.run_id(&id);
@@ -412,6 +421,10 @@ impl App {
             Command::QuickOpen => self.open_quick(""),
             Command::ShowCommands => self.open_quick(">"),
             Command::GotoLine => self.open_quick(":"),
+            Command::Find => self.open_find(false),
+            Command::Replace => self.open_find(true),
+            Command::FindNext => self.find_step(true),
+            Command::FindPrevious => self.find_step(false),
             other => self.edit(other),
         }
     }

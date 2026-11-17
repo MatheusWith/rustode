@@ -7,6 +7,7 @@
 //! below 40×10.
 
 mod app;
+mod find;
 mod keys;
 mod theme;
 mod view;

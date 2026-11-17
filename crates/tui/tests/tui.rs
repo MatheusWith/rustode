@@ -681,3 +681,107 @@ fn user_keybindings_add_remove_and_respect_when() {
         "the when clause is false in the editor"
     );
 }
+
+fn alt(c: char) -> Event {
+    Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT))
+}
+
+fn doc_text(app: &App) -> String {
+    app.workspace()
+        .document(app.document().expect("doc"))
+        .expect("doc")
+        .text()
+}
+
+#[test]
+fn ctrl_f_finds_as_you_type_and_shows_the_count() {
+    let path = fixture("find", "f.txt", "Foo foo FOO\nfoo\n");
+    let mut app = App::open(&path).expect("open");
+    app.set_color_mode(ColorMode::None);
+    let mut terminal = terminal(100, 12);
+    send(&mut app, &mut terminal, &[ctrl('f')]);
+    send(&mut app, &mut terminal, &typed("foo"));
+    assert_snapshot("find-100x12", &screen(&terminal));
+    assert!(
+        screen(&terminal).contains("1 of 4"),
+        "{}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &[alt('c')]);
+    assert!(
+        screen(&terminal).contains("1 of 2"),
+        "Match Case: {}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert!(
+        screen(&terminal).contains("2 of 2"),
+        "{}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert!(
+        screen(&terminal).contains("1 of 2"),
+        "wraps: {}",
+        screen(&terminal)
+    );
+    let shift_enter = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+    send(&mut app, &mut terminal, &[shift_enter]);
+    assert!(
+        screen(&terminal).contains("2 of 2"),
+        "{}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &typed("zz"));
+    assert!(
+        screen(&terminal).contains("No results"),
+        "{}",
+        screen(&terminal)
+    );
+}
+
+#[test]
+fn ctrl_h_replaces_one_then_all_and_escape_closes() {
+    let path = fixture("replace", "f.txt", "a1 a2 a3\n");
+    let mut app = App::open(&path).expect("open");
+    let mut terminal = terminal(100, 12);
+    send(&mut app, &mut terminal, &[ctrl('h'), key(KeyCode::Tab)]);
+    send(&mut app, &mut terminal, &typed("a"));
+    send(&mut app, &mut terminal, &[key(KeyCode::Tab)]);
+    send(&mut app, &mut terminal, &typed("b"));
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert_eq!(doc_text(&app), "b1 a2 a3\n");
+    let replace_all = Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    ));
+    send(&mut app, &mut terminal, &[replace_all]);
+    assert_eq!(doc_text(&app), "b1 b2 b3\n");
+    assert!(
+        screen(&terminal).contains("Replaced 2"),
+        "{}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &[key(KeyCode::Esc), ctrl('z')]);
+    assert_eq!(
+        doc_text(&app),
+        "b1 a2 a3\n",
+        "replace all undoes as one step"
+    );
+    assert!(!screen(&terminal).contains("Replace:"), "the widget closed");
+}
+
+#[test]
+fn f3_repeats_the_last_search_with_the_widget_closed() {
+    let path = fixture("f3", "f.txt", "x y x y x\n");
+    let mut app = App::open(&path).expect("open");
+    let mut terminal = terminal(100, 12);
+    send(&mut app, &mut terminal, &[ctrl('f')]);
+    send(&mut app, &mut terminal, &typed("x"));
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Esc), key(KeyCode::F(3))],
+    );
+    assert_eq!(selections(&app), [rustode_workspace::Selection::new(4, 5)]);
+}

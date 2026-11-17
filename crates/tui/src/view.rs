@@ -82,6 +82,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
     }
     if let Some(editor) = areas.editor {
         draw_editor_group(app, frame, editor);
+        if app.find_visible {
+            draw_find(app, frame, editor);
+        }
     }
     if let Some(status) = areas.status {
         frame.buffer_mut().set_style(status, theme.status);
@@ -131,6 +134,72 @@ fn draw_quick(app: &mut App, frame: &mut Frame) {
     }
     let cursor_x = (inner.x + 1 + to_u16(text_width)).min(inner.right().saturating_sub(1));
     frame.set_cursor_position((cursor_x, inner.y));
+}
+
+/// The find widget at the top right of the editor, like VS Code's: the
+/// find field, the Aa / ab / .* toggles (shown selected when on), the match
+/// status, and the replace field in replace mode.
+fn draw_find(app: &App, frame: &mut Frame, area: Rect) {
+    let Some(find) = app.find.as_ref() else {
+        return;
+    };
+    let theme = app.theme;
+    let width = area.width.min(64);
+    let rows: u16 = if find.replace_mode { 2 } else { 1 };
+    let outer = Rect {
+        x: area.right() - width,
+        y: area.y + 1,
+        width,
+        height: (rows + 2).min(area.height.saturating_sub(1)),
+    };
+    frame.render_widget(Clear, outer);
+    frame.buffer_mut().set_style(outer, theme.quick);
+    let block = Block::bordered().border_style(theme.quick_border);
+    let inner = block.inner(outer);
+    frame.render_widget(block, outer);
+    let toggle = |on: bool, label: &str| {
+        Span::styled(
+            format!(" {label} "),
+            if on {
+                theme.quick_selected
+            } else {
+                theme.description
+            },
+        )
+    };
+    let status = app.find_status();
+    let right = vec![
+        toggle(find.options.match_case, "Aa"),
+        toggle(find.options.whole_word, "ab"),
+        toggle(find.options.regex, ".*"),
+        Span::styled(format!(" {status}"), theme.description),
+    ];
+    let right_width: usize = right.iter().map(|s| s.content.width()).sum();
+    let field_width = usize::from(inner.width).saturating_sub(right_width + 1);
+    let find_text = truncate(&format!(" Find: {}", find.query), field_width);
+    let mut spans = vec![Span::raw(format!("{find_text:<field_width$} "))];
+    spans.extend(right);
+    let buffer = frame.buffer_mut();
+    buffer.set_line(inner.x, inner.y, &Line::from(spans), inner.width);
+    let replace_text = truncate(
+        &format!(" Replace: {}", find.replacement),
+        usize::from(inner.width),
+    );
+    if find.replace_mode {
+        buffer.set_line(
+            inner.x,
+            inner.y + 1,
+            &Line::from(replace_text.clone()),
+            inner.width,
+        );
+    }
+    let (row, text) = if find.in_replace {
+        (1, replace_text)
+    } else {
+        (0, find_text)
+    };
+    let x = (inner.x + to_u16(text.width())).min(inner.right().saturating_sub(1));
+    frame.set_cursor_position((x, inner.y + row));
 }
 
 /// One row of the quick input list, padded to `width`.

@@ -44,6 +44,10 @@ pub(crate) enum Command {
     QuickOpen,
     ShowCommands,
     GotoLine,
+    Find,
+    Replace,
+    FindNext,
+    FindPrevious,
 }
 
 /// What a key does while the explorer has focus.
@@ -73,6 +77,8 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
     match (key.code, ctrl, shift, alt) {
         (KeyCode::F(6), false, false, false) => Some(Command::FocusNextPart),
         (KeyCode::F(1), false, false, false) => Some(Command::ShowCommands),
+        (KeyCode::F(3), false, false, false) => Some(Command::FindNext),
+        (KeyCode::F(3), false, true, false) => Some(Command::FindPrevious),
         (KeyCode::PageDown, true, false, false) => Some(Command::NextTab),
         (KeyCode::PageUp, true, false, false) => Some(Command::PreviousTab),
         (KeyCode::Char(c), true, _, false) => match (c.to_ascii_lowercase(), shift) {
@@ -80,6 +86,8 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
             ('p', false) => Some(Command::QuickOpen),
             ('p', true) => Some(Command::ShowCommands),
             ('g', false) => Some(Command::GotoLine),
+            ('f', false) => Some(Command::Find),
+            ('h', false) => Some(Command::Replace),
             ('w', false) => Some(Command::CloseTab),
             ('s', false) => Some(Command::Save),
             ('q', false) => Some(Command::Quit),
@@ -127,6 +135,10 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::QuickOpen => "workbench.action.quickOpen",
         Command::ShowCommands => "workbench.action.showCommands",
         Command::GotoLine => "workbench.action.gotoLine",
+        Command::Find => "actions.find",
+        Command::Replace => "editor.action.startFindReplaceAction",
+        Command::FindNext => "editor.action.nextMatchFindAction",
+        Command::FindPrevious => "editor.action.previousMatchFindAction",
         Command::Undo => "undo",
         Command::Redo => "redo",
         Command::SelectAll => "editor.action.selectAll",
@@ -193,6 +205,10 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::QuickOpen,
         Command::ShowCommands,
         Command::GotoLine,
+        Command::Find,
+        Command::Replace,
+        Command::FindNext,
+        Command::FindPrevious,
         Command::Undo,
         Command::Redo,
         Command::SelectAll,
