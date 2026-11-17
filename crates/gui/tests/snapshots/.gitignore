@@ -1,0 +1,4 @@
+# kittest writes these next to each snapshot when a test runs
+*.new.png
+*.diff.png
+*.old.png

@@ -5,6 +5,17 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# Owner decision, 2026-11-17: the GUI's screen-reader support (AccessKit on
+# Linux, through accesskit_unix and atspi) still uses zbus 5, whose split-out
+# crates are marked unmaintained because zbus 6 merged them back. They are
+# informational: no vulnerability, no patched version. Even eframe 0.37,
+# accesskit_unix 0.24.1 and atspi 0.30 still use zbus 5.19. Remove these
+# entries when accesskit_unix moves to zbus 6; keep .cargo/audit.toml in step.
+ignore = [
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; needed by accesskit_unix (zbus 5) until it migrates" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; needed by accesskit_unix (zbus 5) until it migrates" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6; needed by accesskit_unix (zbus 5) until it migrates" },
+]
 
 [licenses]
 version = 2

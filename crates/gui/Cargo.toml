@@ -1,12 +1,25 @@
 [package]
 name = "rustode-gui"
-description = "rustode gui crate"
+description = "rustode graphical frontend (egui on eframe with wgpu)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+
+[[bin]]
+name = "rustode-gui"
+path = "src/main.rs"
+
+[dependencies]
+eframe.workspace = true
+rustode-workspace.workspace = true
+tracing.workspace = true
+winit.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
 
 [lints]
 workspace = true
