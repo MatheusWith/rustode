@@ -3,7 +3,10 @@
 mod document;
 
 pub use document::{Document, DocumentId};
+pub use rustode_core::{EditError, Range};
 pub use rustode_fs::{Encoding, Eol};
+
+use rustode_core::Editor;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -22,6 +25,19 @@ pub enum Error {
     Encode(rustode_fs::EncodeError),
     /// No open document has this id.
     UnknownDocument(DocumentId),
+    /// An edit was refused.
+    Edit(EditError),
+}
+
+/// Something that happened in the workspace, for frontends to react to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Event {
+    /// The text of a document changed (edit, undo or redo).
+    DocumentChanged {
+        /// The document.
+        id: DocumentId,
+    },
 }
 
 impl fmt::Display for Error {
@@ -30,6 +46,7 @@ impl fmt::Display for Error {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Encode(err) => err.fmt(f),
             Self::UnknownDocument(id) => write!(f, "no open document {id:?}"),
+            Self::Edit(err) => err.fmt(f),
         }
     }
 }
@@ -40,6 +57,7 @@ impl std::error::Error for Error {}
 #[derive(Debug, Default)]
 pub struct Workspace {
     documents: Vec<Option<Document>>,
+    events: Vec<Event>,
 }
 
 impl Workspace {
@@ -85,7 +103,9 @@ impl Workspace {
         let document = self.document_mut(id)?;
         let bytes = document.encoded().map_err(Error::Encode)?;
         let path = document.path().to_owned();
-        rustode_fs::write_file(&path, &bytes).map_err(|source| Error::Io { path, source })
+        rustode_fs::write_file(&path, &bytes).map_err(|source| Error::Io { path, source })?;
+        document.mark_saved();
+        Ok(())
     }
 
     /// Changes the encoding used on save. Refused if the text cannot be represented.
@@ -108,7 +128,99 @@ impl Workspace {
     /// # Errors
     /// When no document has this id.
     pub fn set_eol(&mut self, id: DocumentId, eol: Eol) -> Result<(), Error> {
-        self.document_mut(id)?.set_eol(eol);
+        let changed = self.document_mut(id)?.set_eol(eol).map_err(Error::Edit)?;
+        self.changed(id, changed);
         Ok(())
+    }
+
+    /// Moves the cursor of a document. Ends the current undo step.
+    ///
+    /// # Errors
+    /// When there is no such document or `offset` is past its end.
+    pub fn set_cursor(&mut self, id: DocumentId, offset: usize) -> Result<(), Error> {
+        self.edit(id, |editor| editor.set_cursor(offset).map(|()| false))
+    }
+
+    /// Types `text` at the cursor, grouping undo steps the way VS Code does.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn type_text(&mut self, id: DocumentId, text: &str) -> Result<(), Error> {
+        self.edit(id, |editor| {
+            editor.type_text(text);
+            Ok(!text.is_empty())
+        })
+    }
+
+    /// Deletes the char before the cursor (Backspace).
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn delete_left(&mut self, id: DocumentId) -> Result<(), Error> {
+        self.edit(id, |editor| Ok(editor.delete_left()))
+    }
+
+    /// Deletes the char after the cursor (Delete).
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn delete_right(&mut self, id: DocumentId) -> Result<(), Error> {
+        self.edit(id, |editor| Ok(editor.delete_right()))
+    }
+
+    /// Replaces `range` with `text` as its own undo step.
+    ///
+    /// # Errors
+    /// When there is no such document or `range` is past its end.
+    pub fn replace(&mut self, id: DocumentId, range: Range, text: &str) -> Result<(), Error> {
+        self.edit(id, |editor| editor.replace(range, text))
+    }
+
+    /// Undoes the last undo step. Returns whether there was one.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn undo(&mut self, id: DocumentId) -> Result<bool, Error> {
+        let mut undone = false;
+        self.edit(id, |editor| {
+            undone = editor.undo();
+            Ok(undone)
+        })?;
+        Ok(undone)
+    }
+
+    /// Redoes the last undone step. Returns whether there was one.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn redo(&mut self, id: DocumentId) -> Result<bool, Error> {
+        let mut redone = false;
+        self.edit(id, |editor| {
+            redone = editor.redo();
+            Ok(redone)
+        })?;
+        Ok(redone)
+    }
+
+    /// The events since the last call, oldest first.
+    pub fn take_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
+    }
+
+    /// Runs `f` on a document's editor; `f` returns whether the text changed.
+    fn edit(
+        &mut self,
+        id: DocumentId,
+        f: impl FnOnce(&mut Editor) -> Result<bool, EditError>,
+    ) -> Result<(), Error> {
+        let changed = f(self.document_mut(id)?.editor_mut()).map_err(Error::Edit)?;
+        self.changed(id, changed);
+        Ok(())
+    }
+
+    fn changed(&mut self, id: DocumentId, changed: bool) {
+        if changed {
+            self.events.push(Event::DocumentChanged { id });
+        }
     }
 }
