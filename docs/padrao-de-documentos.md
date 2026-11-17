@@ -1,6 +1,6 @@
 # Document standard (from filmcraft)
 
-> **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** minor (translated to English; English is now the documents' language) · **Target:** the `~/Projects/filmcraft` standard applied to rustode
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (the workflow skills row) · **Target:** the `~/Projects/filmcraft` standard applied to rustode
 
 rustode follows the documentation standard of the filmcraft project (`~/Projects/filmcraft`). The survey was done on 2026-11-16 by three read-only exploration agents: one for the root documents, one for `docs/` and one for the agent configuration. This document lists:
 - what filmcraft has;
@@ -49,7 +49,7 @@ Precedence in filmcraft: `AGENTS.md` > `CLAUDE.md` > `docs/*`; `CONTRIBUTING.md`
 | `.serena/project.yml`, `.ai-memory.toml` | the same, adapted | Serena with TypeScript on the source tree, read-only; ai-memory scoped to `rustode` |
 | `.codegraph/` | created by the owner | indexing is the owner's decision (ROADMAP, next step 6) |
 | `.mcp.json` (the app's servers) | [`.mcp.json`](../.mcp.json) and [`opencode.json`](../opencode.json) with only REA | filmcraft's servers don't apply; Serena, CodeGraph and ai-memory are already global |
-| the `implement`, `tdd`, `code-review`, `to-tickets`, `grill-with-docs` and `wait-what` skills | not copied | there is no git repository or code under development; two of them depend on files that even filmcraft lacks |
+| the `implement`, `tdd`, `code-review`, `to-tickets`, `grill-with-docs` and `wait-what` skills | not copied at first. With the editor, `implement`, `tdd`, `to-tickets` and `grill-with-docs` are in `.claude/skills/`, together with `grill-me` and `to-spec` (first commit `78aa4d5`; OpenCode copy `06e4dca`). `code-review` and `wait-what` are still not copied | the editor brought a git repository and code under development. Some of these skills still point to skills and files that this project does not have ([`AGENTS.md`](../AGENTS.md) §7) |
 
 **Language.** filmcraft writes its documents in English (except the pt-BR study guide). rustode first wrote them in Portuguese and, at the owner's request on 2026-11-16, switched to English. Folder and file names kept their Portuguese spelling, because `montar.sh` and the links depend on them.
 
@@ -65,5 +65,6 @@ Precedence in filmcraft: `AGENTS.md` > `CLAUDE.md` > `docs/*`; `CONTRIBUTING.md`
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | minor | The workflow skills that came with the editor (`implement`, `tdd`, `to-tickets`, `grill-with-docs`, `grill-me`, `to-spec`) |
 | 2026-11-16 | minor | Translated to English; English is now the documents' language; REA and `.mcp.json` rows updated |
 | 2026-11-16 | major | Created from the filmcraft survey |

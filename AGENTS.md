@@ -15,6 +15,8 @@ The live sources are:
 
 [`montar.sh`](montar.sh) copies them here.
 
+The same repository is the home of the **rustode editor**, written in Rust in `crates/` and `xtask/`, which reimplements behavior studied in the App (Phase 1; [`ROADMAP.md`](ROADMAP.md)). This file has two parts: the **Study** rules (§0–§10), for the reverse engineering of the App, and the **Editor** rules (§11), for the editor. §0–§4 bind both parts.
+
 **Language.** Every document in this project is written in English: this file, `README.md`, `ROADMAP.md`, `docs/`, ADRs, templates, skills and analyses in `09-analises/`. Folder and file names keep their original (Portuguese) spelling, because `montar.sh` and the links depend on them. Quotes from evidence stay verbatim.
 
 ## 0. Never lose or tamper with evidence
@@ -29,7 +31,7 @@ The live sources are:
    - a test run (`08-testes-do-build/<run>/`).
 
    Without evidence, the claim is a hypothesis and is written as one.
-4. **Say whether a number was measured or estimated.** "Measured" comes with the command or the run that produced it; "estimated" says where the estimate came from. Do not present a single case as a rule.
+4. **Say whether a number was measured or estimated.** "Measured" comes with the command or the run that produced it; "estimated" says where the estimate came from. Do not present a single case as a rule. This covers benchmark and performance claims about the editor too (§11.6).
 5. **Runs with `INVALIDA`, `INTERROMPIDA`, `seletor-errado` or `runN` in the name are not product evidence.** They record harness errors and are kept only as history.
 6. **Before concluding anything about a binary, confirm the app's integrity:** `cd 01-app/VSCode-linux-x64 && sha256sum -c --quiet ../../02-engenharia-reversa/manifesto-sha256.txt` (silence = intact).
 
@@ -50,7 +52,7 @@ The live sources are:
 1. **Always use an isolated profile.** Run `01-app/VSCode-linux-x64/codium` with `--user-data-dir`, `--extensions-dir` and `--shared-data-dir` pointing to a temporary folder. Never use the owner's real profiles (`~/.config/VSCodium`, `~/.vscodium`, `~/.vscodium-shared`, `~/.config/Code - OSS`, `~/.vscode-oss`).
 2. **Don't take over the keyboard and mouse.** Drive the app over CDP (`--remote-debugging-port`), preferably on a virtual display (`~/Projects/vscode/qa/suite/tools/run_virtual.sh`). Native input (e.g. `ydotool`) needs the owner's explicit authorization, with the duration announced beforehand.
 3. **Network only when the analysis needs it.** To observe traffic, use the QA logging proxy (`run_network.sh`); to isolate the app, use `bwrap --dev-bind / / --unshare-net`.
-4. **One instance at a time.** The machine has 7.5 GiB of RAM. The QA scenarios abort below 700 MB free, and heavy builds run under a memory cap.
+4. **One instance at a time.** The machine has 7.5 GiB of RAM. The QA scenarios abort below 700 MB free, and heavy builds run under a memory cap. Editor benchmarks follow the same limits (§11.5).
 
 ## 4. Analysis rules
 
@@ -65,8 +67,9 @@ The live sources are:
 1. **Current state:** [`ROADMAP.md`](ROADMAP.md) has the stage, the numbers, the next steps and the progress log.
 2. **What is still unknown:** [`docs/lacunas.md`](docs/lacunas.md) lists the open questions (G1…). Also read the latest analysis in [`09-analises/`](09-analises/).
 3. **Map of the app:** [`docs/arquitetura.md`](docs/arquitetura.md) covers processes and layers. [`docs/fonte-vs-pacote.md`](docs/fonte-vs-pacote.md) gives the origin of each packaged file. §10 says what each artifact in `01-*/` to `09-*/` is.
+4. **Editor work:** read §11, then [`CONTRIBUTING.md`](CONTRIBUTING.md), the ROADMAP's milestones and Gap Analysis, and the ADR of the component you touch ([`docs/adr/README.md`](docs/adr/README.md)).
 
-If the owner asked for a task, it comes first; the three steps are for orientation. Don't stop to ask, unless the decision is marked as the owner's (§1.4 and §3.2; "Owner decision" in the ROADMAP).
+If the owner asked for a task, it comes first; the four steps are for orientation. Don't stop to ask, unless the decision is marked as the owner's (§1.4 and §3.2; "Owner decision" in the ROADMAP).
 
 ## 6. Tools
 
@@ -109,11 +112,11 @@ The project's skills are described in §7.
 
 The original lives in [`.claude/skills/`](.claude/skills/), which Claude Code reads. [`.opencode/skills/`](.opencode/skills/) is an identical copy for OpenCode, rebuilt by `./sincronizar-skills.sh` (`montar.sh` also rebuilds it). **Edit only in `.claude/skills/`.**
 
-Each skill has one folder with two files:
+Each skill has one folder with at least two files (a skill may add reference files, as `tdd/` does with `tests.md` and `mocking.md`):
 - `SKILL.md`: the instructions;
 - `agents/openai.yaml`: the name and description for other tools.
 
-The agent uses **automatic** skills on its own when the task matches the description. Skills marked **owner only** run only when the owner asks for them by name (`/write-finding`, `/launch-built-app`).
+The agent uses **automatic** skills on its own when the task matches the description. Skills marked **owner only** run only when the owner asks for them by name (`/write-finding`, `/launch-built-app`, and the editor workflow skills `/grill-me`, `/grill-with-docs`, `/to-spec`, `/to-tickets`, `/implement`).
 
 | Skill | Triggered by | Use when | Input → output |
 |---|---|---|---|
@@ -127,6 +130,12 @@ The agent uses **automatic** skills on its own when the task matches the descrip
 | [`ast-grep`](.claude/skills/ast-grep/SKILL.md) | automatic | searching for a code shape (AST pattern) in the TypeScript source tree, beyond what `grep` can reach | pattern → files and snippets (copied from filmcraft) |
 | [`grilling`](.claude/skills/grilling/SKILL.md) | automatic or the owner | stress-testing a plan or decision with rounds of questions | plan → questions with a recommended answer, until no open decision is left (copied from filmcraft) |
 | [`reverse-engineer-anything`](.claude/skills/reverse-engineer-anything/SKILL.md) | automatic | a claim depends on the packaged app (bundle, asar, binary, fuses) and not only on the source tree | target and question → REA Evidence with observations, inferences and unknowns (ships with the `rea-agents` package; the "REA in this project" rules in §6 take precedence over it) |
+| [`grill-me`](.claude/skills/grill-me/SKILL.md) | owner only | sharpening a plan or design through a relentless interview | plan → it runs `grilling`: rounds of questions, each with a recommended answer, until no decision is left open |
+| [`grill-with-docs`](.claude/skills/grill-with-docs/SKILL.md) | owner only | the same interview, writing ADRs and glossary entries as the decisions are made | plan → `grilling` plus `domain-modeling`; `domain-modeling` is not in `.claude/skills/` |
+| [`to-spec`](.claude/skills/to-spec/SKILL.md) | owner only | turning a conversation whose decisions are settled into a spec, with no new interview | conversation → test seams confirmed with the owner, then a spec (problem, solution, user stories, implementation and testing decisions, out of scope) saved in the local, unversioned scratch area |
+| [`to-tickets`](.claude/skills/to-tickets/SKILL.md) | owner only | breaking a spec or plan into tracer-bullet tickets | spec → vertical slices, each with the tickets that block it, approved by the owner, one file per ticket in the scratch area. It expects a tracker set up by a skill that this project does not have |
+| [`implement`](.claude/skills/implement/SKILL.md) | owner only | building the work that a spec or a set of tickets describes | spec or tickets → code built with `tdd` at the agreed seams, the full suite run at the end, a `code-review` pass and a commit on the current branch; `code-review` is not in `.claude/skills/` |
+| [`tdd`](.claude/skills/tdd/SKILL.md) | automatic | building a feature or fixing a bug test-first | agreed seams → red-to-green cycles, one test and one minimal implementation at a time; refactoring belongs to review. It also points to a `codebase-design` skill and a `CONTEXT.md` that this project does not have |
 
 In a typical analysis they chain like this:
 
@@ -138,6 +147,14 @@ find-qa-evidence ─▶ find-minified-symbol ─▶ trace-behavior-to-patch ─�
                           └─ inspect-asar (if a dependency is involved) · ast-grep (code shape)
 
 compare-builds: before any conclusion about binaries, and whenever the app is rebuilt
+```
+
+Editor work (§11) chains the workflow skills like this:
+
+```text
+grill-me ─▶ to-spec ─▶ to-tickets ─▶ implement ─▶ pull request
+(decide)    (write the  (slice it)    (tdd at the   (review checklist,
+             spec)                     agreed seams) CONTRIBUTING.md)
 ```
 
 The skills apply rules that hold even without them:
@@ -166,6 +183,7 @@ To create or change a skill:
 - Every cited file exists: run `test -e <path>` for each cited path.
 - No writes to 01 to 08: compare `find 0[1-8]* -newer <marker>` before and after the work.
 - Same skills in both tools: `diff -rq .claude/skills .opencode/skills` (no output).
+- Editor changes: the commit and push hooks pass (§11.3). Where the hooks are not installed, for example in a scratch clone, run the same commands by hand: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace`, and, for each commit message, `committed --commit-file <file>` and `cargo xtask commit-msg <file>`.
 
 ## 9. Recording
 
@@ -177,6 +195,11 @@ To create or change a skill:
 | Studied component | `docs/componentes/<area>.md` | [`docs/modelos/componente.md`](docs/modelos/componente.md) |
 | Something learned that serves other projects | `docs/aprendizado/NNNN-slug.md` | [`docs/aprendizado/README.md`](docs/aprendizado/README.md) |
 | Progress | [`ROADMAP.md`](ROADMAP.md) | "Progress log", metadata line and revision history |
+| Editor milestone state, numbers and Gap Analysis | [`ROADMAP.md`](ROADMAP.md), "Editor: Phase 1 milestones" and "Gap Analysis against VS Code" | the existing tables |
+| Behavior studied in VS Code and reimplemented by the editor | [`ATTRIBUTION.md`](ATTRIBUTION.md), "Behavior studied and reimplemented by the editor", plus the file's doc comment and the component's ADR | [ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md) |
+| Editor dependency | [`ATTRIBUTION.md`](ATTRIBUTION.md), "Editor dependencies" | crate, version, license, what for |
+| Benchmark report against the App | `09-analises/NNNN-slug.md` | [`docs/modelos/achado.md`](docs/modelos/achado.md) |
+| Editor conventions and the review checklist | [`CONTRIBUTING.md`](CONTRIBUTING.md), where every hook error points | — |
 
 ## 10. Artifact map (01 to 09)
 
@@ -192,7 +215,7 @@ What each folder holds and what each artifact is for. Folders 01 to 08 are read-
 | `06-port/` | `~/Projects/vscodium-port` | 162 · 2.8 MB | how the build tree was made |
 | `07-vscodium-origem/` | `~/Projects/vscodium` (filtered) | 289 · 30 MB | the VSCodium the port started from |
 | `08-testes-do-build/` | runs in `05-qa/results/` from 2026-11-16 on | 182 · 11 MB | tests of the built app |
-| `09-analises/` | written here | 2 · 12 KB | this project's findings |
+| `09-analises/` | written here | 38 · 368 KB (re-measured on 2026-11-17) | this project's findings and their annexes |
 
 ### 01-app/VSCode-linux-x64/
 
@@ -309,7 +332,98 @@ Copies of the runs in `05-qa/results/` dated 2026-11-16 or later (15 run folders
 
 ### 09-analises/
 
-The only folder of the nine that this project writes (§0.2). `README.md` is the index; each `NNNN-slug.md` answers one question with evidence, following [`docs/modelos/achado.md`](docs/modelos/achado.md). Today: `0001-trafego-de-rede.md`.
+The only folder of the nine that this project writes (§0.2). `README.md` is the index; each `NNNN-slug.md` answers one question with evidence, following [`docs/modelos/achado.md`](docs/modelos/achado.md). An analysis may keep its raw material in an annex folder, `NNNN-anexos/`, next to it. Today:
+
+| Artifact | What it is |
+|---|---|
+| `0001-trafego-de-rede.md` | which servers the App contacts on its own |
+| `0002-entrada-virtual-wayland.md` | whether keystrokes can be injected into rustode and the App on the virtual display (the spike for typing latency) |
+| `0002-anexos/tools/` | the spike's throwaway tools, guarded to `qa-virt-*` sockets and a private bus: `fakeinput/` and `standin/` (separate Cargo projects, outside the editor's workspace), `eistype/eistype.c`, the session scripts, the CDP driver (`app-driver.cjs`) and `deltas.py` |
+| `0002-anexos/runs/1` to `runs/3` | the raw outputs of the three recorded runs, per run: the injectors' console output, the stand-in's output, the keys the App received and a screenshot of the App |
+
+## 11. Editor
+
+The rustode editor is written in Rust, in `crates/` and `xtask/`. It reimplements behavior studied in the App, and the App is the baseline it is measured against. Its decisions are ADRs 0007 to 0028 ([`docs/adr/README.md`](docs/adr/README.md)); the state of each milestone and the Gap Analysis against VS Code are in [`ROADMAP.md`](ROADMAP.md). §0–§4 bind editor work exactly as they bind the study; this section adds what is specific to the editor. rustode is not VS Code or VSCodium, and no document, UI string or package name presents it as either (§1.3).
+
+### 11.1 Crates and their roles
+
+| Crate | Role | State at `d6debfb` |
+|---|---|---|
+| `rustode-core` | text buffer (ropey), selections and multi-cursor, edit operations, undo/redo with VS Code-like grouping; no I/O | M1 part done |
+| `rustode-syntax` | Tree-sitter parsing, incremental reparse, highlight queries, language detection | placeholder |
+| `rustode-fs` | file reading and writing, encodings, line endings, file watching; workspace search later | done except search |
+| `rustode-config` | `settings.json` and `keybindings.json` in VS Code's format; problems are reported, never fatal | done for M1 |
+| `rustode-workspace` | **the single in-process API for every frontend**: documents, edits, external changes and configuration; later editor groups, commands, LSP, DAP and extensions | M1 part done |
+| `rustode-protocol` | serializable types for every workspace command and event; no transport in Phase 1 | placeholder |
+| `rustode-trace` | shared tracing setup and the input-to-frame metric, re-exported as `rustode_workspace::trace` | done |
+| `rustode-cli` · `rustode-tui` · `rustode-gui` | the frontends: the `rustode` binary, the ratatui TUI and the egui GUI | CLI partial; TUI and GUI placeholders |
+| `xtask` | project tasks: `cargo xtask commit-msg`, `pre-push` and `coverage`; benchmark comparison and release later | partial |
+
+1. **The frontends depend on no rustode crate other than `rustode-workspace`.** This covers normal, dev and build dependencies of `rustode-cli`, `rustode-tui` and `rustode-gui`. `xtask/tests/frontend_deps.rs` fails otherwise ([ADR 0013](docs/adr/0013-crates-and-workspace-api.md)). When a frontend needs a type or function from another crate, the workspace re-exports it, as it does with `rustode_workspace::trace` (`crates/workspace/src/lib.rs:16-19`). Third-party crates are not limited by the test.
+2. **The frontends hold no business logic.** They send commands to the workspace and render its state and events ([ADR 0014](docs/adr/0014-in-process-frontends.md)).
+3. **Behavior studied in VS Code is reimplemented, never translated, and credited** in `ATTRIBUTION.md`, in the file's doc comment and in the component's ADR ([ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md)). It is studied in the source tree (§4.1).
+4. **A new third-party crate** needs a license that `deny.toml` allows and a row in `ATTRIBUTION.md`, "Editor dependencies" ([ADR 0010](docs/adr/0010-ecosystem-crates-allowed.md)).
+
+### 11.2 Seams and test-first
+
+1. **Tests come first, at the highest seam** ([ADR 0019](docs/adr/0019-tests-at-three-seams.md)). The `tdd` skill (§7) is the loop. The seams:
+   - the workspace public API (`crates/workspace/tests/`), the main seam;
+   - input to frame, per frontend: ratatui's test backend and egui_kittest snapshots, from M2 and M3 on;
+   - the CLI process: `crates/cli/tests/`, and the hooks in `xtask/tests/hooks.rs`.
+2. **Tests assert on behavior, not internals.** Doubles exist only at the process or network edge: test LSP and DAP servers, a local stand-in for Open VSX, temporary file systems.
+3. **Tests are deterministic and isolated:** fixed seeds, temporary directories, no network, no real home directory or profile, nothing written to 01 to 08.
+4. **Every fixed bug gets a regression test** at the highest seam that reproduces it.
+
+### 11.3 Quality gates and hooks
+
+1. **Install the hooks once:** `pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push`. What runs at commit, at push and in CI is listed in [`CONTRIBUTING.md`](CONTRIBUTING.md), "Editor code: commits, branches and checks" ([ADR 0023](docs/adr/0023-same-checks-local-and-ci.md)).
+2. **Never bypass a hook with `--no-verify`.** CI repeats every check.
+3. **Coverage** is at least 85% of lines on the core crates and 60% on the frontends (`cargo xtask coverage`). An exception is justified in a comment on the pull request, and the thresholds are never lowered ([ADR 0020](docs/adr/0020-coverage-gates.md)).
+4. **Lints:** clippy pedantic with warnings denied; cognitive complexity 15, function length 80 lines, 6 arguments; `unsafe` forbidden. Every `allow` states its reason on the same line ([ADR 0021](docs/adr/0021-strict-lints.md)).
+5. **Dependencies:** `cargo deny --locked check` runs on push and in CI, and `cargo audit` in CI.
+6. **Micro-benchmark gate:** a regression above 5% against `main` fails locally, above 10% in CI ([ADR 0026](docs/adr/0026-micro-benchmark-gate.md)). Not applied yet.
+
+### 11.4 Commits and branches
+
+1. **Conventional Commits**, with the closed types and scopes of `xtask/src/conventions.rs:4-26`. The title is at most 72 characters, the body is wrapped at 72, and a co-author trailer reads `Co-Authored-By: Name <email>` ([ADR 0022](docs/adr/0022-commits-branches-pull-requests.md)). Check a message with `committed --commit-file <file>` and `cargo xtask commit-msg <file>`.
+2. **Branches are `<type>/<kebab-name>`**, for example `docs/editor-docs-and-adrs`.
+3. **Nothing is pushed to `main`.** Changes reach it through squash-merged pull requests, whose title must itself be a valid commit message. `RUSTODE_ALLOW_MAIN_PUSH=1` exists only for the repository's first push, which is the owner's ([ADR 0007](docs/adr/0007-own-git-repository.md)).
+
+### 11.5 Running the App for benchmarks
+
+1. **One editor instance at a time** (§3.4): never the App and a rustode frontend together, and never two App instances.
+2. **Memory guard.** Before a run, check `MemAvailable` and don't start below what the scenario needs; the QA launcher refuses below 1,800 MB (`05-qa/suite/scenarios/run_scenario.sh:26-28`). During a run, abort below 700 MB available, as the QA watchdog does (`05-qa/suite/scenarios/run_scenario.sh:34-35`). The stress tests skip themselves when memory is short (`crates/workspace/tests/stress.rs:50-58`); run the large ones one at a time, with the App closed.
+3. **Never run the App in place.** Editor work never runs `01-app/VSCode-linux-x64/codium` from `01-app/`. Running it there lets Node write compile-cache files into evidence folder 01 (§0.1). On 2026-11-17, sessions run without `NODE_DISABLE_COMPILE_CACHE=1` added three such files under `resources/app/node-compile-cache/extension-host/`, and §0.6 did not notice, because `sha256sum -c` checks only the files the manifest lists ([`09-analises/0002`](09-analises/0002-entrada-virtual-wayland.md), "Limitations"; [`docs/lacunas.md`](docs/lacunas.md) G13). Benchmarks run a temporary copy instead, verified before each run. From the project root, in bash (tested on 2026-11-17: both checks printed nothing):
+
+   ```bash
+   R=$PWD
+   A=$(mktemp -d -p /var/tmp rustode-app.XXXXXX)   # on disk: /tmp is a 3.8 GB tmpfs here, and the App takes 705 MB
+   cp -a 01-app/VSCode-linux-x64 "$A/"
+   cd "$A/VSCode-linux-x64"
+   sha256sum -c --quiet "$R/02-engenharia-reversa/manifesto-sha256.txt"   # silence = intact (§0.6)
+   diff <(find . -type f | sort) <(sed 's/^[0-9a-f]*  //' "$R/02-engenharia-reversa/manifesto-sha256.txt" | sort)   # silence = no file added or missing
+   # … run the scenario against "$A/VSCode-linux-x64/codium", with an isolated profile (§3.1) …
+   cd "$R" && rm -rf "$A"
+   ```
+
+4. **The rest of §3 still applies:** an isolated profile (§3.1), CDP on the virtual display (§3.2), and network only when the scenario needs it (§3.3).
+5. **No keystroke is injected for a benchmark** until the owner accepts [ADR 0028](docs/adr/0028-virtual-display-input.md). Until then, §3.2 holds as written ([ADR 0025](docs/adr/0025-typing-latency-injected-input.md)).
+
+### 11.6 Evidence for editor and benchmark claims
+
+§0.3 and §0.4 apply to every editor claim, including every benchmark and performance claim.
+
+1. **Evidence for an editor claim** is anything in the §0.3 list, or:
+   - a path with a line number in this repository (`crates/…:N`, `xtask/…:N`);
+   - a commit hash;
+   - a named test, with the command that ran it;
+   - a benchmark run, with its folder.
+2. **A measured number** comes with the exact command, the folder it ran from, the commit, the build profile (release or debug) and the date. **An estimated number** says where the estimate came from. For example, the stress budgets record each measured value with its date and build next to the budget (`crates/workspace/tests/stress.rs:85-110`).
+3. **A comparison is like for like:** the same scenario from the versioned list, on the same virtual display, with software rendering on both sides ([ADR 0024](docs/adr/0024-comparison-with-the-app.md)). Absolute times on the virtual display don't hold for the real session ([ADR 0006](docs/adr/0006-testes-em-tela-virtual.md)).
+4. **One run is not a result** (§0.4): report the repetitions and the percentiles.
+5. **The App copy is verified before a comparison** (§0.6, §11.5). A run with a harness error is named as such and is not evidence (§0.5).
+
+Where each kind of editor record goes is in §9.
 
 ## See also
 
