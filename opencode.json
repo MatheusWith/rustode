@@ -10,6 +10,10 @@
           "JAVA_HOME": "/usr/lib/jvm/java-25-openjdk",
           "GHIDRA_INSTALL_DIR": "/opt/ghidra"
         }
+      },
+      "serena": {
+        "type": "local",
+        "command": ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"]
       }
     }
   }

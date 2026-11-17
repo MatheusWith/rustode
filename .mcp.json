@@ -9,6 +9,11 @@
         "JAVA_HOME": "/usr/lib/jvm/java-25-openjdk",
         "GHIDRA_INSTALL_DIR": "/opt/ghidra"
       }
+    },
+    "serena": {
+      "type": "stdio",
+      "command": "serena",
+      "args": ["start-mcp-server", "--context", "claude-code", "--project-from-cwd"]
     }
   }
 }
