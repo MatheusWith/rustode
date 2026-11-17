@@ -212,6 +212,27 @@ mod tests {
     }
 
     #[test]
+    fn a_big_copy_is_refused_on_a_ram_file_system() {
+        // /dev/shm is a tmpfs on Linux; the folder need not exist yet.
+        let shm = Path::new("/dev/shm/rustode-bench-test/copy");
+        let refused = copy_fits(shm, 700 << 20).expect_err("700 MB into tmpfs");
+        assert!(refused.to_string().contains("RAM file system"), "{refused}");
+        assert!(
+            copy_fits(shm, 1 << 20).is_ok(),
+            "small copies may go to RAM"
+        );
+        let disk = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let disk_is_ram = Command::new("stat")
+            .args(["-f", "-c", "%T"])
+            .arg(disk)
+            .output()
+            .is_ok_and(|out| out.stdout.starts_with(b"tmpfs"));
+        if !disk_is_ram {
+            assert!(copy_fits(disk, 700 << 20).is_ok());
+        }
+    }
+
+    #[test]
     fn evidence_folders_are_found_through_dot_dot() {
         let project = Path::new("/nonexistent/project");
         let inside = Path::new("/nonexistent/project/target/../01-app/x");
