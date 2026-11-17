@@ -1,22 +1,24 @@
 //! `cargo xtask bench-gate`: the micro-benchmark regression gate (ADR 0026).
 //!
-//! It checks out the base revision in a temporary git worktree, builds the
-//! criterion benchmarks of the base and of the current tree, then measures
-//! the base and the current tree one after the other on this machine. Both
-//! runs write to the same criterion directory (`<target>/criterion`), each
-//! saved as a named baseline, and the gate compares their mean estimates
-//! (`<target>/criterion/**/<baseline>/estimates.json`). A benchmark whose
-//! mean is more than the threshold slower than the base's fails the gate.
+//! It checks out the base revision in a temporary git worktree and builds the
+//! criterion benchmarks of the base and of the current tree. Then it measures
+//! them on this machine in alternating rounds (base, current, base, current,
+//! …), running the bench executables directly, so that no compile, cargo
+//! lock or fingerprint check falls between two measurements. Every run writes
+//! to the same criterion directory (`<target>/criterion`), saved as a named
+//! baseline. For each benchmark the gate keeps the fastest mean estimate of
+//! each tree across the rounds (other programs can only slow a run down) and
+//! fails when the current tree's is more than the threshold slower.
 //!
 //! The base builds into its own target directory, `<target>/bench-gate/target`:
 //! cargo names the artifacts of a path package after its path relative to
 //! the workspace root, so the two trees would otherwise overwrite each
-//! other's build and recompile between the measurements.
+//! other's build.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 
 /// The criterion baselines the gate saves. It removes only these names.
@@ -26,8 +28,8 @@ const CANDIDATE: &str = "rustode-gate-candidate";
 /// Printed after a failure.
 pub const GUIDE: &str = "\
 A benchmark is slower than on the base revision by more than the limit.
-See CONTRIBUTING.md, \"Micro-benchmark gate\": re-run the gate to rule out
-noise, then look at the change that slowed it down.";
+See CONTRIBUTING.md, \"Micro-benchmark gate\": re-run the gate on a quiet
+machine to rule out noise, then look at the change that slowed it down.";
 
 /// Runs the gate; returns one line per benchmark slower than the limit.
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
@@ -41,49 +43,36 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     let sha = git(&root, &["rev-parse", "--verify", "--quiet", &revision])
         .map_err(|e| format!("cannot find the base '{}': {e}", options.base))?;
     println!(
-        "bench-gate: base {} ({}), limit {}%",
+        "bench-gate: base {} ({}), limit {}%, {} rounds",
         options.base,
         &sha[..sha.len().min(10)],
-        options.threshold
+        options.threshold,
+        options.rounds
     );
     let gate = target.join("bench-gate");
     let worktree = Worktree::add(&root, &gate.join("base"), &sha)?;
-    let base = Tree {
-        dir: worktree.path.clone(),
-        target: gate.join("target"),
-        criterion: criterion.clone(),
-    };
-    let current = Tree {
-        dir: root,
-        target,
-        criterion: criterion.clone(),
-    };
-    let base_has_benches = !bench_targets(&cargo_metadata(&base.dir)?).is_empty();
-    // Build both trees before measuring either, so that the two measurements
-    // run back to back and neither one right after a compile.
-    if base_has_benches {
-        base.bench(None)?;
-    } else {
+    let base = if bench_targets(&cargo_metadata(&worktree.path)?).is_empty() {
         println!("bench-gate: the base has no benchmarks; every result is new");
+        Vec::new()
+    } else {
+        build(&worktree.path, &gate.join("target"))?
+    };
+    let candidate = build(&root, &target)?;
+    if candidate.is_empty() {
+        return Err("this tree has no benchmarks".to_owned());
     }
-    current.bench(None)?;
-    if base_has_benches {
-        base.bench(Some(BASE))?;
+    let mut base_means = BTreeMap::new();
+    let mut candidate_means = BTreeMap::new();
+    for round in 1..=options.rounds {
+        if !base.is_empty() {
+            measure(&base, &criterion, BASE, round)?;
+            keep_fastest(&mut base_means, read_baseline(&criterion, BASE)?);
+        }
+        measure(&candidate, &criterion, CANDIDATE, round)?;
+        keep_fastest(&mut candidate_means, read_baseline(&criterion, CANDIDATE)?);
     }
     drop(worktree);
-    current.bench(Some(CANDIDATE))?;
-    let candidate = read_baseline(&criterion, CANDIDATE)?;
-    if candidate.is_empty() {
-        return Err(format!(
-            "no benchmark results under {}",
-            criterion.display()
-        ));
-    }
-    let comparison = compare(
-        &read_baseline(&criterion, BASE)?,
-        &candidate,
-        options.threshold,
-    );
+    let comparison = compare(&base_means, &candidate_means, options.threshold);
     println!();
     for line in &comparison.table {
         println!("{line}");
@@ -91,43 +80,54 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     Ok(comparison.problems)
 }
 
-/// A source tree to benchmark: where it is, where it builds, and where
-/// criterion writes its results.
-struct Tree {
-    dir: PathBuf,
-    target: PathBuf,
-    criterion: PathBuf,
+/// Builds the benchmarks of the workspace at `dir` into `target`; returns
+/// their executables.
+fn build(dir: &Path, target: &Path) -> Result<Vec<Executable>, String> {
+    let out = Command::new("cargo")
+        .current_dir(dir)
+        .env("CARGO_TARGET_DIR", target)
+        .args([
+            "bench",
+            "--locked",
+            "--workspace",
+            "--bench",
+            "*",
+            "--no-run",
+        ])
+        .args(["--message-format", "json-render-diagnostics"])
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("cannot run cargo bench: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("cargo bench --no-run failed in {}", dir.display()));
+    }
+    bench_executables(&String::from_utf8_lossy(&out.stdout))
 }
 
-impl Tree {
-    /// Builds the tree's benchmarks or, given a baseline name, runs them and
-    /// saves their results under that name.
-    fn bench(&self, baseline: Option<&str>) -> Result<(), String> {
-        let mut command = Command::new("cargo");
-        command
-            .current_dir(&self.dir)
-            .env("CARGO_TARGET_DIR", &self.target)
-            .env("CRITERION_HOME", &self.criterion)
-            .args(["bench", "--locked", "--workspace", "--bench", "*"]);
-        match baseline {
-            None => command.arg("--no-run"),
-            Some(name) => command.args(["--", "--save-baseline", name, "--noplot"]),
-        };
-        let start = Instant::now();
-        let status = command
+/// Runs every benchmark of one tree once, saving the results as `baseline`.
+fn measure(
+    benches: &[Executable],
+    criterion: &Path,
+    baseline: &str,
+    round: u32,
+) -> Result<(), String> {
+    let start = Instant::now();
+    for bench in benches {
+        let status = Command::new(&bench.path)
+            .current_dir(&bench.dir)
+            .env("CRITERION_HOME", criterion)
+            .args(["--bench", "--save-baseline", baseline, "--noplot"])
             .status()
-            .map_err(|e| format!("cannot run cargo bench: {e}"))?;
+            .map_err(|e| format!("cannot run {}: {e}", bench.path.display()))?;
         if !status.success() {
-            return Err(format!("cargo bench failed in {}", self.dir.display()));
+            return Err(format!("{} failed", bench.path.display()));
         }
-        if let Some(name) = baseline {
-            println!(
-                "bench-gate: measured {name} in {:.0} s",
-                start.elapsed().as_secs_f64()
-            );
-        }
-        Ok(())
     }
+    println!(
+        "bench-gate: round {round}: measured {baseline} in {:.0} s",
+        start.elapsed().as_secs_f64()
+    );
+    Ok(())
 }
 
 /// A detached checkout of the base revision, removed when dropped.
@@ -211,14 +211,17 @@ pub struct Options {
     pub base: String,
     /// The largest accepted slowdown, in percent of the base's mean time.
     pub threshold: f64,
+    /// How many times each tree is measured, alternating base and candidate.
+    pub rounds: u32,
 }
 
-/// Reads `[--base <rev>] [--threshold <percent>]`; the defaults are `main`
-/// and 5% (the local limit of ADR 0026).
+/// Reads `[--base <rev>] [--threshold <percent>] [--rounds <n>]`; the
+/// defaults are `main`, 5% (the local limit of ADR 0026) and 2 rounds.
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut options = Options {
         base: "main".to_owned(),
         threshold: 5.0,
+        rounds: 2,
     };
     let mut args = args.iter();
     while let Some(flag) = args.next() {
@@ -235,10 +238,54 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                         format!("--threshold takes a percentage of 0 or more, not '{text}'")
                     })?;
             }
+            "--rounds" => {
+                let text = value()?;
+                options.rounds = text
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|rounds| *rounds > 0)
+                    .ok_or_else(|| {
+                        format!("--rounds takes a whole number above 0, not '{text}'")
+                    })?;
+            }
             other => return Err(format!("unknown bench-gate option: {other}")),
         }
     }
     Ok(options)
+}
+
+/// A built benchmark, and the package directory cargo would run it from.
+#[derive(Debug, PartialEq)]
+pub struct Executable {
+    pub path: PathBuf,
+    pub dir: PathBuf,
+}
+
+/// The bench executables in the JSON messages of `cargo bench --no-run`.
+pub fn bench_executables(messages: &str) -> Result<Vec<Executable>, String> {
+    let mut found = Vec::new();
+    for line in messages.lines().filter(|line| !line.trim().is_empty()) {
+        let message: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| format!("cannot parse cargo's message '{line}': {e}"))?;
+        let is_bench = message["target"]["kind"]
+            .as_array()
+            .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bench"));
+        let (Some(path), Some(manifest)) = (
+            message["executable"].as_str(),
+            message["manifest_path"].as_str(),
+        ) else {
+            continue;
+        };
+        if message["reason"] == "compiler-artifact" && is_bench {
+            found.push(Executable {
+                path: PathBuf::from(path),
+                dir: Path::new(manifest)
+                    .parent()
+                    .map_or_else(|| PathBuf::from("."), Path::to_owned),
+            });
+        }
+    }
+    Ok(found)
 }
 
 /// The bench targets (`package/target`) in `cargo metadata` output.
@@ -257,6 +304,17 @@ pub fn bench_targets(metadata: &serde_json::Value) -> Vec<String> {
         }
     }
     targets
+}
+
+/// Adds one round's means to `fastest`, keeping the smaller mean of each
+/// benchmark.
+pub fn keep_fastest(fastest: &mut BTreeMap<String, f64>, round: BTreeMap<String, f64>) {
+    for (id, mean) in round {
+        fastest
+            .entry(id)
+            .and_modify(|best| *best = best.min(mean))
+            .or_insert(mean);
+    }
 }
 
 /// The mean time in nanoseconds of every benchmark saved under `baseline` in
@@ -433,14 +491,16 @@ mod tests {
             options(&[]),
             Ok(Options {
                 base: "main".to_owned(),
-                threshold: 5.0
+                threshold: 5.0,
+                rounds: 2,
             })
         );
         assert_eq!(
-            options(&["--threshold", "10", "--base", "abc123"]),
+            options(&["--threshold", "10", "--base", "abc123", "--rounds", "3"]),
             Ok(Options {
                 base: "abc123".to_owned(),
-                threshold: 10.0
+                threshold: 10.0,
+                rounds: 3,
             })
         );
         for bad in [
@@ -449,6 +509,8 @@ mod tests {
             &["--threshold", "NaN"],
             &["--threshold"],
             &["--base"],
+            &["--rounds", "0"],
+            &["--rounds", "two"],
             &["--fast"],
         ] {
             assert!(options(bad).is_err(), "{bad:?} is refused");
@@ -469,6 +531,26 @@ mod tests {
             bench_targets(&serde_json::json!({"packages": []})),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn bench_executables_are_read_from_cargo_messages() {
+        // trimmed from `cargo bench --no-run --message-format json-render-diagnostics`
+        let messages = [
+            r#"{"reason":"compiler-artifact","package_id":"registry+https://github.com/rust-lang/crates.io-index#ropey@1.6.1","manifest_path":"/r/ropey/Cargo.toml","target":{"kind":["lib"],"name":"ropey"},"executable":null,"fresh":true}"#,
+            r#"{"reason":"build-script-executed","package_id":"x"}"#,
+            r#"{"reason":"compiler-artifact","package_id":"path+file:///w/crates/core#rustode-core@0.1.0","manifest_path":"/w/crates/core/Cargo.toml","target":{"kind":["bench"],"crate_types":["bin"],"name":"core","src_path":"/w/crates/core/benches/core.rs","test":false},"executable":"/t/release/deps/core-87a42f9602048662","fresh":true}"#,
+            r#"{"reason":"build-finished","success":true}"#,
+        ]
+        .join("\n");
+        assert_eq!(
+            bench_executables(&messages),
+            Ok(vec![Executable {
+                path: PathBuf::from("/t/release/deps/core-87a42f9602048662"),
+                dir: PathBuf::from("/w/crates/core"),
+            }])
+        );
+        assert!(bench_executables("not json").is_err());
     }
 
     #[test]
@@ -553,6 +635,14 @@ mod tests {
         list.iter()
             .map(|(id, mean)| ((*id).to_owned(), *mean))
             .collect()
+    }
+
+    #[test]
+    fn each_benchmark_keeps_its_fastest_round() {
+        let mut fastest = BTreeMap::new();
+        keep_fastest(&mut fastest, means(&[("a", 10.0), ("b", 20.0)]));
+        keep_fastest(&mut fastest, means(&[("a", 12.0), ("b", 15.0), ("c", 1.0)]));
+        assert_eq!(fastest, means(&[("a", 10.0), ("b", 15.0), ("c", 1.0)]));
     }
 
     #[test]
