@@ -11,7 +11,7 @@
 //! machine; each test's doc comment gives the measured value, its date and
 //! the build, using the command above.
 
-use rustode_workspace::{DocumentId, Range, Workspace};
+use rustode_workspace::{DocumentId, FindOptions, FindQuery, Range, Workspace};
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -157,4 +157,89 @@ fn stress_10k_edits_then_full_undo() {
         "full undo restores the file"
     );
     assert!(elapsed <= Duration::from_secs(5), "took {elapsed:?}");
+}
+
+/// Times find all, find next and replace all for each query on a 100 MB
+/// fixture, checking each against `budget`.
+fn find_within(queries: &[(&str, bool, usize)], budget: Duration) {
+    let path = fixture("100mb", 100 << 20);
+    let mut ws = Workspace::new();
+    let id = ws.open(&path).expect("open");
+    for &(pattern, regex, matches) in queries {
+        let options = FindOptions {
+            regex,
+            ..FindOptions::default()
+        };
+        let query = FindQuery::new(pattern, options).expect("query");
+        let started = Instant::now();
+        let found = ws.find_all(id, &query).expect("find all");
+        let elapsed = started.elapsed();
+        eprintln!(
+            "find all {pattern:?}: {} matches, {elapsed:?}, peak RSS {} MB",
+            found.len(),
+            peak_rss_mb()
+        );
+        assert_eq!(found.len(), matches, "{pattern:?}");
+        assert!(elapsed <= budget, "find all {pattern:?} took {elapsed:?}");
+        let started = Instant::now();
+        let next = ws.find_next(id, &query).expect("find next");
+        let elapsed = started.elapsed();
+        eprintln!("find next {pattern:?}: {next:?}, {elapsed:?}");
+        assert!(elapsed <= budget, "find next {pattern:?} took {elapsed:?}");
+    }
+}
+
+/// Find on 100 MB (79-char lines); no match anywhere is the slowest case,
+/// since every line is searched. Measured in two runs (release,
+/// 2026-11-17): find all 107-114 ms for plain text without a match,
+/// 219-259 ms for a regex without one (`\d{3}x`), 110-123 ms for a
+/// multiline regex, 2 ms when capped at 19,999 matches; find next the same
+/// or less; peak RSS 220 MB. Budget 1 s each.
+#[test]
+#[ignore = "large: run explicitly"]
+fn stress_find_100_mb() {
+    if enough_memory(1_000) {
+        find_within(
+            &[
+                ("zebra", false, 0),
+                (r"\d{3}x", true, 0),
+                ("fox", false, 19_999),
+                (r"dog\n", true, 0),
+                (r"jump\nthe", true, 19_999),
+            ],
+            Duration::from_secs(1),
+        );
+    }
+}
+
+/// Replace All of every "o" in 100 MB (7,864,320 matches), then undo.
+/// Measured (release, 2026-11-17): 1.17 s, undo 130 ms, peak RSS 860 MB;
+/// budget 3 s, 1 s and 1,200 MB.
+#[test]
+#[ignore = "large: run explicitly"]
+fn stress_replace_all_100_mb() {
+    if !enough_memory(2_000) {
+        return;
+    }
+    let path = fixture("100mb", 100 << 20);
+    let mut ws = Workspace::new();
+    let id = ws.open(&path).expect("open");
+    let query = FindQuery::new("o", FindOptions::default()).expect("query");
+    let started = Instant::now();
+    assert_eq!(
+        ws.replace_all(id, &query, "0").expect("replace all"),
+        7_864_320
+    );
+    let replaced = started.elapsed();
+    let started = Instant::now();
+    assert!(ws.undo(id).expect("undo"));
+    let undone = started.elapsed();
+    let peak = peak_rss_mb();
+    eprintln!("replace all: {replaced:?}, undo {undone:?}, peak RSS {peak} MB");
+    assert!(
+        replaced <= Duration::from_secs(3),
+        "replace all took {replaced:?}"
+    );
+    assert!(undone <= Duration::from_secs(1), "undo took {undone:?}");
+    assert!(peak <= 1_200, "peaked at {peak} MB");
 }

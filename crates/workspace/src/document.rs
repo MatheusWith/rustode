@@ -133,6 +133,10 @@ impl Document {
         self.editor.version() != self.saved_version
     }
 
+    pub(crate) fn editor(&self) -> &Editor {
+        &self.editor
+    }
+
     pub(crate) fn editor_mut(&mut self) -> &mut Editor {
         &mut self.editor
     }
