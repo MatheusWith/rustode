@@ -16,9 +16,10 @@ Tasks:
   commit-msg <file> check a commit message (git commit-msg hook)
   pre-push          check refs read from stdin (git pre-push hook)
   coverage          run the instrumented suite and check the coverage gates
-  bench-gate [--base <rev>] [--threshold <percent>]
-                    compare the micro-benchmarks with <rev> on this machine;
-                    fail on a slowdown above <percent> (default: main, 5)
+  bench-gate [--base <rev>] [--threshold <percent>] [--rounds <n>]
+                    measure the micro-benchmarks of <rev> and of this tree
+                    <n> times each on this machine; fail on a slowdown above
+                    <percent> (defaults: main, 5, 2)
 ";
 
 fn main() -> ExitCode {
