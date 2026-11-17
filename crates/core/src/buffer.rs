@@ -81,6 +81,31 @@ impl Buffer {
         self.line_start(line) + column.min(self.line_len(line))
     }
 
+    /// The text of `line` without its line break. `line` must exist.
+    #[must_use]
+    pub fn line_text(&self, line: usize) -> String {
+        self.rope
+            .line(line)
+            .slice(..self.line_len(line))
+            .to_string()
+    }
+
+    /// The first `column` chars of `line`. Both must exist.
+    #[must_use]
+    pub fn line_prefix(&self, line: usize, column: usize) -> String {
+        self.rope.line(line).slice(..column).to_string()
+    }
+
+    /// The number of spaces and tabs that start `line`. `line` must exist.
+    #[must_use]
+    pub fn leading_whitespace(&self, line: usize) -> usize {
+        self.rope
+            .line(line)
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .count()
+    }
+
     pub(crate) fn insert(&mut self, offset: usize, text: &str) {
         self.rope.insert(offset, text);
     }
@@ -107,5 +132,14 @@ mod tests {
         assert_eq!(buffer.line_start(1), 3);
         assert_eq!(buffer.line_of(3), 1);
         assert_eq!(buffer.offset_of(1, 9), 4);
+        assert_eq!(buffer.line_text(0), "a");
+        let indented = Buffer::from_text(" \tx\ny");
+        assert_eq!(indented.leading_whitespace(0), 2);
+        assert_eq!(indented.line_prefix(0, 2), " \t");
+        assert_eq!(
+            Buffer::from_text("a\u{2028}b").len_lines(),
+            1,
+            "only CR/LF/CRLF"
+        );
     }
 }

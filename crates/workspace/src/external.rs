@@ -215,10 +215,12 @@ fn replace_changed_part(document: &mut Document, bytes: &[u8]) -> Result<bool, E
         .count();
     let inserted: String = new[prefix..new.len() - suffix].iter().collect();
     let range = Range::new(prefix, old.len() - suffix);
+    let before = document.version();
     let changed = document
         .editor_mut()
         .replace(range, &inserted)
         .map_err(Error::Edit)?;
+    document.rescan_eol(before);
     document.set_stored_encoding(decoded.encoding, decoded.bom);
     document.mark_saved(bytes);
     Ok(changed)

@@ -6,6 +6,6 @@ mod history;
 mod selection;
 
 pub use buffer::Buffer;
-pub use editor::{EditError, Editor, Range};
+pub use editor::{EditError, Editor, Movement, Range};
 pub use history::EditKind;
 pub use selection::{Position, Selection};

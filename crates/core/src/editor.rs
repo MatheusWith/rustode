@@ -14,6 +14,10 @@ use crate::history::{Change, EditKind, History, Step};
 use crate::selection::{Position, Selection, Selections};
 use std::fmt;
 
+mod movement;
+
+pub use movement::Movement;
+
 /// A half-open range of char offsets, `start..end`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Range {
@@ -113,6 +117,10 @@ pub struct Editor {
     selections: Selections,
     version: u64,
     last_version: u64,
+    /// The column each selection's cursor aims for during consecutive
+    /// vertical moves, even across shorter lines (VS Code keeps the same
+    /// information as `leftoverVisibleColumns`).
+    goal_columns: Option<Vec<usize>>,
 }
 
 impl Editor {
@@ -389,6 +397,7 @@ impl Editor {
     }
 
     fn restore(&mut self, step: Step, before: bool) {
+        self.goal_columns = None;
         if before {
             self.selections = step.cursor_before;
             self.version = step.version_before;
@@ -400,6 +409,7 @@ impl Editor {
 
     fn select(&mut self, selections: Selections) {
         self.selections = selections;
+        self.goal_columns = None;
         self.history.close_step();
     }
 
@@ -542,6 +552,7 @@ impl Editor {
         self.history
             .record(kind, changes, (before, after), versions);
         self.version = self.last_version;
+        self.goal_columns = None;
     }
 
     fn check(&self, offset: usize) -> Result<(), EditError> {

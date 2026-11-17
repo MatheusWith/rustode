@@ -3,6 +3,7 @@
 mod config;
 mod document;
 mod external;
+mod language;
 
 pub use config::{
     Chord, Config, ConfigChange, ConfigFile, Diagnostic, DiagnosticKind, Keybinding, Location,
@@ -11,7 +12,7 @@ pub use config::{
 
 pub use document::{Document, DocumentId};
 pub use external::Resolution;
-pub use rustode_core::{EditError, Position, Range, Selection};
+pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
 /// Shared tracing and metrics setup, re-exported so frontends depend on the
 /// workspace alone: call `trace::init_from_env()` at startup and record
@@ -268,9 +269,73 @@ impl Workspace {
     /// # Errors
     /// When there is no such document.
     pub fn type_text(&mut self, id: DocumentId, text: &str) -> Result<(), Error> {
+        let text = self.with_document_eol(id, text)?;
         self.edit(id, |editor| {
-            editor.type_text(text);
+            editor.type_text(&text);
             Ok(!text.is_empty())
+        })
+    }
+
+    /// Moves every cursor of a document; with `select`, extends the
+    /// selections instead (Shift). Ends the current undo step.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn move_cursor(
+        &mut self,
+        id: DocumentId,
+        movement: Movement,
+        select: bool,
+    ) -> Result<(), Error> {
+        self.edit(id, |editor| {
+            editor.move_cursors(movement, select);
+            Ok(false)
+        })
+    }
+
+    /// Enter: a line break in the document's line ending, keeping the
+    /// current line's indentation. Starts a new undo step that typing joins.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn enter(&mut self, id: DocumentId) -> Result<(), Error> {
+        let eol = self.document_mut(id)?.eol().as_str();
+        self.edit(id, |editor| {
+            editor.insert_line_break(eol);
+            Ok(true)
+        })
+    }
+
+    /// Tab: spaces up to the next tab stop, or a tab char, following
+    /// `editor.tabSize` and `editor.insertSpaces` (with the document
+    /// language's overrides). Its own undo step.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn tab(&mut self, id: DocumentId) -> Result<(), Error> {
+        let language = self.document_mut(id)?.language_id();
+        let tab_size = match self.config.language_value(language, "editor.tabSize") {
+            Some(Value::Number(n)) => setting_count(*n).unwrap_or(4),
+            _ => 4,
+        };
+        let insert_spaces = !matches!(
+            self.config.language_value(language, "editor.insertSpaces"),
+            Some(Value::Bool(false))
+        );
+        self.edit(id, |editor| {
+            editor.insert_tab(tab_size, insert_spaces);
+            Ok(true)
+        })
+    }
+
+    /// `text` with its line breaks in the document's line ending: VS Code's
+    /// model keeps one line ending, so inserted text follows it.
+    fn with_document_eol(&mut self, id: DocumentId, text: &str) -> Result<String, Error> {
+        let eol = self.document_mut(id)?.eol();
+        Ok(if text.contains(['\r', '\n']) {
+            rustode_fs::normalize_eol(text, eol)
+        } else {
+            text.to_owned()
         })
     }
 
@@ -295,7 +360,8 @@ impl Workspace {
     /// # Errors
     /// When there is no such document or `range` is past its end.
     pub fn replace(&mut self, id: DocumentId, range: Range, text: &str) -> Result<(), Error> {
-        self.edit(id, |editor| editor.replace(range, text))
+        let text = self.with_document_eol(id, text)?;
+        self.edit(id, |editor| editor.replace(range, &text))
     }
 
     /// Undoes the last undo step. Returns whether there was one.
@@ -303,11 +369,10 @@ impl Workspace {
     /// # Errors
     /// When there is no such document.
     pub fn undo(&mut self, id: DocumentId) -> Result<bool, Error> {
-        let mut undone = false;
-        self.edit(id, |editor| {
-            undone = editor.undo();
-            Ok(undone)
-        })?;
+        let document = self.document_mut(id)?;
+        let undone = document.editor_mut().undo();
+        document.sync_eol();
+        self.changed(id, undone);
         Ok(undone)
     }
 
@@ -316,11 +381,10 @@ impl Workspace {
     /// # Errors
     /// When there is no such document.
     pub fn redo(&mut self, id: DocumentId) -> Result<bool, Error> {
-        let mut redone = false;
-        self.edit(id, |editor| {
-            redone = editor.redo();
-            Ok(redone)
-        })?;
+        let document = self.document_mut(id)?;
+        let redone = document.editor_mut().redo();
+        document.sync_eol();
+        self.changed(id, redone);
         Ok(redone)
     }
 
@@ -345,4 +409,12 @@ impl Workspace {
             self.events.push(Event::DocumentChanged { id });
         }
     }
+}
+
+/// A count setting such as `editor.tabSize`: a whole number from 1 to 100,
+/// VS Code's bounds (`src/vs/editor/common/config/editorConfigurationSchema.ts:25-31`).
+fn setting_count(value: f64) -> Option<usize> {
+    (1u32..=100)
+        .find(|n| (f64::from(*n) - value).abs() < f64::EPSILON)
+        .and_then(|n| usize::try_from(n).ok())
 }

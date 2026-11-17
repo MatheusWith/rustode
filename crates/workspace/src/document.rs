@@ -1,7 +1,9 @@
 //! One open document: its text and how it is stored on disk.
 
-use rustode_core::{EditError, Editor, Range, Selection};
+use crate::language::{self, Language};
+use rustode_core::{EditError, Editor, Position, Range, Selection};
 use rustode_fs::{EncodeError, Encoding, Eol};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Length and 64-bit hash of a file's bytes. Two different contents share a
@@ -46,6 +48,13 @@ pub struct Document {
     pub(crate) orphaned: bool,
     /// The file's bytes when it changed under unsaved edits, until resolved.
     pub(crate) conflict: Option<Vec<u8>>,
+    /// The line ending new line breaks use, and whether the text mixes both
+    /// kinds; kept rather than rescanning the text on every call.
+    eol: (Eol, bool),
+    /// The line-ending state at versions created by an EOL change or a
+    /// reload, so undo and redo restore it (VS Code's `pushEOL` is undoable).
+    eol_at: HashMap<u64, (Eol, bool)>,
+    language: &'static Language,
 }
 
 impl Document {
@@ -61,7 +70,15 @@ impl Document {
             encoding,
             bom,
         } = decoded;
+        let info = rustode_fs::detect_eol(&text);
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         Self {
+            language: language::detect(&name),
+            eol: (info.dominant, info.mixed),
+            eol_at: HashMap::new(),
             path,
             editor: Editor::new(&text),
             encoding,
@@ -168,13 +185,13 @@ impl Document {
     /// The dominant line ending.
     #[must_use]
     pub fn eol(&self) -> Eol {
-        rustode_fs::detect_eol(&self.text()).dominant
+        self.eol.0
     }
 
     /// Whether the text mixes LF and CRLF.
     #[must_use]
     pub fn has_mixed_eol(&self) -> bool {
-        rustode_fs::detect_eol(&self.text()).mixed
+        self.eol.1
     }
 
     pub(crate) fn encoded(&self) -> Result<Vec<u8>, EncodeError> {
@@ -198,9 +215,90 @@ impl Document {
         let text = self.text();
         let normalized = rustode_fs::normalize_eol(&text, eol);
         if normalized == text {
+            self.eol = (eol, false);
             return Ok(false);
         }
+        let before = self.editor.version();
+        let changed = self
+            .editor
+            .replace(Range::new(0, self.len_chars()), &normalized)?;
+        self.record_eol(before, (eol, false));
+        Ok(changed)
+    }
+
+    /// Rescans the text for its line endings after it was replaced from disk.
+    pub(crate) fn rescan_eol(&mut self, before_version: u64) {
+        let info = rustode_fs::detect_eol(&self.text());
+        self.record_eol(before_version, (info.dominant, info.mixed));
+    }
+
+    fn record_eol(&mut self, before_version: u64, after: (Eol, bool)) {
+        self.eol_at.insert(before_version, self.eol);
+        self.eol_at.insert(self.editor.version(), after);
+        self.eol = after;
+    }
+
+    /// After undo or redo: the line-ending state of the version reached, if
+    /// an EOL change or a reload created it.
+    pub(crate) fn sync_eol(&mut self) {
+        if let Some(state) = self.eol_at.get(&self.editor.version()) {
+            self.eol = *state;
+        }
+    }
+
+    pub(crate) fn version(&self) -> u64 {
+        self.editor.version()
+    }
+
+    /// The number of lines; an empty document has one.
+    #[must_use]
+    pub fn line_count(&self) -> usize {
+        self.editor.buffer().len_lines()
+    }
+
+    /// The text of `line` without its line break, or an empty string past the
+    /// last line. Copies only that line, so frontends can draw what is visible.
+    #[must_use]
+    pub fn line(&self, line: usize) -> String {
+        if line < self.line_count() {
+            self.editor.buffer().line_text(line)
+        } else {
+            String::new()
+        }
+    }
+
+    /// The line and column (both 0-based, columns in chars) of the primary cursor.
+    #[must_use]
+    pub fn cursor_position(&self) -> Position {
+        self.editor.position_of(self.cursor())
+    }
+
+    /// The line and column of char `offset`, clamped to the end of the text.
+    #[must_use]
+    pub fn position_of(&self, offset: usize) -> Position {
+        self.editor.position_of(offset.min(self.len_chars()))
+    }
+
+    /// The char offset of `position`, clamping the line and the column.
+    #[must_use]
+    pub fn offset_of(&self, position: Position) -> usize {
+        if position.line >= self.line_count() {
+            return self.len_chars();
+        }
         self.editor
-            .replace(Range::new(0, self.len_chars()), &normalized)
+            .buffer()
+            .offset_of(position.line, position.column)
+    }
+
+    /// The language id used by settings overrides, e.g. `rust`.
+    #[must_use]
+    pub fn language_id(&self) -> &'static str {
+        self.language.id
+    }
+
+    /// The language name shown in the status bar, e.g. `Rust`.
+    #[must_use]
+    pub fn language_name(&self) -> &'static str {
+        self.language.name
     }
 }
