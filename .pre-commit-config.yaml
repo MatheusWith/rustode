@@ -49,7 +49,8 @@ repos:
       # --- push ---
       - id: xtask-pre-push
         name: branch name, target and pushed messages
-        entry: sh -c 'printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$PRE_COMMIT_TO_REF" "$PRE_COMMIT_REMOTE_BRANCH" "${PRE_COMMIT_FROM_REF:-0000000000000000000000000000000000000000}" | cargo xtask pre-push'
+        # On a first push pre-commit leaves PRE_COMMIT_TO_REF empty: fall back to the local branch's commit.
+        entry: sh -c 'to="${PRE_COMMIT_TO_REF:-$(git rev-parse "$PRE_COMMIT_LOCAL_BRANCH")}"; printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$to" "$PRE_COMMIT_REMOTE_BRANCH" "${PRE_COMMIT_FROM_REF:-0000000000000000000000000000000000000000}" | cargo xtask pre-push'
         language: system
         stages: [pre-push]
         pass_filenames: false
