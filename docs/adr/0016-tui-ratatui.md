@@ -1,7 +1,7 @@
 # ADR 0016: The TUI is built on ratatui and has every Phase 1 feature except the minimap
 
-- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session); not implemented yet (M2; `crates/tui/src/lib.rs` is a one-line placeholder)
-- **Build:** rustode at `d6debfb`
+- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session); implemented in part (M2). Done: the width bands, key-to-frame recording and the snapshot tests (`a8c6252`); tabs and the explorer (`3081db1`); quick open, the command palette and go to line (`b813f94`); Dark Modern with 256-color, 16-color and `NO_COLOR` fallback (`818073e`). Not yet: the mouse, find and replace, and applying the user's keybindings ([`ROADMAP.md`](../../ROADMAP.md), "Editor: Phase 1 milestones")
+- **Build:** rustode at `d6debfb` when decided; status checked at `7c2467c`
 
 ## Context
 
@@ -35,6 +35,6 @@ The TUI renders the same workspace state as the GUI, at every width band, and ne
 
 ## Consequences
 
-- The decision does not say what 60 to 79 columns shows ([`lacunas.md`](../lacunas.md) G17).
+- The decision does not say what 60 to 79 columns shows ([`lacunas.md`](../lacunas.md) G17). Until the owner decides, the TUI shows what it shows from 80 to 119: the status bar and no sidebar (`crates/tui/src/view.rs:32-68`).
 - The App's default dark theme is "Dark 2026", not Dark Modern (`src/vs/workbench/services/themes/common/workbenchThemeService.ts:43`, in the source tree). Whether rustode follows it, and whether the theme's color values may be reused, is open ([`lacunas.md`](../lacunas.md) G18).
 - "Wherever the terminal allows" admits that some VS Code keybindings may not reach the TUI. Each one the TUI cannot offer is listed in the roadmap's Gap Analysis.

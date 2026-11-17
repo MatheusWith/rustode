@@ -30,7 +30,7 @@ Decided by the owner in the Phase 1 grilling session (2026-11-16), except where 
 | [0013](0013-crates-and-workspace-api.md) | One crate per module, and the workspace crate is the only rustode crate the frontends depend on | accepted (2026-11-16) |
 | [0014](0014-in-process-frontends.md) | The frontends link the workspace in-process, send it commands and render its state; other transports come later through the protocol types | accepted (2026-11-16) |
 | [0015](0015-child-process-servers.md) | Language servers and debug adapters run as child processes over stdio, supervised by the workspace | accepted (2026-11-16); not implemented (M5, M7) |
-| [0016](0016-tui-ratatui.md) | The TUI is built on ratatui and has every Phase 1 feature except the minimap | accepted (2026-11-16); not implemented (M2) |
+| [0016](0016-tui-ratatui.md) | The TUI is built on ratatui and has every Phase 1 feature except the minimap | accepted (2026-11-16); implemented in part (M2) |
 | [0017](0017-gui-egui-wgpu.md) | The GUI is egui on eframe with wgpu; it repaints only on change and draws text with its own virtualized widget | accepted (2026-11-16); not implemented (M3) |
 | [0018](0018-phase-1-milestones.md) | Phase 1 ships in ten milestones, M0 to M9, with a fixed scope and fixed exclusions | accepted (2026-11-16) |
 | [0019](0019-tests-at-three-seams.md) | Tests are written first, at three seams: the workspace API, input to frame, and the CLI process | accepted (2026-11-16) |

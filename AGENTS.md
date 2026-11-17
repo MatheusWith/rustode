@@ -347,19 +347,19 @@ The rustode editor is written in Rust, in `crates/` and `xtask/`. It reimplement
 
 ### 11.1 Crates and their roles
 
-| Crate | Role | State at `d6debfb` |
+| Crate | Role | State at `7c2467c` |
 |---|---|---|
 | `rustode-core` | text buffer (ropey), selections and multi-cursor, edit operations, undo/redo with VS Code-like grouping; no I/O | M1 part done |
 | `rustode-syntax` | Tree-sitter parsing, incremental reparse, highlight queries, language detection | placeholder |
-| `rustode-fs` | file reading and writing, encodings, line endings, file watching; workspace search later | done except search |
+| `rustode-fs` | file reading and writing, encodings, line endings, file watching, the folder walk for quick open; workspace search later | done except search |
 | `rustode-config` | `settings.json` and `keybindings.json` in VS Code's format; problems are reported, never fatal | done for M1 |
-| `rustode-workspace` | **the single in-process API for every frontend**: documents, edits, external changes and configuration; later editor groups, commands, LSP, DAP and extensions | M1 part done |
+| `rustode-workspace` | **the single in-process API for every frontend**: documents, edits, external changes, configuration, the view API, tabs, the explorer, quick open and the command registry; later find and replace, LSP, DAP and extensions | M1 and M2 part done |
 | `rustode-protocol` | serializable types for every workspace command and event; no transport in Phase 1 | placeholder |
 | `rustode-trace` | shared tracing setup and the input-to-frame metric, re-exported as `rustode_workspace::trace` | done |
-| `rustode-cli` · `rustode-tui` · `rustode-gui` | the frontends: the `rustode` binary, the ratatui TUI and the egui GUI | CLI partial; TUI and GUI placeholders |
+| `rustode-cli` · `rustode-tui` · `rustode-gui` | the frontends: the `rustode` binary, the ratatui TUI and the egui GUI | CLI partial (`--version`, `bench`; `open` not started); TUI partial (`rustode-tui`: tabs, explorer, quick open, palette, go to line, status bar, colors; no find and replace, mouse or user keybindings yet); GUI placeholder |
 | `xtask` | project tasks: `cargo xtask commit-msg`, `pre-push` and `coverage`; benchmark comparison and release later | partial |
 
-1. **The frontends depend on no rustode crate other than `rustode-workspace`.** This covers normal, dev and build dependencies of `rustode-cli`, `rustode-tui` and `rustode-gui`. `xtask/tests/frontend_deps.rs` fails otherwise ([ADR 0013](docs/adr/0013-crates-and-workspace-api.md)). When a frontend needs a type or function from another crate, the workspace re-exports it, as it does with `rustode_workspace::trace` (`crates/workspace/src/lib.rs:16-19`). Third-party crates are not limited by the test.
+1. **The frontends depend on no rustode crate other than `rustode-workspace`.** This covers normal, dev and build dependencies of `rustode-cli`, `rustode-tui` and `rustode-gui`. `xtask/tests/frontend_deps.rs` fails otherwise ([ADR 0013](docs/adr/0013-crates-and-workspace-api.md)). When a frontend needs a type or function from another crate, the workspace re-exports it, as it does with `rustode_workspace::trace` (`crates/workspace/src/lib.rs:26-29`). Third-party crates are not limited by the test.
 2. **The frontends hold no business logic.** They send commands to the workspace and render its state and events ([ADR 0014](docs/adr/0014-in-process-frontends.md)).
 3. **Behavior studied in VS Code is reimplemented, never translated, and credited** in `ATTRIBUTION.md`, in the file's doc comment and in the component's ADR ([ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md)). It is studied in the source tree (§4.1).
 4. **A new third-party crate** needs a license that `deny.toml` allows and a row in `ATTRIBUTION.md`, "Editor dependencies" ([ADR 0010](docs/adr/0010-ecosystem-crates-allowed.md)).

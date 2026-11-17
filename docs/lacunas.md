@@ -1,6 +1,6 @@
 # Gaps and open questions
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (editor questions G13–G19 added) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (G17 and G18 note the TUI's current choices) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
 
 This page lists what is still unknown or has not been measured, in priority order: first the study (G1–G12), then the editor (G13 on). The hour figures are estimates, not measurements. When a gap is resolved:
 - record the finding in `09-analises/`;
@@ -30,8 +30,8 @@ Editor (rustode, Phase 1):
 | G14 | Does a relocated copy of the App reuse its Node compile cache? | benchmark validity | startup comparisons ([ADR 0024](adr/0024-comparison-with-the-app.md)) | 1 h |
 | G15 | Which App-side event marks a presented frame? | benchmark method | typing latency and startup scenarios ([ADR 0024](adr/0024-comparison-with-the-app.md), [0025](adr/0025-typing-latency-injected-input.md)) | 2–4 h |
 | G16 | The App lost the first injected keystroke once | benchmark method | typing latency ([ADR 0025](adr/0025-typing-latency-injected-input.md)) | 1–2 h |
-| G17 | The TUI layout from 60 to 79 columns is undefined | specification | the TUI tracer (M2) | — |
-| G18 | Dark Modern or the App's default theme, and may theme colors be reused? | specification, license | TUI and GUI colors (M2, M3), token colors (M4) | — |
+| G17 | The TUI layout from 60 to 79 columns is undefined | specification | no; the TUI made a provisional choice (M2) | — |
+| G18 | Dark Modern or the App's default theme, and may theme colors be reused? | specification, license | the TUI uses Dark Modern provisionally (M2); GUI colors (M3), token colors (M4) | — |
 | G19 | Is branch protection available for the private repository? | repository | no | 15 min |
 
 ## G1. No bundle → source-module map
@@ -151,14 +151,16 @@ Editor (rustode, Phase 1):
 ## G17. The TUI layout from 60 to 79 columns is undefined
 
 - **Missing:** [ADR 0016](adr/0016-tui-ratatui.md) defines four width bands: sidebar, editor and status bar at 120 columns or more; sidebar collapsed from 80 to 119; editor only below 60; a "terminal too small" notice below 40×10. Nothing says what 60 to 79 columns shows.
-- **Approach:** **owner decision**, before the TUI tracer (M2).
+- **Current choice (provisional):** the TUI tracer (`a8c6252`) treats 60 to 79 columns like 80 to 119: the status bar and no sidebar, unless the explorer has focus (`crates/tui/src/view.rs:32-68`; snapshot `crates/tui/tests/snapshots/narrow-70x12.txt`).
+- **Approach:** **owner decision:** confirm this choice or set another one.
 
 ## G18. Dark Modern or the App's default theme, and may theme colors be reused?
 
 - **Missing:** two answers.
   - Phase 1 chose Dark Modern ([ADR 0016](adr/0016-tui-ratatui.md), [ADR 0017](adr/0017-gui-egui-wgpu.md)). The App's default dark theme is "Dark 2026" (`src/vs/workbench/services/themes/common/workbenchThemeService.ts:43`; desktop default of `workbench.colorTheme` at `src/vs/workbench/services/themes/common/themeConfiguration.ts:40`). Dark Modern still ships (`extensions/theme-defaults/package.json:35-38`). Should rustode keep Dark Modern or follow the App?
   - The colors live in data files (`extensions/theme-defaults/themes/dark_modern.json`, `2026-dark.json`, MIT). [ADR 0009](adr/0009-mit-and-reimplemented-behavior.md) forbids copying VS Code code. Does taking color values from these files count as copying?
-- **Approach:** **owner decision** on both, before the TUI colors (M2).
+- **Current choice (provisional):** the TUI draws in Dark Modern (`818073e`), as the Phase 1 specification asks (story 70) and ADR 0016 records. Its color values are taken from `extensions/theme-defaults/themes/dark_modern.json` and from the color registry's defaults, and are credited in [`ATTRIBUTION.md`](../ATTRIBUTION.md) (`crates/tui/src/theme.rs`). The App's default stays "Dark 2026".
+- **Approach:** **owner decision** on both: confirm Dark Modern or switch to the App's default, and confirm that taking the color values is not copying code.
 
 ## G19. Is branch protection available for the private repository?
 
@@ -169,6 +171,7 @@ Editor (rustode, Phase 1):
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | minor | G17 and G18: the TUI's provisional layout from 60 to 79 columns and its Dark Modern colors, left for the owner to confirm |
 | 2026-11-17 | minor | Editor questions G13–G19 (integrity, benchmark method, TUI layout, theme, branch protection) |
 | 2026-11-16 | minor | Translated to English; G1 mentions REA |
 | 2026-11-16 | major | Created from the QA, the port and the build tests |

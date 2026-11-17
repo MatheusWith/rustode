@@ -67,8 +67,8 @@ The detail, with layers, workers and the path of each file in the source tree, i
 
 rustode is a Rust editor with one UI-agnostic core and thin frontends: a CLI, a terminal UI (ratatui) and a GUI (egui). It reimplements behavior studied in the source tree, credits it in [`ATTRIBUTION.md`](ATTRIBUTION.md), and is measured against the app on the same virtual display. Phase 1 has ten milestones, M0 to M9 ([ADR 0018](docs/adr/0018-phase-1-milestones.md)).
 
-- **Today (`d6debfb`):** M1, the core and the CLI. Open and save keep the encoding and line endings; editing with undo grouped like VS Code; multi-cursor; reload or conflict when a file changes on disk; `settings.json` and `keybindings.json` in VS Code's format. The TUI, the GUI and the comparison with the app are not started.
-- **Numbers (measured on 2026-11-17):** 133 tests pass (`cargo nextest run --workspace --locked --offline -j 4`); line coverage is 95.1% on the core crates (`cargo xtask coverage`); opening a 1 GB file takes 2.29 s in a release build (`crates/workspace/tests/stress.rs:102-103`). The commands and the other numbers are in [`ROADMAP.md`](ROADMAP.md), "Key numbers".
+- **Today (`7c2467c`):** M1, the core and the CLI, and M2, the workspace and the TUI, both in progress. Open and save keep the encoding and line endings; editing with undo grouped like VS Code; multi-cursor; reload or conflict when a file changes on disk; `settings.json` and `keybindings.json` in VS Code's format. The terminal editor (`rustode-tui PATH...`) has tabs, an explorer, quick open, the command palette, go to line, a status bar and Dark Modern colors, with fallbacks down to no color. `rustode bench` runs a versioned benchmark scenario on rustode and on a verified copy of the app. Still to come in M2: find and replace, the mouse and the user's keybindings in the TUI. The GUI is being built on a separate branch, and no like-for-like comparison with the app exists yet (M3).
+- **Numbers (measured on 2026-11-17):** 225 tests pass (`cargo nextest run --workspace --locked --offline -j 4`); line coverage is 95.5% on the core crates and 82.0% on the frontends (`cargo xtask coverage`, at `a8c6252`); opening a 1 GB file takes 2.29 s in a release build (`crates/workspace/tests/stress.rs:102-103`); the TUI's key-to-frame p99 is 0.88 ms on ratatui's test backend (debug build, `a8c6252`). The commands and the other numbers are in [`ROADMAP.md`](ROADMAP.md), "Key numbers".
 - **Where to read more:** [`AGENTS.md`](AGENTS.md) §11 (rules), [`CONTRIBUTING.md`](CONTRIBUTING.md) (conventions and review checklist), [`docs/adr/`](docs/adr/) 0007–0028 (decisions), and [`ROADMAP.md`](ROADMAP.md) (milestones and the Gap Analysis against VS Code).
 
 ## Layout
@@ -140,14 +140,14 @@ The build was made by the scripts in `06-port/` (originals in `~/Projects/vscodi
 - **Test coverage:** 15 runs on the built app and the comparisons. All passed except for failures already explained: a harness defect, a VSCodium default and an unsuitable criterion.
 - **Recorded analyses:** 2 (`09-analises/0001`, `0002`).
 
-**Editor stage: Phase 1, M1 (core and CLI).** M0 waits for the owner's first push; M2 to M9 are not started ([`ROADMAP.md`](ROADMAP.md), "Editor: Phase 1 milestones").
+**Editor stage: Phase 1, M1 (core and CLI) and M2 (workspace and TUI), both in progress.** M0 waits for the owner's first push; the M3 GUI tracer is under way on a separate branch; M4 to M9 are not started ([`ROADMAP.md`](ROADMAP.md), "Editor: Phase 1 milestones").
 
 The biggest gaps today ([`docs/lacunas.md`](docs/lacunas.md)):
 
 - No map from each bundle to the source-tree files (G1).
 - The 2 h soak has not been run (G4).
 - The `product.json` list of proposed APIs has not been checked against 1.147 (G6).
-- For the editor: the app side of a presented frame is not defined yet (G15), and two layout and theme questions wait for the owner (G17, G18).
+- For the editor: the app side of a presented frame is not defined yet (G15), and the TUI's layout from 60 to 79 columns and its theme wait for the owner to confirm them (G17, G18).
 
 ## License and credits
 
