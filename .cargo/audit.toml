@@ -1,0 +1,9 @@
+# cargo audit (CI runs `cargo audit --deny warnings`): the same exceptions as
+# deny.toml's [advisories] ignore, with the reason recorded there. Owner
+# decision, 2026-11-17. Remove them when accesskit_unix moves to zbus 6.
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0370", # zvariant: merged into zbus 6
+  "RUSTSEC-2026-0371", # zbus_names: merged into zbus 6
+  "RUSTSEC-2026-0372", # zvariant_derive: merged into zbus 6
+]
