@@ -133,27 +133,50 @@ impl Workspace {
     }
 
     pub(crate) fn watch(&mut self, path: &Path) {
-        if self.watcher.is_none() {
-            match rustode_fs::Watcher::new() {
-                Ok(watcher) => self.watcher = Some(watcher),
-                Err(err) => {
-                    tracing::warn!(%err, "no file watcher; external changes go unnoticed");
-                    return;
-                }
-            }
-        }
-        if let Some(watcher) = self.watcher.as_mut()
+        if let Some(watcher) = self.ensure_watcher()
             && let Err(err) = watcher.watch_file(path)
         {
             tracing::warn!(path = %path.display(), %err, "cannot watch");
         }
     }
 
+    /// The file watcher, created on first use; `None` if the platform has none.
+    fn ensure_watcher(&mut self) -> Option<&mut rustode_fs::Watcher> {
+        if self.watcher.is_none() {
+            match rustode_fs::Watcher::new() {
+                Ok(watcher) => self.watcher = Some(watcher),
+                Err(err) => {
+                    tracing::warn!(%err, "no file watcher; external changes go unnoticed");
+                }
+            }
+        }
+        self.watcher.as_mut()
+    }
+
     fn check(&mut self, id: DocumentId, renamed_to: Option<PathBuf>) -> Result<(), Error> {
+        match self.read_or_orphan(id, renamed_to)? {
+            Some(bytes) => self.compare_with_disk(id, bytes),
+            None => Ok(()),
+        }
+    }
+
+    /// The file's bytes; `None` when it is gone, after marking the document
+    /// orphaned (once). A file that comes back un-orphans it.
+    fn read_or_orphan(
+        &mut self,
+        id: DocumentId,
+        renamed_to: Option<PathBuf>,
+    ) -> Result<Option<Vec<u8>>, Error> {
         let document = self.document_mut(id)?;
         let path = document.path().to_owned();
-        let bytes = match rustode_fs::read_file(&path) {
-            Ok(bytes) => bytes,
+        match rustode_fs::read_file(&path) {
+            Ok(bytes) => {
+                if document.orphaned {
+                    document.orphaned = false;
+                    self.events.push(Event::Restored { id });
+                }
+                Ok(Some(bytes))
+            }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 if !document.orphaned {
                     document.orphaned = true;
@@ -163,14 +186,15 @@ impl Workspace {
                         None => Event::Deleted { id },
                     });
                 }
-                return Ok(());
+                Ok(None)
             }
-            Err(source) => return Err(Error::Io { path, source }),
-        };
-        if document.orphaned {
-            document.orphaned = false;
-            self.events.push(Event::Restored { id });
+            Err(source) => Err(Error::Io { path, source }),
         }
+    }
+
+    /// Reloads a clean document, or raises a conflict for a dirty one, when
+    /// the bytes on disk differ from those last read or written.
+    fn compare_with_disk(&mut self, id: DocumentId, bytes: Vec<u8>) -> Result<(), Error> {
         let document = self.document_mut(id)?;
         if DiskStamp::of(&bytes) == document.disk {
             // A touch, our own save, or the file went back to what we know.
@@ -181,7 +205,7 @@ impl Workspace {
             return self.reload(id, &bytes);
         }
         if document.conflict.as_ref() != Some(&bytes) {
-            tracing::debug!(path = %path.display(), "conflict");
+            tracing::debug!(path = %document.path().display(), "conflict");
             document.conflict = Some(bytes);
             document.forget_saved_version();
             self.events.push(Event::Conflict { id });
