@@ -78,6 +78,37 @@ pub fn decode(bytes: &[u8]) -> Decoded {
     }
 }
 
+/// Like [`decode`], but takes the bytes by value so valid UTF-8 (the common
+/// case) becomes the text without a copy, halving peak memory on large files.
+#[must_use]
+pub fn decode_owned(mut bytes: Vec<u8>) -> Decoded {
+    let utf8_bom = Encoding::Utf8.bom();
+    let bom = bytes.starts_with(utf8_bom);
+    let utf16 = !bom
+        && (bytes.starts_with(Encoding::Utf16Le.bom())
+            || bytes.starts_with(Encoding::Utf16Be.bom()));
+    if utf16 {
+        return decode(&bytes);
+    }
+    if bom {
+        bytes.drain(..utf8_bom.len());
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => Decoded {
+            text,
+            encoding: Encoding::Utf8,
+            bom,
+        },
+        Err(err) => {
+            let mut bytes = err.into_bytes();
+            if bom {
+                bytes.splice(..0, utf8_bom.iter().copied());
+            }
+            decode(&bytes)
+        }
+    }
+}
+
 fn decode_without_bom(bytes: &[u8], encoding: Encoding) -> Option<String> {
     let codec = match encoding {
         Encoding::Utf8 => encoding_rs::UTF_8,
@@ -186,5 +217,20 @@ mod tests {
         let decoded = decode(&[0xFF, 0xFE, 0x00, 0xD8]);
         assert_eq!(decoded.encoding, Encoding::Windows1252);
         assert!(!decoded.bom);
+    }
+
+    #[test]
+    fn decode_owned_agrees_with_decode() {
+        let cases: [&[u8]; 6] = [
+            b"plain",
+            b"\xEF\xBB\xBFwith bom",
+            b"\xEF\xBB\xBF\xFFbad after bom",
+            b"caf\xE9",
+            &[0xFF, 0xFE, b'a', 0],
+            b"",
+        ];
+        for bytes in cases {
+            assert_eq!(decode_owned(bytes.to_vec()), decode(bytes), "{bytes:?}");
+        }
     }
 }

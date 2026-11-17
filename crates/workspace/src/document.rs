@@ -22,13 +22,22 @@ pub struct Document {
 }
 
 impl Document {
-    pub(crate) fn from_bytes(path: PathBuf, bytes: &[u8]) -> Self {
-        let decoded = rustode_fs::decode(bytes);
+    /// Decodes a file's bytes, without copying valid UTF-8 (large files).
+    pub(crate) fn from_owned_bytes(path: PathBuf, bytes: Vec<u8>) -> Self {
+        Self::from_decoded(path, rustode_fs::decode_owned(bytes))
+    }
+
+    fn from_decoded(path: PathBuf, decoded: rustode_fs::Decoded) -> Self {
+        let rustode_fs::Decoded {
+            text,
+            encoding,
+            bom,
+        } = decoded;
         Self {
             path,
-            editor: Editor::new(&decoded.text),
-            encoding: decoded.encoding,
-            bom: decoded.bom,
+            editor: Editor::new(&text),
+            encoding,
+            bom,
             saved_version: 0,
         }
     }

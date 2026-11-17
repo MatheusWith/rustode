@@ -76,7 +76,7 @@ impl Workspace {
             path: path.to_owned(),
             source,
         })?;
-        let document = Document::from_bytes(path.to_owned(), &bytes);
+        let document = Document::from_owned_bytes(path.to_owned(), bytes);
         tracing::debug!(path = %path.display(), encoding = document.encoding().label(), "opened");
         self.documents.push(Some(document));
         Ok(DocumentId(self.documents.len() - 1))
