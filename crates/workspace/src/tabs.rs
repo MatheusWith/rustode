@@ -3,7 +3,11 @@
 //! Phase 1 has one group; splits (ticket 35) add more. As in VS Code, a file
 //! has one tab per group, next/previous tab wrap around
 //! (`workbench.action.nextEditor`, `src/vs/workbench/browser/parts/editor/editorActions.ts:1265-1330`),
-//! and closing a tab activates the most recently used one
+//! a quick Ctrl+Tab opens the second most recently used editor and a quick
+//! Ctrl+Shift+Tab the least recently used one (the editor picker of
+//! `src/vs/workbench/browser/parts/editor/editorActions.ts:1868-1905`
+//! starts on the second item, `src/vs/platform/quickinput/browser/quickAccess.ts:122`,
+//! or on the last), and closing a tab activates the most recently used one
 //! (`workbench.editor.focusRecentEditorAfterClose`, default true,
 //! `src/vs/workbench/browser/workbench.contribution.ts:321-325`).
 
@@ -67,6 +71,19 @@ impl EditorGroup {
             (index + count - 1) % count
         };
         self.activate(self.tabs[next]);
+    }
+
+    /// Activates the second most recently used tab, or with `least` the
+    /// least recently used one; nothing changes with fewer than two tabs.
+    pub(crate) fn activate_recent(&mut self, least: bool) {
+        let target = if least {
+            self.recent.last()
+        } else {
+            self.recent.get(1)
+        };
+        if let Some(&id) = target {
+            self.activate(id);
+        }
     }
 
     /// Removes `id`'s tab; the most recently used tab becomes active.
