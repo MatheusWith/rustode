@@ -274,6 +274,55 @@ impl Editor {
         Ok(true)
     }
 
+    /// Replaces several ranges at once as one programmatic undo step that
+    /// leaves the single selection `after` (offsets in the new text), as VS
+    /// Code's Replace All does (`src/vs/editor/contrib/find/browser/findModel.ts:610-619`).
+    /// Undo restores the text and the selections from before. Ranges may come
+    /// in any order; overlapping ones merge, keeping the first one's text.
+    /// Returns whether anything was replaced.
+    ///
+    /// # Errors
+    /// When a range goes past the end of the buffer, or `after` past the end
+    /// of the new text. Nothing changes then.
+    pub fn replace_ranges(
+        &mut self,
+        mut edits: Vec<(Range, String)>,
+        after: Selection,
+    ) -> Result<bool, EditError> {
+        for (range, _) in &mut edits {
+            *range = Range::new(range.start, range.end);
+            self.check(range.end)?;
+        }
+        if !edits.is_sorted_by_key(|(range, _)| (range.start, range.end)) {
+            edits.sort_by_key(|(range, _)| (range.start, range.end));
+        }
+        edits.dedup_by(|next, kept| {
+            let overlaps = next.0.start < kept.0.end;
+            if overlaps {
+                kept.0.end = kept.0.end.max(next.0.end);
+            }
+            overlaps
+        });
+        edits.retain(|(range, text)| !(range.is_empty() && text.is_empty()));
+        if edits.is_empty() {
+            return Ok(false);
+        }
+        let removed: usize = edits.iter().map(|(range, _)| range.len()).sum();
+        let inserted: usize = edits.iter().map(|(_, text)| text.chars().count()).sum();
+        let len = self.buffer.len_chars() - removed + inserted;
+        let end = after.anchor.max(after.head);
+        if end > len {
+            return Err(EditError::OutOfRange { offset: end, len });
+        }
+        let changes = edits
+            .chunk_by(|a, b| b.0.start - a.0.end <= NEAR)
+            .rev()
+            .map(|run| self.change_run(run))
+            .collect();
+        self.commit(EditKind::Other, changes, Selections::single(after));
+        Ok(true)
+    }
+
     /// Adds a selection at the next occurrence of the primary selection's
     /// text, wrapping around (`Ctrl+D`). With an empty primary selection,
     /// first selects the word under each empty cursor instead. Returns
@@ -545,6 +594,32 @@ impl Editor {
         }
     }
 
+    /// Builds one change making every edit of `run` (sorted, apart, and
+    /// at most [`NEAR`] chars from the next), and applies it. Dense edits,
+    /// such as Replace All on a large file, so make a few large changes
+    /// instead of millions of small ones.
+    fn change_run(&mut self, run: &[(Range, String)]) -> Change {
+        let start = run.first().map_or(0, |(range, _)| range.start);
+        let span = Range::new(start, run.last().map_or(start, |(range, _)| range.end));
+        let removed = self.buffer.slice(span);
+        let mut inserted = String::with_capacity(removed.len());
+        let (mut rest, mut at) = (removed.as_str(), span.start);
+        for (range, text) in run {
+            let (kept, tail) = split_chars(rest, range.start - at);
+            inserted.push_str(kept);
+            inserted.push_str(text);
+            rest = split_chars(tail, range.len()).1;
+            at = range.end;
+        }
+        self.buffer.remove(span);
+        self.buffer.insert(span.start, &inserted);
+        Change {
+            offset: span.start,
+            removed,
+            inserted,
+        }
+    }
+
     fn commit(&mut self, kind: EditKind, changes: Vec<Change>, after: Selections) {
         self.last_version += 1;
         let versions = (self.version, self.last_version);
@@ -562,6 +637,19 @@ impl Editor {
         }
         Ok(())
     }
+}
+
+/// Edits of [`Editor::replace_ranges`] closer than this many chars make one
+/// undo change, which then holds the text between them too.
+const NEAR: usize = 1 << 10;
+
+/// `text` split after its first `chars` chars.
+fn split_chars(text: &str, chars: usize) -> (&str, &str) {
+    let at = text
+        .char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(at, _)| at);
+    text.split_at(at)
 }
 
 /// Sorts edits by position and merges overlapping ones (e.g. two cursors
@@ -606,6 +694,51 @@ mod tests {
         assert_eq!(editor.cursor(), 8);
         assert_eq!(editor.replace(Range::empty(0), ""), Ok(false));
         assert!(editor.replace(Range::new(0, 99), "").is_err());
+    }
+
+    #[test]
+    fn several_ranges_are_replaced_as_one_undo_step() {
+        let mut editor = Editor::new("a-b-c");
+        let before = vec![Selection::new(1, 2), Selection::cursor(4)];
+        editor.set_selections(before.clone(), 1).expect("select");
+        let edits = vec![
+            (Range::new(3, 4), "--".to_owned()),
+            (Range::new(1, 2), "+".to_owned()),
+        ];
+        assert_eq!(editor.replace_ranges(edits, Selection::new(2, 1)), Ok(true));
+        assert_eq!(editor.buffer().text(), "a+b--c");
+        assert_eq!(editor.selections(), [Selection::new(2, 1)]);
+        assert!(editor.undo());
+        assert_eq!(editor.buffer().text(), "a-b-c");
+        assert_eq!(editor.selections(), before);
+        assert!(!editor.undo(), "one step");
+        assert!(editor.redo());
+        assert_eq!(editor.buffer().text(), "a+b--c");
+        assert_eq!(editor.selections(), [Selection::new(2, 1)]);
+    }
+
+    #[test]
+    fn replacing_ranges_validates_before_changing_anything() {
+        let mut editor = Editor::new("abc");
+        let nothing = vec![(Range::empty(1), String::new())];
+        assert_eq!(
+            editor.replace_ranges(nothing, Selection::cursor(0)),
+            Ok(false)
+        );
+        let past_the_end = vec![(Range::new(2, 9), String::new())];
+        assert!(
+            editor
+                .replace_ranges(past_the_end, Selection::cursor(0))
+                .is_err()
+        );
+        let shorter = vec![(Range::new(0, 1), String::new())];
+        assert_eq!(
+            editor.replace_ranges(shorter, Selection::cursor(3)),
+            Err(EditError::OutOfRange { offset: 3, len: 2 }),
+            "the selection must fit the new text"
+        );
+        assert_eq!(editor.buffer().text(), "abc");
+        assert!(!editor.undo());
     }
 
     #[test]
