@@ -11,5 +11,14 @@ publish = false
 [dependencies]
 ropey.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+# criterion benchmarks of buffer reads, edits and undo (ADR 0026); compared
+# with main by `cargo xtask bench-gate`. Never run by `cargo nextest`.
+[[bench]]
+name = "core"
+harness = false
+
 [lints]
 workspace = true

@@ -18,7 +18,7 @@
 - [ ] New dependencies pass `cargo deny`, have MIT-compatible licenses and are listed in `ATTRIBUTION.md` (ADR 0010)
 - [ ] Coverage gates hold; any exception is justified in a comment on this pull request (ADR 0020)
 - [ ] Every lint exception is justified next to its `allow` (ADR 0021)
-- [ ] Every number is labeled measured (with its command, folder and commit) or estimated (with its source); no regression beyond the benchmark gate once it exists (ADR 0026)
+- [ ] Every number is labeled measured (with its command, folder and commit) or estimated (with its source); no regression beyond the micro-benchmark gate (ADR 0026)
 - [ ] Benchmarks against the App ran on a verified temporary copy, one editor instance at a time, under the memory guard (AGENTS.md §11.5)
 - [ ] Nothing written to folders 01 to 08; no personal data
 - [ ] Docs, ADRs and the roadmap's milestones and Gap Analysis are updated where the change affects them

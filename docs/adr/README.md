@@ -40,7 +40,7 @@ Decided by the owner in the Phase 1 grilling session (2026-11-16), except where 
 | [0023](0023-same-checks-local-and-ci.md) | The same checks run in git hooks and in CI, and the security scans run offline | accepted (2026-11-16); registry rules in CI not applied |
 | [0024](0024-comparison-with-the-app.md) | rustode is compared with the App once per milestone, on the same virtual display, from a versioned list of scenarios | accepted (2026-11-16); first run planned for M3 |
 | [0025](0025-typing-latency-injected-input.md) | Typing latency is measured with keystrokes injected into both editors through the virtual compositor | accepted (2026-11-16, owner's option a); waits for 0028 |
-| [0026](0026-micro-benchmark-gate.md) | Micro-benchmarks block regressions above 5% locally and 10% in CI | accepted (2026-11-16); not applied |
+| [0026](0026-micro-benchmark-gate.md) | Micro-benchmarks block regressions above 5% locally and 10% in CI | accepted (2026-11-16); applied |
 | [0027](0027-ropey-or-piece-tree.md) | Keep ropey for the text buffer; replace it with a custom piece tree only if the benchmarks show it behind VS Code's text model | proposed (left open by the owner) |
 | [0028](0028-virtual-display-input.md) | Keystrokes may be injected on the virtual display through the virtual compositor's own input paths (amends ADR 0006 rule 2 and AGENTS.md §3.2) | proposed — owner's decision (2026-11-17, from finding 0002) |
 | [0029](0029-extension-management-open-vsx.md) | Extensions are managed through Open VSX's REST API, stored in VS Code's layout in rustode's own folder, and never loaded | proposed (2026-11-17, ticket 40); the folder and the SHA-256 refusal are owner decisions |

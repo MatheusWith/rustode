@@ -67,6 +67,22 @@ jobs:
           semgrep scan --test --config .semgrep/rust.yml .semgrep/rust.rs --metrics=off --disable-version-check
           semgrep scan --config .semgrep --metrics=off --disable-version-check --error .
 
+  bench-gate:
+    # ADR 0026: the pull request's micro-benchmarks against its base commit,
+    # both measured on this runner in alternating rounds; a mean more than 10%
+    # slower fails. The benchmarks need no GUI, so no Vulkan here.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: micro-benchmark gate (10% against the base commit)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: cargo xtask bench-gate --base "$BASE_SHA" --threshold 10
+
   conventions:
     # Dependabot titles and branches follow its own format (prefix configured in dependabot.yml).
     if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
