@@ -2,8 +2,10 @@
 
 mod config;
 mod document;
+mod explorer;
 mod external;
 mod language;
+mod tabs;
 
 pub use config::{
     Chord, Config, ConfigChange, ConfigFile, Diagnostic, DiagnosticKind, Keybinding, Location,
@@ -11,6 +13,7 @@ pub use config::{
 };
 
 pub use document::{Document, DocumentId};
+pub use explorer::{Explorer, ExplorerRow};
 pub use external::Resolution;
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
@@ -18,6 +21,7 @@ pub use rustode_fs::{Encoding, Eol};
 /// workspace alone: call `trace::init_from_env()` at startup and record
 /// input-to-frame latency with `trace::LatencyRecorder`.
 pub use rustode_trace as trace;
+pub use tabs::EditorGroup;
 
 use rustode_core::Editor;
 
@@ -40,6 +44,8 @@ pub enum Error {
     UnknownDocument(DocumentId),
     /// An edit was refused.
     Edit(EditError),
+    /// The document has unsaved changes; closing it needs an explicit discard.
+    Dirty(DocumentId),
     /// The file changed on disk under unsaved edits; resolve the conflict
     /// with [`Workspace::resolve_conflict`] before saving.
     Conflict(DocumentId),
@@ -97,6 +103,7 @@ impl fmt::Display for Error {
             Self::Encode(err) => err.fmt(f),
             Self::UnknownDocument(id) => write!(f, "no open document {id:?}"),
             Self::Edit(err) => err.fmt(f),
+            Self::Dirty(id) => write!(f, "{id:?} has unsaved changes"),
             Self::Conflict(id) => write!(
                 f,
                 "{id:?} changed on disk under unsaved edits; reload or keep the edits first"
@@ -118,6 +125,10 @@ pub struct Workspace {
     watcher: Option<rustode_fs::Watcher>,
     /// Settings and keybindings (`load_config`, `reload_config`).
     config: Config,
+    /// The editor group and its tabs (one group until splits arrive).
+    group: EditorGroup,
+    /// The opened folder, if any.
+    explorer: Option<Explorer>,
 }
 
 impl Workspace {
@@ -132,6 +143,10 @@ impl Workspace {
     /// # Errors
     /// When the file cannot be read.
     pub fn open(&mut self, path: &Path) -> Result<DocumentId, Error> {
+        if let Some(id) = self.find_open(path) {
+            self.group.open(id);
+            return Ok(id);
+        }
         let bytes = rustode_fs::read_file(path).map_err(|source| Error::Io {
             path: path.to_owned(),
             source,
@@ -140,7 +155,122 @@ impl Workspace {
         tracing::debug!(path = %path.display(), encoding = document.encoding().label(), "opened");
         self.documents.push(Some(document));
         self.watch(path);
-        Ok(DocumentId(self.documents.len() - 1))
+        let id = DocumentId(self.documents.len() - 1);
+        self.group.open(id);
+        Ok(id)
+    }
+
+    /// The open document for `path`, compared as absolute paths.
+    fn find_open(&self, path: &Path) -> Option<DocumentId> {
+        let wanted = std::path::absolute(path).ok()?;
+        (0..self.documents.len()).map(DocumentId).find(|&id| {
+            self.document(id)
+                .and_then(|d| std::path::absolute(d.path()).ok())
+                .is_some_and(|p| p == wanted)
+        })
+    }
+
+    /// The tabs of the editor group, in display order.
+    #[must_use]
+    pub fn tabs(&self) -> &[DocumentId] {
+        self.group.tabs()
+    }
+
+    /// The editor group.
+    #[must_use]
+    pub fn group(&self) -> &EditorGroup {
+        &self.group
+    }
+
+    /// The document of the active tab.
+    #[must_use]
+    pub fn active_document(&self) -> Option<DocumentId> {
+        self.group.active()
+    }
+
+    /// Makes `id`'s tab the active one.
+    ///
+    /// # Errors
+    /// When the document has no tab.
+    pub fn activate(&mut self, id: DocumentId) -> Result<(), Error> {
+        if self.group.activate(id) {
+            Ok(())
+        } else {
+            Err(Error::UnknownDocument(id))
+        }
+    }
+
+    /// Activates the next tab, wrapping around (Ctrl+PageDown).
+    pub fn next_tab(&mut self) {
+        self.group.cycle(true);
+    }
+
+    /// Activates the previous tab, wrapping around (Ctrl+PageUp).
+    pub fn previous_tab(&mut self) {
+        self.group.cycle(false);
+    }
+
+    /// Closes a document and its tab; the most recently used tab becomes
+    /// active. Unsaved changes are only dropped when `discard` is true.
+    ///
+    /// # Errors
+    /// When there is no such document, or it is dirty and `discard` is false.
+    pub fn close(&mut self, id: DocumentId, discard: bool) -> Result<(), Error> {
+        let document = self.document(id).ok_or(Error::UnknownDocument(id))?;
+        if document.is_dirty() && !discard {
+            return Err(Error::Dirty(id));
+        }
+        let path = document.path().to_owned();
+        if let Some(watcher) = self.watcher.as_mut()
+            && let Err(err) = watcher.unwatch_file(&path)
+        {
+            tracing::debug!(path = %path.display(), %err, "cannot unwatch");
+        }
+        self.documents[id.0] = None;
+        self.group.close(id);
+        Ok(())
+    }
+
+    /// Opens a folder in the explorer, replacing any opened before.
+    ///
+    /// # Errors
+    /// When the folder cannot be read.
+    pub fn open_folder(&mut self, path: &Path) -> Result<(), Error> {
+        let explorer = Explorer::open(path).map_err(|source| Error::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        self.explorer = Some(explorer);
+        Ok(())
+    }
+
+    /// The opened folder's tree, if a folder is open.
+    #[must_use]
+    pub fn explorer(&self) -> Option<&Explorer> {
+        self.explorer.as_ref()
+    }
+
+    /// Expands or collapses a folder of the explorer; returns whether it is
+    /// now expanded.
+    ///
+    /// # Errors
+    /// When no folder is open or the folder cannot be read.
+    pub fn toggle_folder(&mut self, path: &Path) -> Result<bool, Error> {
+        let explorer = self.explorer.as_mut().ok_or_else(|| Error::Io {
+            path: path.to_owned(),
+            source: std::io::Error::other("no folder is open"),
+        })?;
+        explorer.toggle(path).map_err(|source| Error::Io {
+            path: path.to_owned(),
+            source,
+        })
+    }
+
+    /// Reads the explorer's root and expanded folders again.
+    pub fn refresh_explorer(&mut self) {
+        if let Some(explorer) = self.explorer.as_mut() {
+            explorer.refresh();
+        }
     }
 
     /// An open document.
