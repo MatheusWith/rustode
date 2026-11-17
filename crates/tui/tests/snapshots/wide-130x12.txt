@@ -1,8 +1,8 @@
- EXPLORER               │   1 fn main() {
-   main.rs              │   2     println!("héllo 日本");
+ EXPLORER               │ main.rs │
+  No folder opened      │   1 fn main() {
+                        │   2     println!("héllo 日本");
                         │   3 }
                         │   4
-                        │
                         │
                         │
                         │

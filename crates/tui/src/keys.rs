@@ -2,7 +2,12 @@
 //! where a terminal can deliver them. Add cursor above/below follows
 //! `InsertCursorAbove`/`InsertCursorBelow`
 //! (`src/vs/editor/contrib/multicursor/browser/multicursor.ts:46-60`, `:98-112`):
-//! Shift+Alt+Up/Down, or Ctrl+Shift+Up/Down.
+//! Shift+Alt+Up/Down, or Ctrl+Shift+Up/Down. Workbench keys: Ctrl+Shift+E
+//! shows the explorer (`src/vs/workbench/contrib/files/browser/explorerViewlet.ts:271`),
+//! F6 moves focus to the next part (`src/vs/workbench/browser/actions/navigationActions.ts:362-367`)
+//! and works in every terminal, Ctrl+PageDown/PageUp switch tabs
+//! (`src/vs/workbench/browser/parts/editor/editorActions.ts:1277`, `:1325`)
+//! and Ctrl+W closes one (`src/vs/workbench/browser/parts/editor/editorCommands.ts:841`).
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rustode_workspace::Movement;
@@ -27,6 +32,74 @@ pub(crate) enum Command {
     AddCursorBelow,
     Escape,
     Reload,
+    FocusExplorer,
+    FocusNextPart,
+    NextTab,
+    PreviousTab,
+    CloseTab,
+}
+
+/// What a key does while the explorer has focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExplorerKey {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    /// Enter opens and moves focus to the editor; Space keeps focus here.
+    Open {
+        keep_focus: bool,
+    },
+    /// Left: collapse a folder, or go to the parent.
+    Collapse,
+    /// Right: expand a folder, or go to its first child.
+    Expand,
+    /// Escape: back to the editor.
+    Leave,
+}
+
+/// Commands that work whichever part has focus.
+pub(crate) fn global(key: KeyEvent) -> Option<Command> {
+    let (ctrl, shift, alt) = split(key.modifiers);
+    match (key.code, ctrl, shift, alt) {
+        (KeyCode::F(6), false, false, false) => Some(Command::FocusNextPart),
+        (KeyCode::PageDown, true, false, false) => Some(Command::NextTab),
+        (KeyCode::PageUp, true, false, false) => Some(Command::PreviousTab),
+        (KeyCode::Char(c), true, _, false) => match (c.to_ascii_lowercase(), shift) {
+            ('e', true) => Some(Command::FocusExplorer),
+            ('w', false) => Some(Command::CloseTab),
+            ('s', false) => Some(Command::Save),
+            ('q', false) => Some(Command::Quit),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The explorer's own keys.
+pub(crate) fn explorer_key(key: KeyEvent) -> Option<ExplorerKey> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return None;
+    }
+    Some(match key.code {
+        KeyCode::Up => ExplorerKey::Up,
+        KeyCode::Down => ExplorerKey::Down,
+        KeyCode::PageUp => ExplorerKey::PageUp,
+        KeyCode::PageDown => ExplorerKey::PageDown,
+        KeyCode::Home => ExplorerKey::Home,
+        KeyCode::End => ExplorerKey::End,
+        KeyCode::Enter => ExplorerKey::Open { keep_focus: false },
+        KeyCode::Char(' ') => ExplorerKey::Open { keep_focus: true },
+        KeyCode::Left => ExplorerKey::Collapse,
+        KeyCode::Right => ExplorerKey::Expand,
+        KeyCode::Esc => ExplorerKey::Leave,
+        _ => return None,
+    })
 }
 
 /// Ctrl, Shift and Alt.
@@ -38,8 +111,11 @@ fn split(modifiers: KeyModifiers) -> (bool, bool, bool) {
     )
 }
 
-/// The command for `key`, if it has one.
+/// The command for `key` while the editor has focus, if it has one.
 pub(crate) fn command(key: KeyEvent) -> Option<Command> {
+    if let Some(command) = global(key) {
+        return Some(command);
+    }
     let (ctrl, shift, alt) = split(key.modifiers);
     let plain = !ctrl && !alt;
     match key.code {
@@ -89,10 +165,8 @@ fn char_command(c: char, modifiers: KeyModifiers) -> Option<Command> {
         (false, false) | (true, true) => Some(Command::Type(c.to_string())),
         (false, true) => None,
         (true, false) => match (c.to_ascii_lowercase(), shift) {
-            ('s', false) => Some(Command::Save),
             ('z', false) => Some(Command::Undo),
             ('z', true) | ('y', false) => Some(Command::Redo),
-            ('q', false) => Some(Command::Quit),
             ('a', false) => Some(Command::SelectAll),
             ('d', false) => Some(Command::AddNextOccurrence),
             _ => None,

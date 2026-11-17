@@ -1,4 +1,4 @@
-//! Drawing: width bands, sidebar, editor and status bar.
+//! Drawing: width bands, sidebar, tabs, editor and status bar.
 //!
 //! Only the visible lines are read from the workspace. Tabs advance to the
 //! next tab stop of `editor.tabSize`. Invisible characters are drawn as VS
@@ -8,16 +8,17 @@
 //! paragraph separators and NEL, which do not end lines, are shown the same
 //! way so they cannot hide in a terminal.
 
-use crate::app::App;
+use crate::app::{App, Focus, Viewport};
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use rustode_workspace::{Document, Eol, Position, Selection};
+use rustode_workspace::{Document, DocumentId, Eol, Position, Selection};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// Width of the sidebar at 120 columns or more.
+/// Width of the sidebar.
 const SIDEBAR_WIDTH: u16 = 25;
 
 const SELECTED: Style = Style::new().add_modifier(Modifier::REVERSED);
@@ -25,11 +26,14 @@ const SELECTED: Style = Style::new().add_modifier(Modifier::REVERSED);
 /// The screen's regions for its size; `None` below 40×10.
 struct Areas {
     sidebar: Option<Rect>,
-    editor: Rect,
+    editor: Option<Rect>,
     status: Option<Rect>,
 }
 
-fn areas(area: Rect) -> Option<Areas> {
+/// The width bands: sidebar at 120 columns or more (or while the explorer
+/// has focus), status bar from 60, editor only below 60 — where a focused
+/// explorer takes the whole width.
+fn areas(area: Rect, explorer_focused: bool) -> Option<Areas> {
     if area.width < 40 || area.height < 10 {
         return None;
     }
@@ -40,29 +44,41 @@ fn areas(area: Rect) -> Option<Areas> {
     } else {
         (area, None)
     };
-    let (sidebar, editor) = if area.width >= 120 {
+    let areas = if area.width < 60 && explorer_focused {
+        Areas {
+            sidebar: Some(body),
+            editor: None,
+            status,
+        }
+    } else if area.width >= 120 || explorer_focused {
         let [sidebar, editor] =
             Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(1)]).areas(body);
-        (Some(sidebar), editor)
+        Areas {
+            sidebar: Some(sidebar),
+            editor: Some(editor),
+            status,
+        }
     } else {
-        (None, body)
+        Areas {
+            sidebar: None,
+            editor: Some(body),
+            status,
+        }
     };
-    Some(Areas {
-        sidebar,
-        editor,
-        status,
-    })
+    Some(areas)
 }
 
 pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
-    let Some(areas) = areas(frame.area()) else {
+    let Some(areas) = areas(frame.area(), app.focus == Focus::Explorer) else {
         draw_notice(frame);
         return;
     };
     if let Some(sidebar) = areas.sidebar {
         draw_sidebar(app, frame, sidebar);
     }
-    draw_editor(app, frame, areas.editor);
+    if let Some(editor) = areas.editor {
+        draw_editor_group(app, frame, editor);
+    }
     if let Some(status) = areas.status {
         draw_status(app, frame, status);
     }
@@ -91,37 +107,90 @@ fn file_name(document: &Document) -> String {
         .unwrap_or_default()
 }
 
-fn draw_sidebar(app: &App, frame: &mut Frame, area: Rect) {
-    let Some(document) = app.workspace.document(app.document) else {
+fn to_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
+}
+
+fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
+    let block = Block::new().borders(Borders::RIGHT);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let buffer = frame.buffer_mut();
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    buffer.set_line(
+        inner.x,
+        inner.y,
+        &Line::styled(" EXPLORER", bold),
+        inner.width,
+    );
+    let Some(explorer) = app.workspace.explorer() else {
+        let line = Line::from("  No folder opened");
+        buffer.set_line(inner.x, inner.y + 1, &line, inner.width);
         return;
     };
-    let lines = vec![
-        Line::styled(" EXPLORER", Style::new().add_modifier(Modifier::BOLD)),
-        Line::from(format!("   {}", file_name(document))),
-    ];
-    let block = Block::new().borders(Borders::RIGHT);
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    let root = explorer
+        .root()
+        .file_name()
+        .map(|n| n.to_string_lossy().to_uppercase())
+        .unwrap_or_default();
+    buffer.set_line(
+        inner.x,
+        inner.y + 1,
+        &Line::styled(format!(" {root}"), bold),
+        inner.width,
+    );
+    let rows = explorer.rows();
+    let height = usize::from(inner.height.saturating_sub(2));
+    app.explorer_height = height.max(1);
+    app.explorer_row = app.explorer_row.min(rows.len().saturating_sub(1));
+    app.explorer_top = scroll(app.explorer_top, app.explorer_row, height);
+    let active = app
+        .workspace
+        .active_document()
+        .and_then(|id| app.workspace.document(id))
+        .map(|d| d.path().to_owned());
+    let focused = app.focus == Focus::Explorer;
+    for (offset, row) in rows.iter().enumerate().skip(app.explorer_top).take(height) {
+        let marker = match (row.is_dir, row.expanded) {
+            (true, true) => "▾ ",
+            (true, false) => "▸ ",
+            (false, _) => "  ",
+        };
+        let text = format!(" {}{marker}{}", "  ".repeat(row.depth), row.name);
+        let mut style = Style::new();
+        if active.as_deref() == Some(row.path.as_path()) {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if focused && offset == app.explorer_row {
+            style = style.patch(SELECTED);
+        }
+        let y = inner.y + 2 + to_u16(offset - app.explorer_top);
+        let padded = format!("{text:<width$}", width = usize::from(inner.width));
+        buffer.set_line(inner.x, y, &Line::styled(padded, style), inner.width);
+    }
 }
 
 fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
-    let Some(document) = app.workspace.document(app.document) else {
-        return;
-    };
-    let (line, column) = app
-        .workspace
-        .status_line_column(app.document)
-        .unwrap_or((1, 1));
-    let eol = match document.eol() {
-        Eol::Lf => "LF",
-        Eol::Crlf => "CRLF",
-    };
-    let right = format!(
-        "Ln {line}, Col {column}  {}  {eol}  {} ",
-        document.encoding_name(),
-        document.language_name()
-    );
-    let dirty = if document.is_dirty() { " ●" } else { "" };
-    let mut left = format!(" {}{dirty}", file_name(document));
+    let document = app.document().and_then(|id| app.workspace.document(id));
+    let right = document.map_or_else(String::new, |document| {
+        let (line, column) = app
+            .document()
+            .and_then(|id| app.workspace.status_line_column(id).ok())
+            .unwrap_or((1, 1));
+        let eol = match document.eol() {
+            Eol::Lf => "LF",
+            Eol::Crlf => "CRLF",
+        };
+        format!(
+            "Ln {line}, Col {column}  {}  {eol}  {} ",
+            document.encoding_name(),
+            document.language_name()
+        )
+    });
+    let mut left = document.map_or_else(String::new, |document| {
+        let dirty = if document.is_dirty() { " ●" } else { "" };
+        format!(" {}{dirty}", file_name(document))
+    });
     if let Some(message) = &app.message {
         left = format!("{left}  {message}");
     }
@@ -148,6 +217,73 @@ fn truncate(text: &str, width: usize) -> String {
     out
 }
 
+/// The tab bar on the first row, then the active document below it.
+fn draw_editor_group(app: &mut App, frame: &mut Frame, area: Rect) {
+    let [tabs, text] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    draw_tabs(app, frame.buffer_mut(), tabs);
+    if let Some(id) = app.document() {
+        draw_editor(app, frame, text, id);
+        return;
+    }
+    let hint = vec![
+        Line::from("No file open"),
+        Line::from("Open one from the explorer: Ctrl+Shift+E or F6"),
+    ];
+    let top = text.height.saturating_sub(2) / 2;
+    let hint_area = Rect {
+        y: text.y + top,
+        height: (text.height - top).min(2),
+        ..text
+    };
+    frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), hint_area);
+}
+
+/// One cell per tab: its name, ● when dirty; the active tab reversed. The
+/// row scrolls so the active tab stays visible.
+fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) {
+    let active = app.document();
+    let labels: Vec<(String, bool)> = app
+        .workspace
+        .tabs()
+        .iter()
+        .filter_map(|&id| app.workspace.document(id).map(|d| (id, d)))
+        .map(|(id, document)| {
+            let dirty = if document.is_dirty() { " ●" } else { "" };
+            (
+                format!(" {}{dirty} ", file_name(document)),
+                Some(id) == active,
+            )
+        })
+        .collect();
+    let width = usize::from(area.width);
+    let mut start = 0;
+    let end_of_active = labels
+        .iter()
+        .take_while(|(_, is_active)| !is_active)
+        .map(|(label, _)| label.width() + 1)
+        .sum::<usize>()
+        + labels
+            .iter()
+            .find(|(_, is_active)| *is_active)
+            .map_or(0, |(label, _)| label.width());
+    let mut skipped = 0;
+    while end_of_active.saturating_sub(skipped) > width && start < labels.len() {
+        skipped += labels[start].0.width() + 1;
+        start += 1;
+    }
+    let mut spans = Vec::new();
+    for (label, is_active) in labels.into_iter().skip(start) {
+        let style = if is_active {
+            SELECTED.add_modifier(Modifier::BOLD)
+        } else {
+            Style::new()
+        };
+        spans.push(Span::styled(label, style));
+        spans.push(Span::raw("│"));
+    }
+    buffer.set_line(area.x, area.y, &Line::from(spans), area.width);
+}
+
 /// What the editor needs to draw one row.
 struct RowContext<'a> {
     document: &'a Document,
@@ -158,9 +294,10 @@ struct RowContext<'a> {
     width: usize,
 }
 
-fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect) {
-    let tab_size = app.workspace.tab_size(app.document).unwrap_or(4);
-    let Some(document) = app.workspace.document(app.document) else {
+fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
+    let tab_size = app.workspace.tab_size(id).unwrap_or(4);
+    let view = app.views.get(&id).copied().unwrap_or_default();
+    let Some(document) = app.workspace.document(id) else {
         return;
     };
     let lines = document.line_count();
@@ -173,18 +310,20 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect) {
         document.line(cursor.line).chars().take(cursor.column),
         tab_size,
     );
-    let top = scroll(app.top, cursor.line, height);
-    let left = scroll(app.left, cursor_x, width);
+    let view = Viewport {
+        top: scroll(view.top, cursor.line, height),
+        left: scroll(view.left, cursor_x, width),
+    };
     let context = RowContext {
         document,
         selections: document.selections(),
         primary: document.primary_selection(),
         tab_size,
-        left,
+        left: view.left,
         width,
     };
     let buffer = frame.buffer_mut();
-    for (row, line) in (top..lines).take(height).enumerate() {
+    for (row, line) in (view.top..lines).take(height).enumerate() {
         let number_style = if line == cursor.line {
             Style::new().add_modifier(Modifier::BOLD)
         } else {
@@ -193,15 +332,13 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect) {
         let number = Span::styled(format!("{:>w$} ", line + 1, w = gutter - 1), number_style);
         let mut spans = vec![number];
         spans.extend(row_spans(&context, line));
-        let y = area.y + u16::try_from(row).unwrap_or(u16::MAX);
-        buffer.set_line(area.x, y, &Line::from(spans), area.width);
+        buffer.set_line(area.x, area.y + to_u16(row), &Line::from(spans), area.width);
     }
-    app.top = top;
-    app.left = left;
+    app.views.insert(id, view);
     app.page = height.saturating_sub(2).max(1);
-    if width > 0 {
-        let x = area.x + u16::try_from(gutter + cursor_x - left).unwrap_or(area.width);
-        let y = area.y + u16::try_from(cursor.line - top).unwrap_or(area.height);
+    if width > 0 && app.focus == Focus::Editor {
+        let x = area.x + to_u16(gutter + cursor_x - view.left);
+        let y = area.y + to_u16(cursor.line - view.top);
         frame.set_cursor_position((x, y));
     }
 }
@@ -387,5 +524,22 @@ mod tests {
         assert_eq!(scroll(0, 15, 10), 6);
         assert_eq!(scroll(8, 3, 10), 3);
         assert_eq!(scroll(4, 7, 0), 7);
+    }
+
+    #[test]
+    fn a_focused_explorer_shows_at_any_width() {
+        let narrow = areas(Rect::new(0, 0, 50, 12), true).expect("areas");
+        assert!(
+            narrow.editor.is_none(),
+            "below 60 the explorer takes the width"
+        );
+        let medium = areas(Rect::new(0, 0, 100, 12), true).expect("areas");
+        assert!(medium.sidebar.is_some() && medium.editor.is_some());
+        assert!(
+            areas(Rect::new(0, 0, 100, 12), false)
+                .expect("areas")
+                .sidebar
+                .is_none()
+        );
     }
 }

@@ -13,7 +13,7 @@ fn tui(args: &[&str]) -> std::process::Output {
 fn no_file_prints_usage_and_exits_2() {
     let out = tui(&[]);
     assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("Usage: rustode-tui FILE"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Usage: rustode-tui PATH..."));
 }
 
 #[test]

@@ -1,8 +1,8 @@
+ main.rs │
    1 fn main() {
    2     println!("héllo 日本");
    3 }
    4
-
 
 
 

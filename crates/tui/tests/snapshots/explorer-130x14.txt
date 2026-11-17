@@ -1,0 +1,14 @@
+ EXPLORER               │ main.rs │
+ DEMO                   │   1 fn main() {}
+ ▾ src                  │   2
+     lib.rs             │
+     main.rs            │
+   README.md            │
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
+ main.rs                                                                                             Ln 1, Col 1  UTF-8  LF  Rust

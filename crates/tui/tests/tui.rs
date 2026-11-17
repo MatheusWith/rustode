@@ -147,10 +147,10 @@ fn shift_arrows_select_and_the_selection_is_drawn_reversed() {
     let shift_right = Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
     send(&mut app, &mut terminal, &[shift_right.clone(), shift_right]);
     let buffer = terminal.backend().buffer();
-    // The gutter takes 5 columns ("  1 " plus padding); "fn" starts at x = 5.
-    assert!(buffer[(5, 0)].modifier.contains(Modifier::REVERSED));
-    assert!(buffer[(6, 0)].modifier.contains(Modifier::REVERSED));
-    assert!(!buffer[(7, 0)].modifier.contains(Modifier::REVERSED));
+    // Row 0 is the tab bar; the gutter takes 5 columns, so "fn" starts at (5, 1).
+    assert!(buffer[(5, 1)].modifier.contains(Modifier::REVERSED));
+    assert!(buffer[(6, 1)].modifier.contains(Modifier::REVERSED));
+    assert!(!buffer[(7, 1)].modifier.contains(Modifier::REVERSED));
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn a_paste_is_inserted_and_undone_as_one_step() {
     );
     let text = |app: &App| {
         app.workspace()
-            .document(app.document())
+            .document(app.document().expect("active document"))
             .expect("doc")
             .text()
     };
@@ -201,9 +201,10 @@ fn page_down_moves_by_the_editor_height_minus_two() {
     let mut terminal = terminal(100, 12);
     draw(&mut app, &mut terminal);
     send(&mut app, &mut terminal, &[key(KeyCode::PageDown)]);
-    // 11 editor rows above the status bar: VS Code pages by 11 - 2 = 9 lines.
+    // 10 text rows between the tab bar and the status bar: VS Code pages by
+    // 10 - 2 = 8 lines.
     assert!(
-        screen(&terminal).contains("Ln 10, Col 1"),
+        screen(&terminal).contains("Ln 9, Col 1"),
         "{}",
         screen(&terminal)
     );
@@ -229,4 +230,117 @@ fn key_to_frame_p99_stays_under_16_ms() {
     eprintln!("key to frame (test backend, this build): {report}");
     assert_eq!(report.count, 600);
     assert!(report.p99 < Duration::from_millis(16), "{report}");
+}
+
+fn project(name: &str) -> PathBuf {
+    let base = std::env::temp_dir().join(format!("rustode-tui-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    // A fixed folder name keeps the explorer's root header stable in snapshots.
+    let root = base.join("demo");
+    for (file, text) in [
+        ("src/main.rs", "fn main() {}\n"),
+        ("src/lib.rs", "pub mod x;\n"),
+        ("README.md", "# demo\n"),
+    ] {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+        std::fs::write(&path, text).expect("fixture");
+    }
+    std::fs::create_dir_all(root.join(".git")).expect("git dir");
+    root
+}
+
+fn shift(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::SHIFT))
+}
+
+#[test]
+fn a_folder_opens_in_the_explorer_and_files_open_in_tabs() {
+    let root = project("explorer");
+    let mut app = App::open(&root).expect("open folder");
+    let mut terminal = terminal(130, 14);
+    draw(&mut app, &mut terminal);
+    // Folder rows first: src, then README.md. Expand src and open main.rs.
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Right), key(KeyCode::Down), key(KeyCode::Down)],
+    );
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert_snapshot("explorer-130x14", &screen(&terminal));
+    let shown = screen(&terminal);
+    assert!(shown.contains("Ln 1, Col 1  UTF-8  LF  Rust"), "{shown}");
+    // Back to the explorer with F6, open README.md with Space (focus stays).
+    send(
+        &mut app,
+        &mut terminal,
+        &[
+            key(KeyCode::F(6)),
+            key(KeyCode::Down),
+            key(KeyCode::Char(' ')),
+        ],
+    );
+    assert_eq!(app.workspace().tabs().len(), 2);
+    assert!(
+        screen(&terminal).contains("Markdown"),
+        "{}",
+        screen(&terminal)
+    );
+}
+
+#[test]
+fn ctrl_page_down_cycles_tabs_and_ctrl_w_closes() {
+    let root = project("tabs");
+    let paths = [root.join("src/main.rs"), root.join("README.md")];
+    let mut app = App::open_paths(&paths).expect("open files");
+    let mut terminal = terminal(100, 12);
+    draw(&mut app, &mut terminal);
+    assert!(
+        screen(&terminal).contains("Markdown"),
+        "the last file opened is active"
+    );
+    let ctrl_page_down = Event::Key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
+    send(&mut app, &mut terminal, &[ctrl_page_down]);
+    assert!(screen(&terminal).contains("Rust"), "{}", screen(&terminal));
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Char('x')), ctrl('w')],
+    );
+    assert!(
+        screen(&terminal).contains("Ctrl+W again closes"),
+        "{}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &[ctrl('w')]);
+    assert_eq!(app.workspace().tabs().len(), 1);
+    assert!(
+        screen(&terminal).contains("Markdown"),
+        "{}",
+        screen(&terminal)
+    );
+}
+
+#[test]
+fn the_explorer_takes_the_screen_below_60_columns() {
+    let root = project("narrow");
+    let mut app = App::open(&root).expect("open folder");
+    let mut terminal = terminal(50, 12);
+    draw(&mut app, &mut terminal);
+    let shown = screen(&terminal);
+    assert!(
+        shown.contains("▸ src") && shown.contains("README.md"),
+        "{shown}"
+    );
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Down), key(KeyCode::Enter)],
+    );
+    assert!(
+        screen(&terminal).contains("# demo"),
+        "Enter opened README.md: {}",
+        screen(&terminal)
+    );
+    let _ = shift(KeyCode::Tab);
 }

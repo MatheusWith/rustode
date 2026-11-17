@@ -1,4 +1,5 @@
-//! `rustode-tui FILE`: the terminal editor.
+//! `rustode-tui PATH...`: the terminal editor. Files open in tabs; the
+//! first folder opens in the explorer.
 //!
 //! Logs go to stderr (`RUSTODE_LOG`, `RUSTODE_LOG_FORMAT`); redirect it to a
 //! file when logging, since the editor owns the terminal. On exit the
@@ -14,11 +15,12 @@ fn main() -> ExitCode {
     if let Err(err) = rustode_workspace::trace::init_from_env() {
         eprintln!("warning: {err}");
     }
-    let Some(path) = std::env::args_os().nth(1).map(PathBuf::from) else {
-        eprintln!("Usage: rustode-tui FILE");
+    let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    if paths.is_empty() {
+        eprintln!("Usage: rustode-tui PATH...");
         return ExitCode::from(2);
-    };
-    let mut app = match App::open(&path) {
+    }
+    let mut app = match App::open_paths(&paths) {
         Ok(app) => app,
         Err(err) => {
             eprintln!("error: {err}");
