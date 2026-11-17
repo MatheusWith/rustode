@@ -1,23 +1,37 @@
 # Contributing to rustode
 
-Thanks for helping. Before you start:
+Thanks for helping. rustode holds two kinds of work: the study of the App (the reverse engineering of VSCodium 1.147.0, in `09-analises/` and `docs/`) and the rustode editor (Rust, in `crates/` and `xtask/`). Before you start:
 
 1. **Read [`AGENTS.md`](AGENTS.md).** Two rules outweigh all the others:
    - the folders `01-app/` to `08-testes-do-build/` are read-only evidence (§0.1);
    - every claim cites its evidence or is marked as a hypothesis (§0.3).
-2. **Start with [`ROADMAP.md`](ROADMAP.md) and [`docs/lacunas.md`](docs/lacunas.md)** to choose what to investigate.
+
+   Editor work also follows §11.
+2. **Choose what to work on.**
+   - For the study, start with [`ROADMAP.md`](ROADMAP.md) and [`docs/lacunas.md`](docs/lacunas.md).
+   - For the editor, start with the ROADMAP's "Editor: Phase 1 milestones" and "Gap Analysis against VS Code", and with the ADR of the component you touch ([`docs/adr/`](docs/adr/)).
 3. **Record things in the right place.**
-   - Findings go in [`09-analises/`](09-analises/).
+   - Findings, including benchmark reports, go in [`09-analises/`](09-analises/).
    - Decisions go in [`docs/adr/`](docs/adr/).
    - Open questions go in the gaps.
+   - Behavior studied in VS Code and new dependencies go in [`ATTRIBUTION.md`](ATTRIBUTION.md).
 
    The templates are in [`docs/modelos/`](docs/modelos/). Write every document in English.
 
 More reading:
-- [`AGENTS.md`](AGENTS.md) §5–9: work sequence, tools, skills, where to record;
+- [`AGENTS.md`](AGENTS.md) §5–9 and §11: work sequence, tools, skills, where to record, editor rules;
 - [`docs/README.md`](docs/README.md): index;
 - [`docs/arquitetura.md`](docs/arquitetura.md);
 - [`06-port/PORT-NOTES.md`](06-port/PORT-NOTES.md).
+
+## Editor code: how the work is done
+
+- **Tests first, at the highest seam** ([ADR 0019](docs/adr/0019-tests-at-three-seams.md)). The seams are the workspace API (`crates/workspace/tests/`), input to frame per frontend (snapshots, from M2 on) and the CLI process (`crates/cli/tests/`, `xtask/tests/`). Tests assert on behavior, not internals. They are deterministic and use no network, real home directory or real profile.
+- **Frontends go through the workspace** ([ADR 0013](docs/adr/0013-crates-and-workspace-api.md), [ADR 0014](docs/adr/0014-in-process-frontends.md)). The CLI, TUI and GUI depend on no rustode crate other than `rustode-workspace`, and `xtask/tests/frontend_deps.rs` fails otherwise. They hold no business logic.
+- **Behavior studied in VS Code is reimplemented, never translated** ([ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md)). Study it in the source tree (`02-engenharia-reversa/fonte/arvore/`), then credit it in three places: a row of the `ATTRIBUTION.md` table "Behavior studied and reimplemented by the editor", the doc comment of the file that implements it, and the component's ADR.
+- **Dependencies** ([ADR 0010](docs/adr/0010-ecosystem-crates-allowed.md)). Declare them once in `[workspace.dependencies]`. Each one needs a license that `deny.toml` allows and a row in `ATTRIBUTION.md`, "Editor dependencies".
+- **Numbers** ([`AGENTS.md`](AGENTS.md) §11.6). A measured number comes with its command, folder, commit, build profile and date. An estimated one says where it came from.
+- **Benchmarks against the App** ([`AGENTS.md`](AGENTS.md) §11.5, [ADR 0024](docs/adr/0024-comparison-with-the-app.md)). Run one editor instance at a time, under the memory guard, and always on a verified temporary copy of the App, never in place.
 
 ## Editor code: commits, branches and checks
 
@@ -33,6 +47,8 @@ Required tools: `cargo-nextest`, `committed`, `cargo-deny`, `cargo-audit`, `carg
 
 Coverage gates: `cargo xtask coverage`. Without rustup (for example Arch's `rust` package), point it at the system LLVM: `LLVM_COV=/usr/bin/llvm-cov LLVM_PROFDATA=/usr/bin/llvm-profdata cargo xtask coverage`.
 
+Hooks are not copied by `git clone`. In a clone without them, run the commands of "What runs when" by hand ([`AGENTS.md`](AGENTS.md) §8).
+
 ### Commit messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): subject`.
@@ -43,10 +59,12 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope
 - **Body:** explains why; wrapped at 72 characters.
 - **Trailers:** a co-author trailer has the form `Co-Authored-By: Name <email>`.
 
+Check a message before committing: `committed --commit-file <file>` and `cargo xtask commit-msg <file>`.
+
 ### Branches
 
 - Never push to `main`; every change reaches `main` through a pull request, squash-merged, so the pull request title becomes the commit and must itself be a valid commit message.
-- Branch names start with a commit type and a slash: `feat/…`, `fix/…`, `perf/…`, `refactor/…`, `test/…`, `docs/…`, `build/…`, `ci/…`, `chore/…`, `revert/…`, followed by lower-case words joined by `-`.
+- Branch names start with a commit type and a slash: `feat/…`, `fix/…`, `perf/…`, `refactor/…`, `test/…`, `docs/…`, `build/…`, `ci/…`, `chore/…`, `revert/…`, followed by words of lower-case letters and digits joined by `-` (for example `feat/rope-buffer-2`).
 
 ### What runs when
 
@@ -59,6 +77,30 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope
 
 Do not bypass hooks with `--no-verify`: CI runs the same checks and will fail the pull request.
 
+Not applied yet: the micro-benchmark gate, where a regression above 5% against `main` fails locally and above 10% fails in CI ([ADR 0026](docs/adr/0026-micro-benchmark-gate.md)). This section will say how to run it once it lands.
+
+### Exceptions
+
+- **Coverage:** at least 85% of lines on the core crates and 60% on the frontends. An exception is justified in a comment on the pull request. The thresholds are never lowered ([ADR 0020](docs/adr/0020-coverage-gates.md)).
+- **Lints:** an `#[allow(...)]` goes on the smallest item that needs it, with its reason on the same line, as in `xtask/src/coverage.rs:73` ([ADR 0021](docs/adr/0021-strict-lints.md)).
+
+## Code review checklist
+
+Every pull request is reviewed against this list. The pull request template ([`.github/pull_request_template.md`](.github/pull_request_template.md)) repeats it word for word, so change both together.
+
+- [ ] The title is a valid Conventional Commit; it becomes the squash commit on `main`
+- [ ] Tests came first, at the highest seam: workspace API, frontend snapshot or CLI process (ADR 0019)
+- [ ] Tests assert on behavior, not internals; they are deterministic and use no network, real home directory or real profile
+- [ ] Frontends depend on no rustode crate but the workspace, and hold no business logic (ADR 0013, ADR 0014)
+- [ ] Behavior studied in VS Code is reimplemented, not translated, and credited in `ATTRIBUTION.md`, the file's doc comment and the component's ADR (ADR 0009)
+- [ ] New dependencies pass `cargo deny`, have MIT-compatible licenses and are listed in `ATTRIBUTION.md` (ADR 0010)
+- [ ] Coverage gates hold; any exception is justified in a comment on this pull request (ADR 0020)
+- [ ] Every lint exception is justified next to its `allow` (ADR 0021)
+- [ ] Every number is labeled measured (with its command, folder and commit) or estimated (with its source); no regression beyond the benchmark gate once it exists (ADR 0026)
+- [ ] Benchmarks against the App ran on a verified temporary copy, one editor instance at a time, under the memory guard (AGENTS.md §11.5)
+- [ ] Nothing written to folders 01 to 08; no personal data
+- [ ] Docs, ADRs and the roadmap's milestones and Gap Analysis are updated where the change affects them
+
 ## License
 
-The license of this project's analysis documents is still the owner's decision (see the ROADMAP, "Next steps"). The analyzed material keeps the licenses listed in [`ATTRIBUTION.md`](ATTRIBUTION.md).
+The editor code is declared MIT in `Cargo.toml` ([ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md)). The `LICENSE` file and the license of this project's analysis documents are still the owner's decision (see the ROADMAP, "Next steps"). The analyzed material keeps the licenses listed in [`ATTRIBUTION.md`](ATTRIBUTION.md).
