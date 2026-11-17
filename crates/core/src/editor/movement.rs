@@ -19,9 +19,114 @@
 //! Columns count chars; VS Code counts visible columns (a tab spans to the next
 //! tab stop) for Up/Down.
 
-use super::{Editor, Selections};
+use super::{Editor, Range, Selections};
 use crate::history::EditKind;
 use crate::selection::Selection;
+
+/// Words on one line, as VS Code finds them for word moves
+/// (`src/vs/editor/common/cursor/cursorWordOperations.ts:75-210`): runs of
+/// regular chars or of separators, split by whitespace. Separators are VS
+/// Code's `USUAL_WORD_SEPARATORS` (`src/vs/editor/common/core/wordHelper.ts:10`).
+/// VS Code also splits CJK text with `Intl.Segmenter`; that is not done.
+mod words {
+    const SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum Class {
+        Regular,
+        Separator,
+        Whitespace,
+    }
+
+    pub(super) fn class(c: char) -> Class {
+        if c == ' ' || c == '\t' {
+            Class::Whitespace
+        } else if SEPARATORS.contains(c) {
+            Class::Separator
+        } else {
+            Class::Regular
+        }
+    }
+
+    /// A word: `start..end` on the line, its kind, and the class of the char
+    /// just outside it on the side the search came from.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct Word {
+        pub start: usize,
+        pub end: usize,
+        pub kind: Class,
+        pub beside: Class,
+    }
+
+    /// The word ending at or before `column` (`_doFindPreviousWordOnLine`).
+    pub(super) fn previous(line: &[char], column: usize) -> Option<Word> {
+        let mut kind: Option<Class> = None;
+        for index in (0..column.min(line.len())).rev() {
+            let here = class(line[index]);
+            match (kind, here) {
+                (Some(k), Class::Whitespace)
+                | (Some(k @ Class::Separator), Class::Regular)
+                | (Some(k @ Class::Regular), Class::Separator) => {
+                    return Some(Word {
+                        start: index + 1,
+                        end: end_of(line, k, index + 1),
+                        kind: k,
+                        beside: here,
+                    });
+                }
+                (_, Class::Whitespace) => {}
+                (_, k) => kind = Some(k),
+            }
+        }
+        kind.map(|k| Word {
+            start: 0,
+            end: end_of(line, k, 0),
+            kind: k,
+            beside: Class::Whitespace,
+        })
+    }
+
+    /// The word starting at or after `column` (`_doFindNextWordOnLine`).
+    pub(super) fn next(line: &[char], column: usize) -> Option<Word> {
+        let mut kind: Option<Class> = None;
+        for (index, &c) in line.iter().enumerate().skip(column) {
+            let here = class(c);
+            match (kind, here) {
+                (Some(k), Class::Whitespace)
+                | (Some(k @ Class::Separator), Class::Regular)
+                | (Some(k @ Class::Regular), Class::Separator) => {
+                    return Some(Word {
+                        start: start_of(line, k, index),
+                        end: index,
+                        kind: k,
+                        beside: here,
+                    });
+                }
+                (_, Class::Whitespace) => {}
+                (_, k) => kind = Some(k),
+            }
+        }
+        kind.map(|k| Word {
+            start: start_of(line, k, line.len()),
+            end: line.len(),
+            kind: k,
+            beside: Class::Whitespace,
+        })
+    }
+
+    fn end_of(line: &[char], kind: Class, from: usize) -> usize {
+        (from..line.len())
+            .find(|&i| class(line[i]) != kind)
+            .unwrap_or(line.len())
+    }
+
+    fn start_of(line: &[char], kind: Class, before: usize) -> usize {
+        (0..before)
+            .rev()
+            .find(|&i| class(line[i]) != kind)
+            .map_or(0, |i| i + 1)
+    }
+}
 
 /// Where cursors move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +151,10 @@ pub enum Movement {
     DocumentStart,
     /// The end of the document.
     DocumentEnd,
+    /// Ctrl+Left: the start of the previous word (`cursorWordLeft`).
+    WordLeft,
+    /// Ctrl+Right: the end of the next word (`cursorWordEndRight`).
+    WordRight,
 }
 
 impl Movement {
@@ -175,6 +284,8 @@ impl Editor {
                 self.buffer.line_start(line) + self.buffer.line_len(line)
             }
             Movement::DocumentStart => 0,
+            Movement::WordLeft => self.word_left(selection.head, self.selections().len() > 1),
+            Movement::WordRight => self.word_right(selection.head),
             _ => self.buffer.len_chars(),
         };
         (head, self.position_of(head).column)
@@ -203,6 +314,123 @@ impl Editor {
         };
         let column = wanted.min(self.buffer.line_len(line));
         (self.buffer.line_start(line) + column, wanted)
+    }
+
+    /// `cursorWordLeft` (VS Code's `WordStartFast`): to the start of the
+    /// previous word, skipping a one-char separator glued to a word (`a.|b`
+    /// goes to before `a`) unless there are several cursors; from a line's
+    /// start, to the previous line's end first.
+    fn word_left(&self, offset: usize, multicursor: bool) -> usize {
+        let (mut line, mut column) = self.line_column(offset);
+        if column == 0 && line > 0 {
+            line -= 1;
+            column = self.buffer.line_len(line);
+        }
+        let text: Vec<char> = self.buffer.line_text(line).chars().collect();
+        let mut word = words::previous(&text, column);
+        if let Some(w) = word
+            && !multicursor
+            && w.kind == words::Class::Separator
+            && w.end - w.start == 1
+            && w.beside == words::Class::Regular
+        {
+            word = words::previous(&text, w.start);
+        }
+        self.buffer.line_start(line) + word.map_or(0, |w| w.start)
+    }
+
+    /// `cursorWordEndRight` (VS Code's `WordEnd`): to the end of the next
+    /// word, skipping a one-char separator glued to a word; from a line's
+    /// end, to the next line first.
+    fn word_right(&self, offset: usize) -> usize {
+        let (mut line, mut column) = self.line_column(offset);
+        if column == self.buffer.line_len(line) && line + 1 < self.buffer.len_lines() {
+            line += 1;
+            column = 0;
+        }
+        let text: Vec<char> = self.buffer.line_text(line).chars().collect();
+        let mut word = words::next(&text, column);
+        if let Some(w) = word
+            && w.kind == words::Class::Separator
+            && w.end - w.start == 1
+            && w.beside == words::Class::Regular
+        {
+            word = words::next(&text, w.end);
+        }
+        self.buffer.line_start(line) + word.map_or(text.len(), |w| w.end)
+    }
+
+    fn line_column(&self, offset: usize) -> (usize, usize) {
+        let position = self.position_of(offset);
+        (position.line, position.column)
+    }
+
+    /// Ctrl+Backspace (`deleteWordLeft`): deletes the selection, or back to
+    /// the start of the previous word; a run of two or more spaces goes
+    /// first; at a line's start, the line break. Its own undo step.
+    pub fn delete_word_left(&mut self) -> bool {
+        let edits = self.each(|buffer, selection| {
+            if !selection.is_empty() {
+                return (selection.range(), String::new());
+            }
+            let head = selection.head;
+            let line = buffer.line_of(head);
+            let column = head - buffer.line_start(line);
+            let text: Vec<char> = buffer.line_text(line).chars().collect();
+            let blanks = text[..column]
+                .iter()
+                .rev()
+                .take_while(|c| words::class(**c) == words::Class::Whitespace)
+                .count();
+            let start = if blanks >= 2 {
+                head - blanks
+            } else if let Some(word) = words::previous(&text, column) {
+                buffer.line_start(line) + word.start
+            } else if column > 0 {
+                buffer.line_start(line)
+            } else if line > 0 {
+                buffer.line_start(line - 1) + buffer.line_len(line - 1)
+            } else {
+                head
+            };
+            (Range::new(start, head), String::new())
+        });
+        self.history.close_step();
+        self.apply(EditKind::Other, edits)
+    }
+
+    /// Ctrl+Delete (`deleteWordRight`): deletes the selection, or to the end
+    /// of the next word; a run of two or more spaces goes first; at a line's
+    /// end, the line break. Its own undo step.
+    pub fn delete_word_right(&mut self) -> bool {
+        let lines = self.buffer.len_lines();
+        let edits = self.each(|buffer, selection| {
+            if !selection.is_empty() {
+                return (selection.range(), String::new());
+            }
+            let head = selection.head;
+            let line = buffer.line_of(head);
+            let column = head - buffer.line_start(line);
+            let text: Vec<char> = buffer.line_text(line).chars().collect();
+            let blanks = text[column..]
+                .iter()
+                .take_while(|c| words::class(**c) == words::Class::Whitespace)
+                .count();
+            let end = if blanks >= 2 {
+                head + blanks
+            } else if let Some(word) = words::next(&text, column) {
+                buffer.line_start(line) + word.end
+            } else if column < text.len() {
+                buffer.line_start(line) + text.len()
+            } else if line + 1 < lines {
+                buffer.line_start(line + 1)
+            } else {
+                head
+            };
+            (Range::new(head, end), String::new())
+        });
+        self.history.close_step();
+        self.apply(EditKind::Other, edits)
     }
 
     fn step_left(&self, offset: usize) -> usize {
@@ -297,6 +525,51 @@ mod tests {
         assert!(!editor.cancel_selections());
         editor.select_all();
         assert_eq!(editor.selections(), [Selection::new(0, 7)]);
+    }
+
+    #[test]
+    fn word_moves_follow_vs_code() {
+        let mut editor = Editor::new("foo.bar  baz(qux)\nnext");
+        editor.set_cursor(7).expect("cursor");
+        editor.move_cursors(Movement::WordLeft, false);
+        assert_eq!(editor.cursor(), 4, "to the start of bar");
+        editor.move_cursors(Movement::WordLeft, false);
+        assert_eq!(editor.cursor(), 0, "a lone dot glued to words is skipped");
+        editor.move_cursors(Movement::WordRight, false);
+        assert_eq!(editor.cursor(), 3, "to the end of foo");
+        editor.move_cursors(Movement::WordRight, false);
+        assert_eq!(editor.cursor(), 7, "over .bar");
+        editor.set_cursor(17).expect("cursor");
+        editor.move_cursors(Movement::WordRight, false);
+        assert_eq!(editor.cursor(), 22, "to the next line's first word end");
+        editor.move_cursors(Movement::WordLeft, false);
+        assert_eq!(editor.cursor(), 18);
+        editor.move_cursors(Movement::WordLeft, false);
+        assert_eq!(
+            editor.cursor(),
+            13,
+            "from a line start: the start of the previous line's last word"
+        );
+    }
+
+    #[test]
+    fn word_deletes_take_blank_runs_first() {
+        let mut editor = Editor::new("let  x = foo_bar;");
+        editor.set_cursor(16).expect("cursor");
+        assert!(editor.delete_word_left());
+        assert_eq!(editor.buffer().text(), "let  x = ;");
+        editor.set_cursor(5).expect("cursor");
+        assert!(editor.delete_word_left());
+        assert_eq!(
+            editor.buffer().text(),
+            "letx = ;",
+            "two blanks go before the word"
+        );
+        editor.set_cursor(3).expect("cursor");
+        assert!(editor.delete_word_right());
+        assert_eq!(editor.buffer().text(), "let = ;");
+        assert!(editor.undo());
+        assert_eq!(editor.buffer().text(), "letx = ;");
     }
 
     #[test]

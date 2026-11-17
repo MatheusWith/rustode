@@ -424,6 +424,8 @@ impl App {
             Command::Tab => self.report(Workspace::tab),
             Command::DeleteLeft => self.report(Workspace::delete_left),
             Command::DeleteRight => self.report(Workspace::delete_right),
+            Command::DeleteWordLeft => self.report(Workspace::delete_word_left),
+            Command::DeleteWordRight => self.report(Workspace::delete_word_right),
             Command::Move(movement, select) => {
                 self.report(|ws, id| ws.move_cursor(id, movement, select));
             }

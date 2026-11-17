@@ -22,6 +22,8 @@ pub(crate) enum Command {
     Tab,
     DeleteLeft,
     DeleteRight,
+    DeleteWordLeft,
+    DeleteWordRight,
     Move(Movement, bool),
     Page { up: bool, select: bool },
     Undo,
@@ -135,6 +137,8 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::Tab => "tab",
         Command::DeleteLeft => "deleteLeft",
         Command::DeleteRight => "deleteRight",
+        Command::DeleteWordLeft => "deleteWordLeft",
+        Command::DeleteWordRight => "deleteWordRight",
         Command::Move(movement, select) => move_id(*movement, *select)?,
         Command::Page { up, select } => match (up, select) {
             (true, false) => "cursorPageUp",
@@ -146,7 +150,13 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
     })
 }
 
-const MOVES: [(Movement, &str, &str); 8] = [
+const MOVES: [(Movement, &str, &str); 10] = [
+    (Movement::WordLeft, "cursorWordLeft", "cursorWordLeftSelect"),
+    (
+        Movement::WordRight,
+        "cursorWordEndRight",
+        "cursorWordEndRightSelect",
+    ),
     (Movement::Left, "cursorLeft", "cursorLeftSelect"),
     (Movement::Right, "cursorRight", "cursorRightSelect"),
     (Movement::Up, "cursorUp", "cursorUpSelect"),
@@ -193,6 +203,8 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::Tab,
         Command::DeleteLeft,
         Command::DeleteRight,
+        Command::DeleteWordLeft,
+        Command::DeleteWordRight,
         Command::Page {
             up: true,
             select: false,
@@ -268,8 +280,9 @@ pub(crate) fn command(key: KeyEvent) -> Option<Command> {
         KeyCode::Char(c) => char_command(c, key.modifiers),
         KeyCode::Up => vertical(true, key.modifiers),
         KeyCode::Down => vertical(false, key.modifiers),
-        KeyCode::Left if plain => Some(Command::Move(Movement::Left, shift)),
-        KeyCode::Right if plain => Some(Command::Move(Movement::Right, shift)),
+        KeyCode::Left | KeyCode::Right | KeyCode::Backspace | KeyCode::Delete => {
+            horizontal(key.code, key.modifiers)
+        }
         KeyCode::Home if !alt => Some(Command::Move(
             if ctrl {
                 Movement::DocumentStart
@@ -296,12 +309,31 @@ pub(crate) fn command(key: KeyEvent) -> Option<Command> {
         }),
         KeyCode::Enter if plain => Some(Command::Enter),
         KeyCode::Tab if plain && !shift => Some(Command::Tab),
-        KeyCode::Backspace if plain => Some(Command::DeleteLeft),
-        KeyCode::Delete if plain => Some(Command::DeleteRight),
         KeyCode::Esc => Some(Command::Escape),
         KeyCode::F(5) => Some(Command::Reload),
         _ => None,
     }
+}
+
+/// Left/Right move by char, or by word with Ctrl; Backspace/Delete delete
+/// a char, or a word with Ctrl (`cursorWordLeft`, `cursorWordEndRight`,
+/// `deleteWordLeft`, `deleteWordRight`).
+fn horizontal(code: KeyCode, modifiers: KeyModifiers) -> Option<Command> {
+    let (ctrl, shift, alt) = split(modifiers);
+    if alt {
+        return None;
+    }
+    Some(match (code, ctrl) {
+        (KeyCode::Left, false) => Command::Move(Movement::Left, shift),
+        (KeyCode::Right, false) => Command::Move(Movement::Right, shift),
+        (KeyCode::Left, true) => Command::Move(Movement::WordLeft, shift),
+        (KeyCode::Right, true) => Command::Move(Movement::WordRight, shift),
+        (KeyCode::Backspace, false) => Command::DeleteLeft,
+        (KeyCode::Delete, false) => Command::DeleteRight,
+        (KeyCode::Backspace, true) => Command::DeleteWordLeft,
+        (KeyCode::Delete, true) => Command::DeleteWordRight,
+        _ => return None,
+    })
 }
 
 fn char_command(c: char, modifiers: KeyModifiers) -> Option<Command> {
@@ -368,8 +400,8 @@ mod tests {
         assert_eq!(key(KeyCode::Char('x'), KeyModifiers::ALT), None);
         assert_eq!(
             key(KeyCode::Left, ctrl),
-            None,
-            "word moves are not implemented yet"
+            Some(Command::Move(Movement::WordLeft, false))
         );
+        assert_eq!(key(KeyCode::Backspace, ctrl), Some(Command::DeleteWordLeft));
     }
 }

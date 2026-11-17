@@ -529,6 +529,22 @@ impl Workspace {
         Ok((position.line + 1, column + 1))
     }
 
+    /// Ctrl+Backspace: deletes back to the start of the previous word.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn delete_word_left(&mut self, id: DocumentId) -> Result<(), Error> {
+        self.edit(id, |editor| Ok(editor.delete_word_left()))
+    }
+
+    /// Ctrl+Delete: deletes to the end of the next word.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn delete_word_right(&mut self, id: DocumentId) -> Result<(), Error> {
+        self.edit(id, |editor| Ok(editor.delete_word_right()))
+    }
+
     /// Escape: drops secondary cursors, or else collapses the selection.
     /// Returns whether the selections changed.
     ///
