@@ -15,6 +15,10 @@ rustode-core = { path = "crates/core" }
 rustode-fs = { path = "crates/fs" }
 rustode-trace = { path = "crates/trace" }
 rustode-workspace = { path = "crates/workspace" }
+# GUI: eframe on wgpu (no glow) with AccessKit. winit is the version eframe
+# uses; the GUI wraps eframe's event handler to time input-to-present.
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
+egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 encoding_rs = "0.8"
 ignore = "0.4.34"
 notify = "8.2.2"
@@ -28,6 +32,9 @@ toml = { version = "1.2.1", default-features = false, features = ["parse", "serd
 tracing = "0.1.44"
 unicode-width = "0.2.3"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "env-filter", "fmt", "json", "std"] }
+# Client-side decorations without a title font (sctk-adwaita without
+# ab_glyph): ab_glyph pulls the unmaintained ttf-parser (RUSTSEC-2026-0192).
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-csd-adwaita-notitle", "wayland-dlopen", "x11"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
