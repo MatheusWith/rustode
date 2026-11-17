@@ -34,8 +34,25 @@ pub fn native_options() -> eframe::NativeOptions {
 pub fn run(mut app: EditorApp) -> eframe::Result<Option<LatencyReport>> {
     let latency = Rc::new(RefCell::new(PresentLatency::new()));
     app.time_frames(Rc::clone(&latency));
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     let title = app.window_title();
+    run_timed(app, &title, &latency)?;
+    let report = latency.borrow().report();
+    Ok(report)
+}
+
+/// Runs `app` in a window titled `title` until it is closed, on an event
+/// loop that gives `latency` each key press and the return from each
+/// painted frame. The app reports its own frames to `latency` (see
+/// [`EditorApp::time_frames`]).
+///
+/// # Errors
+/// When the event loop or the window cannot be created.
+pub fn run_timed(
+    app: impl eframe::App + 'static,
+    title: &str,
+    latency: &Rc<RefCell<PresentLatency>>,
+) -> eframe::Result {
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     let mut options = native_options();
     options.viewport = options.viewport.with_title(title);
     let eframe = eframe::create_native(
@@ -46,11 +63,10 @@ pub fn run(mut app: EditorApp) -> eframe::Result<Option<LatencyReport>> {
     );
     let mut timed = Timed {
         eframe,
-        latency: Rc::clone(&latency),
+        latency: Rc::clone(latency),
     };
     event_loop.run_app(&mut timed)?;
-    let report = latency.borrow().report();
-    Ok(report)
+    Ok(())
 }
 
 /// eframe's handler, with key presses and presented frames timed.

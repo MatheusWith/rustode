@@ -73,7 +73,9 @@ impl EditorApp {
         format!("{mark}{} - rustode", self.name)
     }
 
-    pub(crate) fn time_frames(&mut self, latency: Rc<RefCell<PresentLatency>>) {
+    /// Reports each frame to `latency`, telling whether its input changed
+    /// the editor; [`crate::run`] does this for its window.
+    pub fn time_frames(&mut self, latency: Rc<RefCell<PresentLatency>>) {
         self.latency = Some(latency);
     }
 

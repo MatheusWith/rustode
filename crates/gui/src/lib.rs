@@ -23,5 +23,5 @@ mod text;
 
 pub use app::EditorApp;
 pub use editor::{FONT_SIZE, LINE_HEIGHT};
-pub use run::{native_options, run};
+pub use run::{native_options, run, run_timed};
 pub use status::STATUS_BAR_HEIGHT;
