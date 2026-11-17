@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod document;
 mod explorer;
+pub mod extensions;
 mod external;
 mod find;
 mod fuzzy;
@@ -19,6 +20,10 @@ pub use config::{
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
 pub use document::{Document, DocumentId};
 pub use explorer::{Explorer, ExplorerRow};
+pub use extensions::{
+    ExtensionError, ExtensionEvent, ExtensionOperation, ExtensionSearch, ExtensionSummary,
+    InstalledExtension, NOT_LOADED, OPEN_VSX, default_extensions_dir,
+};
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
@@ -102,6 +107,9 @@ pub enum Event {
         /// The document.
         id: DocumentId,
     },
+    /// Extension search, install, uninstall or listing results arrived
+    /// ([`Workspace::poll_extensions`]).
+    Extension(ExtensionEvent),
 }
 
 impl fmt::Display for Error {
@@ -139,6 +147,8 @@ pub struct Workspace {
     explorer: Option<Explorer>,
     /// The opened folder's files for quick open, listed on first use.
     files: Option<Vec<PathBuf>>,
+    /// Extension management: folder, registry, background work, results.
+    extensions: extensions::Extensions,
 }
 
 impl Workspace {

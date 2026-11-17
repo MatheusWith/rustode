@@ -1,5 +1,6 @@
-//! The window: the explorer in the sidebar on the left, the tab strip and
-//! the editor on the right, the status bar along the bottom, and the title.
+//! The window: the sidebar on the left (the explorer, or the Extensions
+//! view after Ctrl+Shift+X, see `extensions.rs`), the tab strip and the
+//! editor on the right, the status bar along the bottom, and the title.
 //! Everything is drawn from the workspace's state; the window keeps only
 //! what is on screen (scroll positions, the selected explorer row, focus).
 //!
@@ -23,11 +24,13 @@ use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::status::STATUS_BAR_HEIGHT;
 use crate::tabs::{self, TAB_HEIGHT};
-use crate::{editor, explorer, status};
+use crate::{editor, explorer, extensions, status};
 use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, UiBuilder, Vec2, ViewportCommand,
 };
-use rustode_workspace::{Document, DocumentId, Error, Event, Workspace};
+use rustode_workspace::{
+    Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Workspace,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -62,6 +65,10 @@ pub struct EditorApp {
     title: Option<String>,
     /// Set when the window runs under [`crate::run`], to time frames.
     latency: Option<Rc<RefCell<PresentLatency>>>,
+    /// The Extensions view, shown in the sidebar instead of the explorer.
+    extensions: extensions::Panel,
+    /// Whether the workspace wakes this window when extension results arrive.
+    waker_set: bool,
 }
 
 /// Where each part goes this frame.
@@ -104,6 +111,13 @@ fn file_name(document: &Document) -> String {
         .unwrap_or_default()
 }
 
+/// Whether the explorer or the Extensions view's search box has focus.
+fn sidebar_has_focus(ctx: &Context) -> bool {
+    ctx.memory(|memory| {
+        memory.has_focus(explorer::id()) || memory.has_focus(extensions::search_id())
+    })
+}
+
 /// Gives keyboard focus to `id`, and draws once more so the widget can lock
 /// its keys before the next one arrives.
 fn focus(ctx: &Context, id: egui::Id) {
@@ -126,7 +140,15 @@ impl EditorApp {
     /// # Errors
     /// When a path cannot be read.
     pub fn open_paths(paths: &[PathBuf]) -> Result<Self, Error> {
-        let mut workspace = Workspace::new();
+        Self::open_paths_in(Workspace::new(), paths)
+    }
+
+    /// [`Self::open_paths`] in a workspace set up by the caller, for
+    /// example with its extensions folder.
+    ///
+    /// # Errors
+    /// When a path cannot be read.
+    pub fn open_paths_in(mut workspace: Workspace, paths: &[PathBuf]) -> Result<Self, Error> {
         for path in paths {
             if path.is_dir() {
                 if workspace.explorer().is_none() {
@@ -155,6 +177,8 @@ impl EditorApp {
             confirm_close: None,
             title: None,
             latency: None,
+            extensions: extensions::Panel::default(),
+            waker_set: false,
         }
     }
 
@@ -208,8 +232,23 @@ impl EditorApp {
                     Some(format!("The file was moved to {}.", to.display()))
                 }
                 Event::Restored { .. } | Event::Reloaded { .. } => None,
+                Event::Extension(event) => match extension_notice(&event) {
+                    Some(notice) => Some(notice),
+                    None => continue,
+                },
                 _ => continue,
             };
+        }
+    }
+
+    /// Asks the workspace to repaint the window when extension results
+    /// arrive from its background threads.
+    fn wake_on_results(&mut self, ctx: &Context) {
+        if !self.waker_set {
+            let ctx = ctx.clone();
+            self.workspace
+                .set_extensions_waker(move || ctx.request_repaint());
+            self.waker_set = true;
         }
     }
 
@@ -272,6 +311,7 @@ impl EditorApp {
             Workbench::ToggleSidebar => self.toggle_sidebar(ctx),
             Workbench::FocusExplorer => self.focus_explorer(ctx),
             Workbench::FocusNextPart => self.focus_next_part(ctx),
+            Workbench::ShowExtensions => self.show_extensions(ctx),
         }
     }
 
@@ -322,15 +362,23 @@ impl EditorApp {
 
     fn toggle_sidebar(&mut self, ctx: &Context) {
         self.sidebar = !self.sidebar;
-        if !self.sidebar && ctx.memory(|memory| memory.has_focus(explorer::id())) {
+        if !self.sidebar && sidebar_has_focus(ctx) {
             self.focus_editor(ctx);
         }
+    }
+
+    /// Ctrl+Shift+X: shows the sidebar with the Extensions view and focuses
+    /// its search box, or, from the search box, goes back to the editor.
+    fn show_extensions(&mut self, ctx: &Context) {
+        self.sidebar = true;
+        self.notice = self.extensions.toggle(ctx, &mut self.workspace);
     }
 
     /// Ctrl+Shift+E: shows the sidebar and focuses the explorer on the
     /// active file's row.
     fn focus_explorer(&mut self, ctx: &Context) {
         self.sidebar = true;
+        self.extensions.shown = false;
         if self.workspace.explorer().is_none() {
             self.message = Some("No folder opened".to_owned());
             return;
@@ -348,8 +396,10 @@ impl EditorApp {
 
     /// F6: from the editor to the explorer and back, as in the TUI.
     fn focus_next_part(&mut self, ctx: &Context) {
-        if ctx.memory(|memory| memory.has_focus(explorer::id())) {
+        if sidebar_has_focus(ctx) {
             self.focus_editor(ctx);
+        } else if self.sidebar && self.extensions.shown {
+            focus(ctx, extensions::search_id());
         } else if self.sidebar {
             self.focus_explorer(ctx);
         }
@@ -368,6 +418,21 @@ impl EditorApp {
     }
 
     fn show_sidebar(&mut self, ui: &mut egui::Ui, rect: Rect) -> bool {
+        if self.extensions.shown {
+            let refused = ui
+                .scope_builder(
+                    UiBuilder::new().max_rect(rect).id_salt("rustode-sidebar"),
+                    |ui| {
+                        ui.set_clip_rect(rect);
+                        extensions::show(ui, &mut self.workspace, &mut self.extensions)
+                    },
+                )
+                .inner;
+            if refused.is_some() {
+                self.notice = refused;
+            }
+            return false;
+        }
         let outcome = ui
             .scope_builder(
                 UiBuilder::new().max_rect(rect).id_salt("rustode-sidebar"),
@@ -451,7 +516,9 @@ fn empty_group(ui: &mut egui::Ui, rect: Rect) {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.wake_on_results(&ctx);
         self.workspace.poll_external_changes();
+        self.workspace.poll_extensions();
         self.note();
         let mut changed = self.workbench_keys(&ctx);
         self.default_focus(&ctx);
@@ -483,4 +550,17 @@ impl eframe::App for EditorApp {
             latency.borrow_mut().frame(changed);
         }
     }
+}
+
+/// The status bar's notice for an extension event, if it has one.
+fn extension_notice(event: &ExtensionEvent) -> Option<String> {
+    Some(match event {
+        ExtensionEvent::Installed { id, version } => {
+            format!("Installed {id} {version} ({}).", NOT_LOADED.to_lowercase())
+        }
+        ExtensionEvent::Uninstalled { id } => format!("Uninstalled {id}."),
+        ExtensionEvent::Failed { id, message } => format!("{id}: {message}"),
+        ExtensionEvent::ListFailed { message } => message.clone(),
+        _ => return None,
+    })
 }

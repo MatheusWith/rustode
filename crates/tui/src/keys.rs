@@ -8,6 +8,8 @@
 //! and works in every terminal, Ctrl+PageDown/PageUp switch tabs
 //! (`src/vs/workbench/browser/parts/editor/editorActions.ts:1277`, `:1325`)
 //! and Ctrl+W closes one (`src/vs/workbench/browser/parts/editor/editorCommands.ts:841`).
+//! Ctrl+Shift+X shows the Extensions view
+//! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:121`).
 //! Ctrl+P opens quick open, Ctrl+Shift+P or F1 the command palette and
 //! Ctrl+G go to line (see `rustode_workspace`'s command registry).
 
@@ -38,6 +40,7 @@ pub(crate) enum Command {
     Reload,
     FocusExplorer,
     FocusNextPart,
+    ShowExtensions,
     NextTab,
     PreviousTab,
     CloseTab,
@@ -83,6 +86,7 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
         (KeyCode::PageUp, true, false, false) => Some(Command::PreviousTab),
         (KeyCode::Char(c), true, _, false) => match (c.to_ascii_lowercase(), shift) {
             ('e', true) => Some(Command::FocusExplorer),
+            ('x', true) => Some(Command::ShowExtensions),
             ('p', false) => Some(Command::QuickOpen),
             ('p', true) => Some(Command::ShowCommands),
             ('g', false) => Some(Command::GotoLine),
@@ -132,6 +136,7 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::PreviousTab => "workbench.action.previousEditor",
         Command::FocusExplorer => "workbench.view.explorer",
         Command::FocusNextPart => "workbench.action.focusNextPart",
+        Command::ShowExtensions => "workbench.view.extensions",
         Command::QuickOpen => "workbench.action.quickOpen",
         Command::ShowCommands => "workbench.action.showCommands",
         Command::GotoLine => "workbench.action.gotoLine",
@@ -202,6 +207,7 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::PreviousTab,
         Command::FocusExplorer,
         Command::FocusNextPart,
+        Command::ShowExtensions,
         Command::QuickOpen,
         Command::ShowCommands,
         Command::GotoLine,

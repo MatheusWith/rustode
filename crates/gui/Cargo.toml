@@ -20,6 +20,8 @@ winit.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true
+# The local Open VSX stand-in, for the Extensions panel tests.
+rustode-workspace = { workspace = true, features = ["stand-in"] }
 
 [lints]
 workspace = true

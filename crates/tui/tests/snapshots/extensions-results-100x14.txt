@@ -1,0 +1,14 @@
+ EXTENSIONS                                │ notes.txt │
+ hello                                     │   1 hello
+ OPEN VSX · 2 of 42                        │   2
+ Hello World                        Install│
+   acme · 1.2.3                            │
+ Rainbow Brackets                   Install│
+   acme · 0.4.0                            │
+ INSTALLED · 0                             │
+   No extensions installed                 │
+                                           │
+                                           │
+                                           │
+                                           │
+ notes.txt                                                       Ln 1, Col 1  UTF-8  LF  Plain Text

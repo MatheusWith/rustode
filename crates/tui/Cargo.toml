@@ -18,5 +18,9 @@ rustode-workspace.workspace = true
 tracing.workspace = true
 unicode-width.workspace = true
 
+[dev-dependencies]
+# The local Open VSX stand-in, for the Extensions view tests.
+rustode-workspace = { workspace = true, features = ["stand-in"] }
+
 [lints]
 workspace = true

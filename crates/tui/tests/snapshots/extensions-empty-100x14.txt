@@ -1,0 +1,14 @@
+ EXTENSIONS                                │ notes.txt │
+ Search Extensions in Open VSX             │   1 hello
+ INSTALLED · 0                             │   2
+   No extensions installed                 │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+ notes.txt                                                       Ln 1, Col 1  UTF-8  LF  Plain Text
