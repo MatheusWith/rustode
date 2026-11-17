@@ -5,7 +5,9 @@
 //! file when logging, since the editor owns the terminal. On exit the
 //! key-to-frame latency is logged at `info`.
 
-use ratatui::crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use ratatui::crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use ratatui::crossterm::execute;
 use rustode_tui::App;
 use std::path::PathBuf;
@@ -28,9 +30,13 @@ fn main() -> ExitCode {
         }
     };
     let mut terminal = ratatui::init();
-    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableMouseCapture);
     let result = app.run(&mut terminal);
-    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+    let _ = execute!(
+        std::io::stdout(),
+        DisableBracketedPaste,
+        DisableMouseCapture
+    );
     ratatui::restore();
     if let Some(report) = app.latency() {
         tracing::info!(%report, "key-to-frame latency");

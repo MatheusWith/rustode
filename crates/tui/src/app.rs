@@ -4,12 +4,15 @@ use crate::keys::{self, Command, ExplorerKey};
 use crate::theme::{ColorMode, Theme};
 use ratatui::backend::Backend;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
 use rustode_workspace::trace::{LatencyRecorder, LatencyReport};
 use rustode_workspace::{
     CommandMatch, CommandScope, Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow,
-    FileMatch, Movement, QuickQuery, Resolution, Workspace, parse_quick_query,
+    FileMatch, Movement, Position, QuickQuery, Resolution, Selection, Workspace, parse_quick_query,
 };
 use std::collections::HashMap;
 use std::io;
@@ -33,7 +36,32 @@ pub(crate) struct Viewport {
     pub top: usize,
     /// First visible display column.
     pub left: usize,
+    /// Where the cursor was when the view last followed it; the view only
+    /// follows the cursor again once it moves, so wheel scrolling sticks.
+    pub revealed: Option<Position>,
 }
+
+/// The editor's text area on the last frame, for mouse clicks.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EditorHit {
+    pub area: Rect,
+    pub gutter: u16,
+    pub id: DocumentId,
+    pub tab_size: usize,
+}
+
+/// What was drawn where on the last frame.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Hits {
+    pub editor: Option<EditorHit>,
+    /// Each tab's row, first and one-past-last column.
+    pub tabs: Vec<(u16, u16, u16, DocumentId)>,
+    /// The explorer's rows.
+    pub explorer: Option<Rect>,
+}
+
+/// Lines one wheel notch scrolls.
+const WHEEL_LINES: usize = 3;
 
 /// The quick input box (Ctrl+P, F1, Ctrl+G): its text and selected item.
 #[derive(Debug, Clone, Default)]
@@ -68,6 +96,12 @@ pub struct App {
     /// The explorer's selected row and first visible row.
     pub(crate) explorer_row: usize,
     pub(crate) explorer_top: usize,
+    /// The selected row when the explorer last scrolled to it.
+    pub(crate) explorer_revealed: Option<usize>,
+    /// What was drawn where on the last frame.
+    pub(crate) hits: Hits,
+    /// Where a mouse drag started, as a char offset.
+    drag_anchor: Option<usize>,
     /// Explorer rows that fit on screen, from the last frame.
     pub(crate) explorer_height: usize,
     /// One line for the status bar: a save result, an error or a prompt.
@@ -118,6 +152,9 @@ impl App {
             page: 1,
             explorer_row: 0,
             explorer_top: 0,
+            explorer_revealed: None,
+            hits: Hits::default(),
+            drag_anchor: None,
             explorer_height: 1,
             message: None,
             quick: None,
@@ -231,6 +268,7 @@ impl App {
                     }
                 }
             },
+            Event::Mouse(mouse) => self.mouse(*mouse),
             Event::Paste(text) if self.focus == Focus::Editor => {
                 self.confirm_quit = false;
                 self.message = None;
@@ -583,6 +621,116 @@ impl App {
         }
     }
 
+    fn mouse(&mut self, mouse: MouseEvent) {
+        let (column, row) = (mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.quick = None;
+                self.click(column, row, mouse.modifiers);
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let (Some(anchor), Some(offset)) =
+                    (self.drag_anchor, self.offset_at(column, row))
+                {
+                    self.report(|ws, id| {
+                        ws.set_selections(id, vec![Selection::new(anchor, offset)], 0)
+                    });
+                }
+            }
+            MouseEventKind::Up(_) => self.drag_anchor = None,
+            MouseEventKind::ScrollDown => self.wheel(column, row, true),
+            MouseEventKind::ScrollUp => self.wheel(column, row, false),
+            _ => {}
+        }
+    }
+
+    /// A left click: a tab activates, an explorer row opens or toggles, the
+    /// text places the cursor (Shift extends the selection, Alt adds a
+    /// cursor, as with VS Code's default `editor.multiCursorModifier`).
+    fn click(&mut self, column: u16, row: u16, modifiers: KeyModifiers) {
+        let inside = |area: Rect| area.contains(ratatui::layout::Position::new(column, row));
+        if let Some(&(_, _, _, id)) = self
+            .hits
+            .tabs
+            .iter()
+            .find(|(y, x0, x1, _)| *y == row && (*x0..*x1).contains(&column))
+        {
+            let _ = self.workspace.activate(id);
+            self.focus = Focus::Editor;
+            return;
+        }
+        if let Some(area) = self.hits.explorer.filter(|&a| inside(a)) {
+            let index = self.explorer_top + usize::from(row - area.y);
+            let rows = self.rows();
+            if let Some(entry) = rows.get(index) {
+                self.focus = Focus::Explorer;
+                self.explorer_row = index;
+                self.open_row(entry, true);
+            }
+            return;
+        }
+        let Some(offset) = self.offset_at(column, row) else {
+            return;
+        };
+        self.focus = Focus::Editor;
+        let Some(id) = self.document() else { return };
+        let Some(document) = self.workspace.document(id) else {
+            return;
+        };
+        let primary = document.primary_selection();
+        let mut selections = document.selections().to_vec();
+        let result = if modifiers.contains(KeyModifiers::ALT) {
+            selections.push(Selection::cursor(offset));
+            let last = selections.len() - 1;
+            self.workspace.set_selections(id, selections, last)
+        } else if modifiers.contains(KeyModifiers::SHIFT) {
+            self.workspace
+                .set_selections(id, vec![Selection::new(primary.anchor, offset)], 0)
+        } else {
+            self.drag_anchor = Some(offset);
+            self.workspace.set_cursor(id, offset)
+        };
+        if let Err(err) = result {
+            self.message = Some(err.to_string());
+        }
+    }
+
+    /// The char offset under a screen cell of the editor's text.
+    fn offset_at(&self, column: u16, row: u16) -> Option<usize> {
+        let hit = self.hits.editor?;
+        let area = hit.area;
+        if row < area.y || row >= area.bottom() || column < area.x || column >= area.right() {
+            return None;
+        }
+        let view = self.views.get(&hit.id).copied().unwrap_or_default();
+        let document = self.workspace.document(hit.id)?;
+        let line = view.top + usize::from(row - area.y);
+        if line >= document.line_count() {
+            return Some(document.len_chars());
+        }
+        let display = view.left + usize::from(column.saturating_sub(area.x + hit.gutter));
+        let char_column = crate::view::column_at(&document.line(line), display, hit.tab_size);
+        Some(document.offset_of(Position::new(line, char_column)))
+    }
+
+    /// The wheel scrolls the part under the pointer, without moving the cursor.
+    fn wheel(&mut self, column: u16, row: u16, down: bool) {
+        let point = ratatui::layout::Position::new(column, row);
+        if let Some(area) = self.hits.explorer.filter(|a| a.contains(point)) {
+            let rows = self.rows().len().saturating_sub(usize::from(area.height));
+            self.explorer_top = step(self.explorer_top, down, rows);
+            return;
+        }
+        if let Some(hit) = self.hits.editor.filter(|h| h.area.contains(point)) {
+            let lines = self
+                .workspace
+                .document(hit.id)
+                .map_or(1, Document::line_count);
+            let view = self.views.entry(hit.id).or_default();
+            view.top = step(view.top, down, lines.saturating_sub(1));
+        }
+    }
+
     /// Drains workspace events (they would pile up otherwise) and turns the
     /// ones the user must know about into a message. Returns whether any came.
     fn take_events(&mut self) -> bool {
@@ -605,5 +753,14 @@ impl App {
             self.message = Some(message);
         }
         !events.is_empty()
+    }
+}
+
+/// `value` moved by one wheel notch, within `0..=max`.
+fn step(value: usize, down: bool, max: usize) -> usize {
+    if down {
+        (value + WHEEL_LINES).min(max)
+    } else {
+        value.saturating_sub(WHEEL_LINES)
     }
 }

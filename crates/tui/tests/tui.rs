@@ -481,3 +481,154 @@ fn truecolor_selection_uses_the_dark_modern_selection_color() {
         ratatui::style::Color::Rgb(0x1F, 0x1F, 0x1F)
     );
 }
+
+fn mouse(
+    kind: ratatui::crossterm::event::MouseEventKind,
+    column: u16,
+    row: u16,
+    modifiers: KeyModifiers,
+) -> Event {
+    Event::Mouse(ratatui::crossterm::event::MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers,
+    })
+}
+
+fn selections(app: &App) -> Vec<rustode_workspace::Selection> {
+    app.workspace()
+        .document(app.document().expect("doc"))
+        .expect("doc")
+        .selections()
+        .to_vec()
+}
+
+#[test]
+fn clicks_place_the_cursor_and_drags_select() {
+    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+    use rustode_workspace::Selection;
+    let (mut app, _) = open_sample("mouse-click");
+    let mut terminal = terminal(100, 12);
+    draw(&mut app, &mut terminal);
+    // Row 2 is line 2 ("    println!…"); the text starts at column 5 after the gutter.
+    let none = KeyModifiers::NONE;
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(MouseEventKind::Down(MouseButton::Left), 9, 2, none)],
+    );
+    assert_eq!(
+        selections(&app),
+        [Selection::cursor(16)],
+        "line 2, column 4"
+    );
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(MouseEventKind::Drag(MouseButton::Left), 12, 2, none)],
+    );
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(MouseEventKind::Up(MouseButton::Left), 12, 2, none)],
+    );
+    assert_eq!(selections(&app), [Selection::new(16, 19)]);
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            5,
+            1,
+            KeyModifiers::ALT,
+        )],
+    );
+    assert_eq!(
+        selections(&app),
+        [Selection::cursor(0), Selection::new(16, 19)],
+        "Alt+click adds a cursor"
+    );
+    // Past the end of the text: the end of the document.
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(MouseEventKind::Down(MouseButton::Left), 30, 9, none)],
+    );
+    assert_eq!(
+        selections(&app),
+        [Selection::cursor(
+            app.workspace()
+                .document(app.document().expect("doc"))
+                .expect("doc")
+                .len_chars()
+        )]
+    );
+}
+
+#[test]
+fn the_wheel_scrolls_without_moving_the_cursor() {
+    use ratatui::crossterm::event::MouseEventKind;
+    let lines: Vec<String> = (1..=100).map(|n| format!("line {n}")).collect();
+    let path = fixture("wheel", "long.txt", &(lines.join("\n") + "\n"));
+    let mut app = App::open(&path).expect("open");
+    let mut terminal = terminal(100, 12);
+    draw(&mut app, &mut terminal);
+    let none = KeyModifiers::NONE;
+    send(
+        &mut app,
+        &mut terminal,
+        &[
+            mouse(MouseEventKind::ScrollDown, 20, 5, none),
+            mouse(MouseEventKind::ScrollDown, 20, 5, none),
+        ],
+    );
+    let shown = screen(&terminal);
+    assert!(
+        shown.contains("  7 line 7") && !shown.contains("  1 line 1"),
+        "{shown}"
+    );
+    assert!(shown.contains("Ln 1, Col 1"), "the cursor stays: {shown}");
+    send(&mut app, &mut terminal, &[key(KeyCode::Down)]);
+    assert!(
+        screen(&terminal).contains("  2 line 2"),
+        "moving the cursor (now on line 2) brings it back into view"
+    );
+}
+
+#[test]
+fn clicking_a_tab_or_an_explorer_row_opens_it() {
+    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+    let root = project("mouse-tabs");
+    let mut app = App::open_paths(&[
+        root.clone(),
+        root.join("README.md"),
+        root.join("src/main.rs"),
+    ])
+    .expect("open");
+    let mut terminal = terminal(130, 14);
+    draw(&mut app, &mut terminal);
+    let none = KeyModifiers::NONE;
+    // Tabs start after the 25-column sidebar: " README.md │ main.rs │".
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(MouseEventKind::Down(MouseButton::Left), 28, 0, none)],
+    );
+    assert!(
+        screen(&terminal).contains("Markdown"),
+        "{}",
+        screen(&terminal)
+    );
+    // Explorer rows start on screen row 2: "▸ src", then "README.md".
+    send(
+        &mut app,
+        &mut terminal,
+        &[mouse(MouseEventKind::Down(MouseButton::Left), 4, 2, none)],
+    );
+    assert!(
+        screen(&terminal).contains("▾ src"),
+        "a click toggles a folder: {}",
+        screen(&terminal)
+    );
+}

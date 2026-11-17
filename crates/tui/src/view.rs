@@ -8,7 +8,7 @@
 //! paragraph separators and NEL, which do not end lines, are shown the same
 //! way so they cannot hide in a terminal.
 
-use crate::app::{App, Focus, QUICK_ROWS, QuickItem, Viewport};
+use crate::app::{App, EditorHit, Focus, Hits, QUICK_ROWS, QuickItem, Viewport};
 use crate::theme::Theme;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -69,6 +69,7 @@ fn areas(area: Rect, explorer_focused: bool) -> Option<Areas> {
 
 pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
     let theme = app.theme;
+    app.hits = Hits::default();
     let screen = frame.area();
     frame.buffer_mut().set_style(screen, theme.editor);
     let Some(areas) = areas(screen, app.focus == Focus::Explorer) else {
@@ -258,7 +259,16 @@ fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
     let height = usize::from(inner.height.saturating_sub(2));
     app.explorer_height = height.max(1);
     app.explorer_row = app.explorer_row.min(rows.len().saturating_sub(1));
-    app.explorer_top = scroll(app.explorer_top, app.explorer_row, height);
+    if app.explorer_revealed != Some(app.explorer_row) {
+        app.explorer_top = scroll(app.explorer_top, app.explorer_row, height);
+        app.explorer_revealed = Some(app.explorer_row);
+    }
+    app.explorer_top = app.explorer_top.min(rows.len().saturating_sub(1));
+    app.hits.explorer = Some(Rect {
+        y: inner.y + 2,
+        height: to_u16(height),
+        ..inner
+    });
     let active = app
         .workspace
         .active_document()
@@ -335,7 +345,7 @@ fn truncate(text: &str, width: usize) -> String {
 /// The tab bar on the first row, then the active document below it.
 fn draw_editor_group(app: &mut App, frame: &mut Frame, area: Rect) {
     let [tabs, text] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
-    draw_tabs(app, frame.buffer_mut(), tabs);
+    app.hits.tabs = draw_tabs(app, frame.buffer_mut(), tabs);
     if let Some(id) = app.document() {
         draw_editor(app, frame, text, id);
         return;
@@ -355,8 +365,16 @@ fn draw_editor_group(app: &mut App, frame: &mut Frame, area: Rect) {
 
 /// One cell per tab: its name, ● when dirty; the active tab reversed. The
 /// row scrolls so the active tab stays visible.
-fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) {
+fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) -> Vec<(u16, u16, u16, DocumentId)> {
     let active = app.document();
+    let ids: Vec<DocumentId> = app
+        .workspace
+        .tabs()
+        .iter()
+        .copied()
+        .filter(|&id| app.workspace.document(id).is_some())
+        .collect();
+    let mut tabs = Vec::new();
     let labels: Vec<(String, bool)> = app
         .workspace
         .tabs()
@@ -389,16 +407,21 @@ fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) {
     let theme = app.theme;
     buffer.set_style(area, theme.tab_bar);
     let mut spans = Vec::new();
-    for (label, is_active) in labels.into_iter().skip(start) {
+    let mut x = area.x;
+    for ((label, is_active), id) in labels.into_iter().zip(ids).skip(start) {
         let style = if is_active {
             theme.tab_active
         } else {
             theme.tab_inactive
         };
+        let end = x.saturating_add(to_u16(label.width()));
+        tabs.push((area.y, x, end, id));
+        x = end.saturating_add(1);
         spans.push(Span::styled(label, style));
         spans.push(Span::styled("│", theme.separator));
     }
     buffer.set_line(area.x, area.y, &Line::from(spans), area.width);
+    tabs
 }
 
 /// What the editor needs to draw one row.
@@ -429,9 +452,18 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         document.line(cursor.line).chars().take(cursor.column),
         tab_size,
     );
-    let view = Viewport {
-        top: scroll(view.top, cursor.line, height),
-        left: scroll(view.left, cursor_x, width),
+    // Follow the cursor only when it moved, so wheel scrolling sticks.
+    let view = if view.revealed == Some(cursor) {
+        Viewport {
+            top: view.top.min(lines.saturating_sub(1)),
+            ..view
+        }
+    } else {
+        Viewport {
+            top: scroll(view.top, cursor.line, height),
+            left: scroll(view.left, cursor_x, width),
+            revealed: Some(cursor),
+        }
     };
     let context = RowContext {
         document,
@@ -457,7 +489,17 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
     }
     app.views.insert(id, view);
     app.page = height.saturating_sub(2).max(1);
-    if width > 0 && app.focus == Focus::Editor {
+    app.hits.editor = Some(EditorHit {
+        area,
+        gutter: to_u16(gutter),
+        id,
+        tab_size,
+    });
+    let visible = cursor.line >= view.top
+        && cursor.line < view.top + height
+        && cursor_x >= view.left
+        && cursor_x < view.left + width;
+    if visible && app.focus == Focus::Editor {
         let x = area.x + to_u16(gutter + cursor_x - view.left);
         let y = area.y + to_u16(cursor.line - view.top);
         frame.set_cursor_position((x, y));
@@ -554,6 +596,20 @@ fn glyph(c: char, column: usize, tab_size: usize) -> (String, usize) {
         | '\u{2029}' => (format!("[U+{:04X}]", u32::from(c)), 8),
         _ => (c.to_string(), c.width().unwrap_or(0)),
     }
+}
+
+/// The char column a click at display column `display` lands on: before a
+/// char when its left half is hit, after it for the right half.
+pub(crate) fn column_at(text: &str, display: usize, tab_size: usize) -> usize {
+    let mut column = 0;
+    for (index, c) in text.chars().enumerate() {
+        let width = glyph(c, column, tab_size).1;
+        if width > 0 && display < column + width.div_ceil(2) {
+            return index;
+        }
+        column += width;
+    }
+    text.chars().count()
 }
 
 /// Columns taken by `chars` from the start of a line.
