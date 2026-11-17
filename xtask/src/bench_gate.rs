@@ -2,11 +2,16 @@
 //!
 //! It checks out the base revision in a temporary git worktree, builds the
 //! criterion benchmarks of the base and of the current tree, then measures
-//! the base and the current tree one after the other on this machine, into
-//! the same target directory. Each run is saved as a named criterion
-//! baseline, and the gate compares their mean estimates
+//! the base and the current tree one after the other on this machine. Both
+//! runs write to the same criterion directory (`<target>/criterion`), each
+//! saved as a named baseline, and the gate compares their mean estimates
 //! (`<target>/criterion/**/<baseline>/estimates.json`). A benchmark whose
 //! mean is more than the threshold slower than the base's fails the gate.
+//!
+//! The base builds into its own target directory, `<target>/bench-gate/target`:
+//! cargo names the artifacts of a path package after its path relative to
+//! the workspace root, so the two trees would otherwise overwrite each
+//! other's build and recompile between the measurements.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -41,21 +46,32 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         &sha[..sha.len().min(10)],
         options.threshold
     );
-    let worktree = Worktree::add(&root, &target.join("bench-gate").join("base"), &sha)?;
-    let base_has_benches = !bench_targets(&cargo_metadata(&worktree.path)?).is_empty();
+    let gate = target.join("bench-gate");
+    let worktree = Worktree::add(&root, &gate.join("base"), &sha)?;
+    let base = Tree {
+        dir: worktree.path.clone(),
+        target: gate.join("target"),
+        criterion: criterion.clone(),
+    };
+    let current = Tree {
+        dir: root,
+        target,
+        criterion: criterion.clone(),
+    };
+    let base_has_benches = !bench_targets(&cargo_metadata(&base.dir)?).is_empty();
     // Build both trees before measuring either, so that the two measurements
     // run back to back and neither one right after a compile.
     if base_has_benches {
-        cargo_bench(&worktree.path, &target, None)?;
+        base.bench(None)?;
     } else {
         println!("bench-gate: the base has no benchmarks; every result is new");
     }
-    cargo_bench(&root, &target, None)?;
+    current.bench(None)?;
     if base_has_benches {
-        cargo_bench(&worktree.path, &target, Some(BASE))?;
+        base.bench(Some(BASE))?;
     }
     drop(worktree);
-    cargo_bench(&root, &target, Some(CANDIDATE))?;
+    current.bench(Some(CANDIDATE))?;
     let candidate = read_baseline(&criterion, CANDIDATE)?;
     if candidate.is_empty() {
         return Err(format!(
@@ -75,32 +91,43 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     Ok(comparison.problems)
 }
 
-/// Builds the benchmarks of the workspace at `dir` into `target` or, given a
-/// baseline name, runs them and saves their results under that name.
-fn cargo_bench(dir: &Path, target: &Path, baseline: Option<&str>) -> Result<(), String> {
-    let mut command = Command::new("cargo");
-    command
-        .current_dir(dir)
-        .env("CARGO_TARGET_DIR", target)
-        .args(["bench", "--locked", "--workspace", "--bench", "*"]);
-    match baseline {
-        None => command.arg("--no-run"),
-        Some(name) => command.args(["--", "--save-baseline", name, "--noplot"]),
-    };
-    let start = Instant::now();
-    let status = command
-        .status()
-        .map_err(|e| format!("cannot run cargo bench: {e}"))?;
-    if !status.success() {
-        return Err(format!("cargo bench failed in {}", dir.display()));
+/// A source tree to benchmark: where it is, where it builds, and where
+/// criterion writes its results.
+struct Tree {
+    dir: PathBuf,
+    target: PathBuf,
+    criterion: PathBuf,
+}
+
+impl Tree {
+    /// Builds the tree's benchmarks or, given a baseline name, runs them and
+    /// saves their results under that name.
+    fn bench(&self, baseline: Option<&str>) -> Result<(), String> {
+        let mut command = Command::new("cargo");
+        command
+            .current_dir(&self.dir)
+            .env("CARGO_TARGET_DIR", &self.target)
+            .env("CRITERION_HOME", &self.criterion)
+            .args(["bench", "--locked", "--workspace", "--bench", "*"]);
+        match baseline {
+            None => command.arg("--no-run"),
+            Some(name) => command.args(["--", "--save-baseline", name, "--noplot"]),
+        };
+        let start = Instant::now();
+        let status = command
+            .status()
+            .map_err(|e| format!("cannot run cargo bench: {e}"))?;
+        if !status.success() {
+            return Err(format!("cargo bench failed in {}", self.dir.display()));
+        }
+        if let Some(name) = baseline {
+            println!(
+                "bench-gate: measured {name} in {:.0} s",
+                start.elapsed().as_secs_f64()
+            );
+        }
+        Ok(())
     }
-    if let Some(name) = baseline {
-        println!(
-            "bench-gate: measured {name} in {:.0} s",
-            start.elapsed().as_secs_f64()
-        );
-    }
-    Ok(())
 }
 
 /// A detached checkout of the base revision, removed when dropped.

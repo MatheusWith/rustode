@@ -6,8 +6,10 @@
 //! rustode-core` runs them on their own. Each benchmark is short (0.5 s of
 //! warm-up, 2 s of measurement), so the suite takes well under a minute.
 //!
-//! Edits grow the undo history, so the edit benchmarks start every sample
-//! from a fresh editor, built outside the timing (`timed`).
+//! Edits change the text and grow the undo history, so the edit benchmarks
+//! run on fresh editors, built outside the timing, each one for a bounded
+//! number of steps (`timed`): the work per step stays the same however many
+//! iterations criterion asks for, and memory stays at a few megabytes.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use rustode_core::{Buffer, Editor, Range, Selection};
@@ -88,21 +90,29 @@ fn type_word(editor: &mut Editor) {
     }
 }
 
-/// Times `iters` calls of `step` on one editor made by `setup`. Making the
-/// editor, and dropping it with the history it grew, are not timed.
+/// Times `iters` calls of `step`, at most `per_editor` of them on each
+/// editor made by `setup`. Making each editor, and dropping it with the
+/// history it grew, are not timed.
 fn timed(
     iters: u64,
+    per_editor: u64,
     setup: &impl Fn() -> Editor,
     mut step: impl FnMut(&mut Editor, usize),
 ) -> Duration {
-    let mut editor = setup();
-    let start = Instant::now();
-    for (index, _) in (0..iters).enumerate() {
-        step(&mut editor, index);
+    let mut total = Duration::ZERO;
+    let mut left = iters;
+    while left > 0 {
+        let steps = left.min(per_editor);
+        let mut editor = setup();
+        let start = Instant::now();
+        for (index, _) in (0..steps).enumerate() {
+            step(&mut editor, index);
+        }
+        total += start.elapsed();
+        drop(black_box(editor));
+        left -= steps;
     }
-    let elapsed = start.elapsed();
-    drop(black_box(editor));
-    elapsed
+    total
 }
 
 fn buffer(c: &mut Criterion) {
@@ -143,7 +153,7 @@ fn edit(c: &mut Criterion) {
     let mut group = c.benchmark_group("edit");
     group.bench_function("insert_char_at_random_offset", |b| {
         b.iter_custom(|iters| {
-            timed(iters, &fresh, |editor, i| {
+            timed(iters, 16_384, &fresh, |editor, i| {
                 let at = offsets[i % offsets.len()];
                 black_box(editor.replace(Range::empty(at), "x")).expect("inside");
             })
@@ -151,7 +161,7 @@ fn edit(c: &mut Criterion) {
     });
     group.bench_function("delete_char_at_random_offset", |b| {
         b.iter_custom(|iters| {
-            timed(iters, &fresh, |editor, i| {
+            timed(iters, 16_384, &fresh, |editor, i| {
                 let at = offsets[i % offsets.len()] % (editor.buffer().len_chars() - 1);
                 black_box(editor.replace(Range::new(at, at + 1), "")).expect("inside");
             })
@@ -164,11 +174,11 @@ fn edit(c: &mut Criterion) {
         editor
     };
     group.bench_function("type_word", |b| {
-        b.iter_custom(|iters| timed(iters, &middle, |editor, _| type_word(editor)));
+        b.iter_custom(|iters| timed(iters, 2_048, &middle, |editor, _| type_word(editor)));
     });
     let cursors = || multi_cursor_editor(&text, CURSORS);
     group.bench_function("type_word_64_cursors", |b| {
-        b.iter_custom(|iters| timed(iters, &cursors, |editor, _| type_word(editor)));
+        b.iter_custom(|iters| timed(iters, 64, &cursors, |editor, _| type_word(editor)));
     });
     group.finish();
 }
