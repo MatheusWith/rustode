@@ -632,3 +632,52 @@ fn clicking_a_tab_or_an_explorer_row_opens_it() {
         screen(&terminal)
     );
 }
+
+#[test]
+fn user_keybindings_add_remove_and_respect_when() {
+    let (mut app, path) = open_sample("user-keys");
+    let dir = path.parent().expect("dir").join("User");
+    std::fs::create_dir_all(&dir).expect("user dir");
+    std::fs::write(
+        dir.join("keybindings.json"),
+        r#"[
+            // Ctrl+S no longer saves; Ctrl+Alt+S does.
+            { "key": "ctrl+s", "command": "-workbench.action.files.save" },
+            { "key": "ctrl+alt+s", "command": "workbench.action.files.save" },
+            { "key": "ctrl+k", "command": "cursorDown", "when": "editorTextFocus && editorLangId == rust" },
+            { "key": "ctrl+j", "command": "cursorDown", "when": "filesExplorerFocus" },
+        ]"#,
+    )
+    .expect("keybindings");
+    app.load_user_config(&dir);
+    let mut terminal = terminal(100, 12);
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Char('x')), ctrl('s')],
+    );
+    assert!(
+        std::fs::read_to_string(&path)
+            .expect("read")
+            .starts_with("fn main"),
+        "Ctrl+S was removed"
+    );
+    let ctrl_alt_s = Event::Key(KeyEvent::new(
+        KeyCode::Char('s'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    ));
+    send(&mut app, &mut terminal, &[ctrl_alt_s]);
+    assert!(
+        std::fs::read_to_string(&path)
+            .expect("read")
+            .starts_with("xfn main"),
+        "Ctrl+Alt+S saves"
+    );
+    send(&mut app, &mut terminal, &[ctrl('k')]);
+    assert!(screen(&terminal).contains("Ln 2,"), "{}", screen(&terminal));
+    send(&mut app, &mut terminal, &[ctrl('j')]);
+    assert!(
+        screen(&terminal).contains("Ln 2,"),
+        "the when clause is false in the editor"
+    );
+}

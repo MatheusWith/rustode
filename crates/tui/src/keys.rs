@@ -12,7 +12,7 @@
 //! Ctrl+G go to line (see `rustode_workspace`'s command registry).
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rustode_workspace::Movement;
+use rustode_workspace::{Chord, Movement};
 
 /// What a key asks the editor to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +109,143 @@ pub(crate) fn explorer_key(key: KeyEvent) -> Option<ExplorerKey> {
         KeyCode::Esc => ExplorerKey::Leave,
         _ => return None,
     })
+}
+
+/// VS Code's id for each command a key can run, so `keybindings.json` can
+/// bind or remove it (`cursorDown`, `deleteLeft`, …).
+pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
+    Some(match command {
+        Command::Save => "workbench.action.files.save",
+        Command::Quit => "workbench.action.quit",
+        Command::CloseTab => "workbench.action.closeActiveEditor",
+        Command::NextTab => "workbench.action.nextEditor",
+        Command::PreviousTab => "workbench.action.previousEditor",
+        Command::FocusExplorer => "workbench.view.explorer",
+        Command::FocusNextPart => "workbench.action.focusNextPart",
+        Command::QuickOpen => "workbench.action.quickOpen",
+        Command::ShowCommands => "workbench.action.showCommands",
+        Command::GotoLine => "workbench.action.gotoLine",
+        Command::Undo => "undo",
+        Command::Redo => "redo",
+        Command::SelectAll => "editor.action.selectAll",
+        Command::AddNextOccurrence => "editor.action.addSelectionToNextFindMatch",
+        Command::AddCursorAbove => "editor.action.insertCursorAbove",
+        Command::AddCursorBelow => "editor.action.insertCursorBelow",
+        Command::Escape => "cancelSelection",
+        Command::Tab => "tab",
+        Command::DeleteLeft => "deleteLeft",
+        Command::DeleteRight => "deleteRight",
+        Command::Move(movement, select) => move_id(*movement, *select)?,
+        Command::Page { up, select } => match (up, select) {
+            (true, false) => "cursorPageUp",
+            (true, true) => "cursorPageUpSelect",
+            (false, false) => "cursorPageDown",
+            (false, true) => "cursorPageDownSelect",
+        },
+        Command::Type(_) | Command::Enter | Command::Reload => return None,
+    })
+}
+
+const MOVES: [(Movement, &str, &str); 8] = [
+    (Movement::Left, "cursorLeft", "cursorLeftSelect"),
+    (Movement::Right, "cursorRight", "cursorRightSelect"),
+    (Movement::Up, "cursorUp", "cursorUpSelect"),
+    (Movement::Down, "cursorDown", "cursorDownSelect"),
+    (Movement::LineStart, "cursorHome", "cursorHomeSelect"),
+    (Movement::LineEnd, "cursorEnd", "cursorEndSelect"),
+    (Movement::DocumentStart, "cursorTop", "cursorTopSelect"),
+    (Movement::DocumentEnd, "cursorBottom", "cursorBottomSelect"),
+];
+
+fn move_id(movement: Movement, select: bool) -> Option<&'static str> {
+    MOVES
+        .iter()
+        .find(|(m, _, _)| *m == movement)
+        .map(|(_, plain, selecting)| if select { *selecting } else { *plain })
+}
+
+/// The command for a VS Code id, for ids a key can also run.
+pub(crate) fn from_id(id: &str) -> Option<Command> {
+    if id == "removeSecondaryCursors" {
+        return Some(Command::Escape);
+    }
+    if let Some((movement, plain, _)) = MOVES.iter().find(|(_, p, s)| *p == id || *s == id) {
+        return Some(Command::Move(*movement, *plain != id));
+    }
+    let all = [
+        Command::Save,
+        Command::Quit,
+        Command::CloseTab,
+        Command::NextTab,
+        Command::PreviousTab,
+        Command::FocusExplorer,
+        Command::FocusNextPart,
+        Command::QuickOpen,
+        Command::ShowCommands,
+        Command::GotoLine,
+        Command::Undo,
+        Command::Redo,
+        Command::SelectAll,
+        Command::AddNextOccurrence,
+        Command::AddCursorAbove,
+        Command::AddCursorBelow,
+        Command::Escape,
+        Command::Tab,
+        Command::DeleteLeft,
+        Command::DeleteRight,
+        Command::Page {
+            up: true,
+            select: false,
+        },
+        Command::Page {
+            up: true,
+            select: true,
+        },
+        Command::Page {
+            up: false,
+            select: false,
+        },
+        Command::Page {
+            up: false,
+            select: true,
+        },
+    ];
+    all.into_iter().find(|command| id_of(command) == Some(id))
+}
+
+/// Whether `key` is the chord, with key names as `keybindings.json` writes
+/// them (`ctrl+shift+p`, `pagedown`, `f5`); an uppercase letter implies Shift.
+pub(crate) fn matches_chord(key: KeyEvent, chord: &Chord) -> bool {
+    let (ctrl, mut shift, alt) = split(key.modifiers);
+    let meta = key.modifiers.contains(KeyModifiers::SUPER);
+    let name = match key.code {
+        KeyCode::Char(' ') => "space".to_owned(),
+        KeyCode::Char(c) => {
+            shift |= c.is_uppercase();
+            c.to_lowercase().collect()
+        }
+        KeyCode::Enter => "enter".to_owned(),
+        KeyCode::Tab => "tab".to_owned(),
+        KeyCode::Backspace => "backspace".to_owned(),
+        KeyCode::Delete => "delete".to_owned(),
+        KeyCode::Insert => "insert".to_owned(),
+        KeyCode::Esc => "escape".to_owned(),
+        KeyCode::Up => "up".to_owned(),
+        KeyCode::Down => "down".to_owned(),
+        KeyCode::Left => "left".to_owned(),
+        KeyCode::Right => "right".to_owned(),
+        KeyCode::Home => "home".to_owned(),
+        KeyCode::End => "end".to_owned(),
+        KeyCode::PageUp => "pageup".to_owned(),
+        KeyCode::PageDown => "pagedown".to_owned(),
+        KeyCode::F(n) => format!("f{n}"),
+        _ => return false,
+    };
+    chord.key == name
+        && chord.ctrl == ctrl
+        && chord.shift == shift
+        && chord.alt == alt
+        && chord.meta == meta
 }
 
 /// Ctrl, Shift and Alt.

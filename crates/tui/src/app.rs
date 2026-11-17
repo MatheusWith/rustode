@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame, Terminal};
 use rustode_workspace::trace::{LatencyRecorder, LatencyReport};
 use rustode_workspace::{
-    CommandMatch, CommandScope, Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow,
+    CommandMatch, ContextValue, Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow,
     FileMatch, Movement, Position, QuickQuery, Resolution, Selection, Workspace, parse_quick_query,
 };
 use std::collections::HashMap;
@@ -233,7 +233,11 @@ impl App {
                 self.step(terminal, &event)?;
             } else {
                 self.workspace.poll_external_changes();
-                if self.take_events() {
+                let config_changed = !self.workspace.reload_config().is_empty();
+                if config_changed {
+                    self.report_config_problems();
+                }
+                if self.take_events() || config_changed {
                     terminal.draw(|frame| self.draw(frame))?;
                 }
             }
@@ -253,21 +257,7 @@ impl App {
                     quick.selected = 0;
                 }
             }
-            Event::Key(key) if key.kind != KeyEventKind::Release => match self.focus {
-                Focus::Editor => {
-                    if let Some(command) = keys::command(*key) {
-                        self.run_command(command);
-                    }
-                }
-                Focus::Explorer => {
-                    if let Some(command) = keys::global(*key) {
-                        self.run_command(command);
-                    } else if let Some(explorer_key) = keys::explorer_key(*key) {
-                        self.message = None;
-                        self.explorer_key(explorer_key);
-                    }
-                }
-            },
+            Event::Key(key) if key.kind != KeyEventKind::Release => self.key(*key),
             Event::Mouse(mouse) => self.mouse(*mouse),
             Event::Paste(text) if self.focus == Focus::Editor => {
                 self.confirm_quit = false;
@@ -277,6 +267,129 @@ impl App {
             _ => {}
         }
         self.take_events();
+    }
+
+    /// A key: the user's `keybindings.json` first (later entries win, a
+    /// false `when` falls through), then the default keys unless the user
+    /// removed them (`"-command"`).
+    fn key(&mut self, key: KeyEvent) {
+        if let Some(id) = self.user_binding(key) {
+            self.message = None;
+            self.run_id(&id);
+            return;
+        }
+        match self.focus {
+            Focus::Editor => {
+                if let Some(command) = keys::command(key).filter(|c| !self.removed(c, key)) {
+                    self.run_command(command);
+                }
+            }
+            Focus::Explorer => {
+                if let Some(command) = keys::global(key) {
+                    if !self.removed(&command, key) {
+                        self.run_command(command);
+                    }
+                } else if let Some(explorer_key) = keys::explorer_key(key) {
+                    self.message = None;
+                    self.explorer_key(explorer_key);
+                }
+            }
+        }
+    }
+
+    /// The command of the last user keybinding for `key` whose `when` holds.
+    fn user_binding(&self, key: KeyEvent) -> Option<String> {
+        let context = self.context();
+        self.workspace
+            .config()
+            .keybindings()
+            .iter()
+            .rev()
+            .filter(|b| !b.is_removal())
+            .filter(
+                |b| matches!(b.key.as_deref(), Some([chord]) if keys::matches_chord(key, chord)),
+            )
+            .find(|b| b.when.as_ref().is_none_or(|w| w.evaluate(&context)))
+            .and_then(|b| b.command.clone())
+    }
+
+    /// Whether the user removed this default key for `command`.
+    fn removed(&self, command: &Command, key: KeyEvent) -> bool {
+        let Some(id) = keys::id_of(command) else {
+            return false;
+        };
+        self.workspace.config().keybindings().iter().any(|b| {
+            b.command.as_deref().and_then(|c| c.strip_prefix('-')) == Some(id)
+                && match b.key.as_deref() {
+                    None => true,
+                    Some([chord]) => keys::matches_chord(key, chord),
+                    Some(_) => false,
+                }
+        })
+    }
+
+    /// Context keys for `when` clauses, named as in VS Code.
+    fn context(&self) -> impl Fn(&str) -> ContextValue + '_ {
+        let document = self.document().and_then(|id| self.workspace.document(id));
+        let editor = self.focus == Focus::Editor && self.quick.is_none();
+        let explorer = self.focus == Focus::Explorer && self.quick.is_none();
+        move |key: &str| {
+            let flag = ContextValue::Bool;
+            match key {
+                "editorTextFocus" | "editorFocus" | "textInputFocus" => flag(editor),
+                "filesExplorerFocus" | "explorerViewletFocus" | "listFocus" | "sideBarFocus" => {
+                    flag(explorer)
+                }
+                "explorerViewletVisible" => flag(self.workspace.explorer().is_some()),
+                "inQuickOpen" => flag(self.quick.is_some()),
+                "editorHasSelection" => {
+                    flag(document.is_some_and(|d| !d.primary_selection().is_empty()))
+                }
+                "editorHasMultipleSelections" => {
+                    flag(document.is_some_and(|d| d.selections().len() > 1))
+                }
+                "editorLangId" => document.map_or(ContextValue::Undefined, |d| {
+                    ContextValue::Str(d.language_id().to_owned())
+                }),
+                "isLinux" => flag(true),
+                "isMac" | "isWindows" | "editorReadonly" => flag(false),
+                _ => ContextValue::Undefined,
+            }
+        }
+    }
+
+    /// Runs a command by VS Code id: through the TUI's own handling when a
+    /// key could run it, else through the workspace's registry.
+    fn run_id(&mut self, id: &str) {
+        if let Some(command) = keys::from_id(id) {
+            self.run_command(command);
+            return;
+        }
+        match self.workspace.execute(id) {
+            Ok(true) => {}
+            Ok(false) => {
+                self.message = Some(format!("{id} is not available in the terminal editor"));
+            }
+            Err(err) => self.message = Some(err.to_string()),
+        }
+    }
+
+    /// Reads `settings.json` and `keybindings.json` from `dir` (VS Code's
+    /// `User` folder layout); problems show in the status bar.
+    pub fn load_user_config(&mut self, dir: &Path) {
+        let _ = self
+            .workspace
+            .load_config(&dir.join("settings.json"), &dir.join("keybindings.json"));
+        self.report_config_problems();
+    }
+
+    fn report_config_problems(&mut self) {
+        let problems = self.workspace.config().diagnostics().count();
+        if problems > 0 {
+            self.message = Some(format!(
+                "{problems} problem(s) in settings.json or keybindings.json"
+            ));
+        }
     }
 
     fn run_command(&mut self, command: Command) {
@@ -587,37 +700,12 @@ impl App {
                 Ok(_) => self.focus = Focus::Editor,
                 Err(err) => self.message = Some(err.to_string()),
             },
-            Some(QuickItem::Command(found)) => {
-                self.run_palette_command(found.command.id, found.command.scope);
-            }
+            Some(QuickItem::Command(found)) => self.run_id(found.command.id),
             Some(QuickItem::Line { line, column }) => {
                 self.focus = Focus::Editor;
                 self.report(|ws, id| ws.go_to_line(id, line, column));
             }
             Some(QuickItem::Hint(_)) | None => {}
-        }
-    }
-
-    /// Runs a command picked in the palette: workbench commands through the
-    /// TUI's own handling, editor commands through the workspace.
-    fn run_palette_command(&mut self, id: &str, scope: CommandScope) {
-        let command = match id {
-            "workbench.action.files.save" => Some(Command::Save),
-            "workbench.action.quit" => Some(Command::Quit),
-            "workbench.action.closeActiveEditor" => Some(Command::CloseTab),
-            "workbench.view.explorer" => Some(Command::FocusExplorer),
-            "workbench.action.focusNextPart" => Some(Command::FocusNextPart),
-            "workbench.action.quickOpen" => Some(Command::QuickOpen),
-            "workbench.action.showCommands" => Some(Command::ShowCommands),
-            "workbench.action.gotoLine" => Some(Command::GotoLine),
-            _ => None,
-        };
-        if let Some(command) = command {
-            self.run_command(command);
-        } else if scope == CommandScope::Editor
-            && let Err(err) = self.workspace.execute(id)
-        {
-            self.message = Some(err.to_string());
         }
     }
 

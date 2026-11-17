@@ -29,6 +29,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    app.load_user_config(&user_dir());
     let mut terminal = ratatui::init();
     let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableMouseCapture);
     let result = app.run(&mut terminal);
@@ -48,4 +49,17 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Where `settings.json` and `keybindings.json` live: `RUSTODE_USER_DIR`, or
+/// `rustode/User` under the XDG config folder (VS Code's `User` layout).
+fn user_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("RUSTODE_USER_DIR") {
+        return PathBuf::from(dir);
+    }
+    let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(
+        || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
+        PathBuf::from,
+    );
+    config.join("rustode").join("User")
 }
