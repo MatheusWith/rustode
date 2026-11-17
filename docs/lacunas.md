@@ -1,8 +1,8 @@
 # Gaps and open questions
 
-> **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** minor (translated to English) · **Target:** local VSCodium 1.147.0
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (editor questions G13–G19 added) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
 
-This page lists what is still unknown or has not been measured, in priority order. The hour figures are estimates, not measurements. When a gap is resolved:
+This page lists what is still unknown or has not been measured, in priority order: first the study (G1–G12), then the editor (G13 on). The hour figures are estimates, not measurements. When a gap is resolved:
 - record the finding in `09-analises/`;
 - mark the row as resolved;
 - point the row to the finding.
@@ -21,6 +21,18 @@ This page lists what is still unknown or has not been measured, in priority orde
 | G10 | Unsuitable L05 criterion | test | no | 30 min |
 | G11 | A full typecheck of `src` has never run | build validation | no | depends on RAM |
 | G12 | 25 unresolved imports in the tests (19 in the original) | build validation | no | 1–2 h |
+
+Editor (rustode, Phase 1):
+
+| # | Gap | Type | Blocks | Estimate |
+|---|---|---|---|---|
+| G13 | The integrity check does not see files added to `01-app/` | evidence protection | no | 30 min |
+| G14 | Does a relocated copy of the App reuse its Node compile cache? | benchmark validity | startup comparisons ([ADR 0024](adr/0024-comparison-with-the-app.md)) | 1 h |
+| G15 | Which App-side event marks a presented frame? | benchmark method | typing latency and startup scenarios ([ADR 0024](adr/0024-comparison-with-the-app.md), [0025](adr/0025-typing-latency-injected-input.md)) | 2–4 h |
+| G16 | The App lost the first injected keystroke once | benchmark method | typing latency ([ADR 0025](adr/0025-typing-latency-injected-input.md)) | 1–2 h |
+| G17 | The TUI layout from 60 to 79 columns is undefined | specification | the TUI tracer (M2) | — |
+| G18 | Dark Modern or the App's default theme, and may theme colors be reused? | specification, license | TUI and GUI colors (M2, M3), token colors (M4) | — |
+| G19 | Is branch protection available for the private repository? | repository | no | 15 min |
 
 ## G1. No bundle → source-module map
 
@@ -107,9 +119,56 @@ This page lists what is still unknown or has not been measured, in priority orde
 - **Missing:** 25 relative imports don't resolve in the tests, against 19 in the original VS Code. In production there are 3, all already present in the original. They stay out of the bundle but break the affected unit tests.
 - **Approach:** list the 6 extra ones with `06-port/check-imports.py` and link each to the patch that removed its target (probably 52/53, Copilot). **1–2 h.**
 
+## G13. The integrity check does not see files added to `01-app/`
+
+- **Missing:** `sha256sum -c` (§0.6) checks only the files the manifest lists. Files added to `01-app/` go unnoticed. On 2026-11-17, running the App in place wrote 3 new Node compile-cache files under `resources/app/node-compile-cache/extension-host/`, and the check still passed ([`09-analises/0002`](../09-analises/0002-entrada-virtual-wayland.md), "Limitations").
+- **Impact:** §0.6 can pass while 01 no longer matches the analyzed app.
+- **Evidence today:** the file list matched the manifest on 2026-11-17 (3,008 files). Measured from `01-app/VSCode-linux-x64` with `diff <(find . -type f | sort) <(sed 's/^[0-9a-f]*  //' ../../02-engenharia-reversa/manifesto-sha256.txt | sort)`, which printed nothing.
+- **Approach:** two changes, both proposed by finding 0002. **Owner decision**, because they change §0.6 and a skill. **30 min.**
+  - Add the file-list comparison above to §0.6 and to the `compare-builds` skill. Editor benchmarks already run it on their copy (AGENTS.md §11.5).
+  - Set `NODE_DISABLE_COMPILE_CACHE=1` in the `launch-built-app` skill and the QA launchers.
+
+## G14. Does a relocated copy of the App reuse its Node compile cache?
+
+- **Missing:** editor benchmarks run a verified copy of the App from another folder (AGENTS.md §11.5). It is not known whether Node accepts the cache files in the copy's `resources/app/node-compile-cache/` when the path changes. Hypothesis: if the cache is keyed by file path, the copy misses it.
+- **Impact:** a copy that misses the cache starts more slowly than the App did in place in the 2026-11-16 startup runs (`…-startup-bench`), so the two would not be comparable.
+- **Approach:** run `startup_bench.cjs` against a verified copy and compare it with the 2026-11-16 run. Then list the files the run added to the copy's cache folder. **1 h.**
+
+## G15. Which App-side event marks a presented frame?
+
+- **Missing:** the App-side signal that marks two things:
+  - the first frame at startup (ADR 0024, "startup to first frame"). The QA startup benchmark measures "workbench ready" instead (README, "Tests");
+  - the frame that shows a typed key (ADR 0025). The decision names "a CDP frame trace event" but not which one.
+- **Impact:** without it, the App side of the typing-latency and first-frame scenarios has no end point.
+- **Approach:** record a CDP trace (`Tracing.start`) while keys are injected on the virtual display, and match the frame events against screenshots. **2–4 h.**
+
+## G16. The App lost the first injected keystroke once
+
+- **Missing:** the cause. In one of 3 App sessions through `org_kde_kwin_fake_input`, the first key (Shift+H) never reached the renderer ([`09-analises/0002`](../09-analises/0002-entrada-virtual-wayland.md), run 2). The finding's hypothesis is a race between the window getting focus or keymap and the first event from a newly created device. One case doesn't make a rule.
+- **Impact:** a typing-latency run that loses keys times fewer events than it sent.
+- **Approach:** repeat with a warm-up key, through both paths, and check focus, keymap and device creation. **1–2 h.**
+
+## G17. The TUI layout from 60 to 79 columns is undefined
+
+- **Missing:** [ADR 0016](adr/0016-tui-ratatui.md) defines four width bands: sidebar, editor and status bar at 120 columns or more; sidebar collapsed from 80 to 119; editor only below 60; a "terminal too small" notice below 40×10. Nothing says what 60 to 79 columns shows.
+- **Approach:** **owner decision**, before the TUI tracer (M2).
+
+## G18. Dark Modern or the App's default theme, and may theme colors be reused?
+
+- **Missing:** two answers.
+  - Phase 1 chose Dark Modern ([ADR 0016](adr/0016-tui-ratatui.md), [ADR 0017](adr/0017-gui-egui-wgpu.md)). The App's default dark theme is "Dark 2026" (`src/vs/workbench/services/themes/common/workbenchThemeService.ts:43`; desktop default of `workbench.colorTheme` at `src/vs/workbench/services/themes/common/themeConfiguration.ts:40`). Dark Modern still ships (`extensions/theme-defaults/package.json:35-38`). Should rustode keep Dark Modern or follow the App?
+  - The colors live in data files (`extensions/theme-defaults/themes/dark_modern.json`, `2026-dark.json`, MIT). [ADR 0009](adr/0009-mit-and-reimplemented-behavior.md) forbids copying VS Code code. Does taking color values from these files count as copying?
+- **Approach:** **owner decision** on both, before the TUI colors (M2).
+
+## G19. Is branch protection available for the private repository?
+
+- **Missing:** whether the owner's plan offers server-side protection of `main` for a private repository ([ADR 0022](adr/0022-commits-branches-pull-requests.md)). Nothing can be checked yet: the repository has not been pushed (measured on 2026-11-17: `git status -sb` shows `## main` with no upstream).
+- **Approach:** after the first push (**owner decision**), read the branch settings on the remote, for example with `gh api repos/<owner>/<repo>/branches/main/protection`. If protection is not available, ADR 0022 records "no push to main" as a convention, enforced by the pre-push hook and CI only. **15 min.**
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-17 | minor | Editor questions G13–G19 (integrity, benchmark method, TUI layout, theme, branch protection) |
 | 2026-11-16 | minor | Translated to English; G1 mentions REA |
 | 2026-11-16 | major | Created from the QA, the port and the build tests |
