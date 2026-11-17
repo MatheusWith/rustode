@@ -66,6 +66,33 @@ fn next_and_previous_tab_wrap_around() {
 }
 
 #[test]
+fn ctrl_tab_returns_to_the_previous_tab_and_ctrl_shift_tab_to_the_oldest() {
+    let root = dir("recent");
+    let mut ws = Workspace::new();
+    let open = |ws: &mut Workspace, name: &str| {
+        let path = root.join(name);
+        write(&path, name);
+        ws.open(&path).expect("open")
+    };
+    let a = open(&mut ws, "a");
+    ws.recently_used_tab();
+    assert_eq!(
+        ws.active_document(),
+        Some(a),
+        "one tab: nothing to switch to"
+    );
+    let b = open(&mut ws, "b");
+    let c = open(&mut ws, "c");
+    ws.recently_used_tab();
+    assert_eq!(ws.active_document(), Some(b), "the tab used before c");
+    ws.recently_used_tab();
+    assert_eq!(ws.active_document(), Some(c), "a second tap goes back");
+    ws.least_recently_used_tab();
+    assert_eq!(ws.active_document(), Some(a), "a was used longest ago");
+    assert_eq!(ws.tabs(), [a, b, c], "the tab order does not change");
+}
+
+#[test]
 fn closing_a_tab_activates_the_most_recently_used_one() {
     let root = dir("close");
     let mut ws = Workspace::new();

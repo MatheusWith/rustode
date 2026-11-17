@@ -1,48 +1,15 @@
-//! Input to frame: key, mouse and wheel events go into the window, and the
-//! AccessKit tree, the window title and image snapshots come out. These tests
-//! cover presentation only; the editing logic is tested at the workspace seam
-//! (`crates/workspace/tests/`).
-//!
-//! Snapshots live in `tests/snapshots/`. Regenerate them with
-//! `UPDATE_SNAPSHOTS=1 cargo nextest run -p rustode-gui`.
+//! The editor area: typing, selecting, scrolling and saving, as the
+//! AccessKit tree, the window title and image snapshots show them.
 
+use super::{HEIGHT, assert_status, fixture, open, open_text, press, status, type_text};
 use eframe::egui::{
     self, Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2, ViewportId,
     accesskit::Role,
 };
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_kittest::{Harness, Node};
-use rustode_gui::{EditorApp, LINE_HEIGHT, STATUS_BAR_HEIGHT};
-use std::path::{Path, PathBuf};
+use rustode_gui::{EditorApp, LINE_HEIGHT, STATUS_BAR_HEIGHT, TAB_HEIGHT};
 use std::time::Duration;
-
-const WIDTH: f32 = 480.0;
-const HEIGHT: f32 = 320.0;
-
-fn fixture(name: &str, file: &str, text: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rustode-gui-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let path = dir.join(file);
-    std::fs::write(&path, text).expect("fixture");
-    path
-}
-
-fn open(path: &Path) -> Harness<'static, EditorApp> {
-    let app = EditorApp::open(path).expect("open");
-    let mut harness = Harness::builder()
-        .with_size([WIDTH, HEIGHT])
-        .build_eframe(move |cc| {
-            rustode_gui::fonts::install(&cc.egui_ctx);
-            app
-        });
-    harness.run();
-    harness
-}
-
-fn open_text(name: &str, text: &str) -> Harness<'static, EditorApp> {
-    open(&fixture(name, "f.txt", text))
-}
 
 fn editor<'h>(harness: &'h Harness<'_, EditorApp>) -> Node<'h> {
     harness.get_by_role(Role::MultilineTextInput)
@@ -77,16 +44,6 @@ fn exposed_lines(harness: &Harness<'_, EditorApp>) -> usize {
         .count()
 }
 
-fn type_text(harness: &mut Harness<'_, EditorApp>, text: &str) {
-    harness.event(Event::Text(text.to_owned()));
-    harness.run();
-}
-
-fn press(harness: &mut Harness<'_, EditorApp>, modifiers: Modifiers, key: Key) {
-    harness.key_press_modifiers(modifiers, key);
-    harness.run();
-}
-
 fn click_at(harness: &mut Harness<'_, EditorApp>, pos: Pos2, modifiers: Modifiers) {
     harness.hover_at(pos);
     for pressed in [true, false] {
@@ -100,28 +57,11 @@ fn click_at(harness: &mut Harness<'_, EditorApp>, pos: Pos2, modifiers: Modifier
     harness.run();
 }
 
-/// The status bar items, in the order they are drawn.
-fn status(harness: &Harness<'_, EditorApp>) -> Vec<String> {
-    harness
-        .query_all_by_role(Role::Label)
-        .filter_map(|label| label.value())
-        .collect()
-}
-
-#[track_caller]
-fn assert_status(harness: &Harness<'_, EditorApp>, item: &str) {
-    let items = status(harness);
-    assert!(
-        items.iter().any(|shown| shown == item),
-        "the status bar shows {items:?}, not {item:?}"
-    );
-}
-
-/// Lines of the editor area (window minus status bar): wholly visible, or
-/// visible at least in part.
+/// Lines of the editor area (window minus tab strip and status bar):
+/// wholly visible, or visible at least in part.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a few positive rows
 fn rows(partly: bool) -> usize {
-    let rows = (HEIGHT - STATUS_BAR_HEIGHT) / LINE_HEIGHT;
+    let rows = (HEIGHT - TAB_HEIGHT - STATUS_BAR_HEIGHT) / LINE_HEIGHT;
     (if partly { rows.ceil() } else { rows.floor() }) as usize
 }
 
@@ -403,7 +343,10 @@ fn ctrl_d_selects_the_word_then_its_next_occurrence() {
 #[test]
 fn resizing_the_window_changes_how_many_lines_are_shown() {
     let mut harness = open_text("resize", &numbered_lines(100));
-    harness.set_size(Vec2::new(WIDTH, STATUS_BAR_HEIGHT + 5.0 * LINE_HEIGHT));
+    harness.set_size(Vec2::new(
+        super::WIDTH,
+        TAB_HEIGHT + STATUS_BAR_HEIGHT + 5.0 * LINE_HEIGHT,
+    ));
     harness.run();
     assert_eq!(exposed_lines(&harness), 5);
     assert_eq!(shown(&harness), "line 0\nline 1\nline 2\nline 3\nline 4");

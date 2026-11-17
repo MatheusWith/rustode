@@ -220,6 +220,19 @@ impl Workspace {
         self.group.cycle(false);
     }
 
+    /// Activates the tab used before the active one: what a quick Ctrl+Tab
+    /// does in VS Code, whose editor picker opens on the second most
+    /// recently used editor.
+    pub fn recently_used_tab(&mut self) {
+        self.group.activate_recent(false);
+    }
+
+    /// Activates the tab used longest ago: what a quick Ctrl+Shift+Tab does
+    /// in VS Code.
+    pub fn least_recently_used_tab(&mut self) {
+        self.group.activate_recent(true);
+    }
+
     /// Closes a document and its tab; the most recently used tab becomes
     /// active. Unsaved changes are only dropped when `discard` is true.
     ///
