@@ -65,6 +65,8 @@ pub(crate) struct Launch {
     pub spawn_to_first_line_ms: Option<f64>,
     /// SIGTERM until no App process is left.
     pub shutdown_ms: Option<f64>,
+    /// The App did not exit within 10 s of SIGTERM.
+    pub needed_sigkill: Option<bool>,
     /// Peak total RSS in the watchdog's samples.
     pub peak_rss_mb: Option<f64>,
 }

@@ -55,7 +55,8 @@ if os.environ.get("FAKE_WRITE_INTO"):
 def launch(label, warmup, i):
     return {"label": label, "warmup": warmup, "spawn_to_cdp_ms": 200.0 + i,
             "spawn_to_workbench_ms": 1800.0 + 10 * i, "spawn_to_first_line_ms": 2000.0 + 100 * i,
-            "shutdown_ms": 300.0, "needed_sigkill": False, "peak_rss_mb": 900 + i}
+            "shutdown_ms": 300.0, "peak_rss_mb": 900 + i,
+            "needed_sigkill": label in os.environ.get("FAKE_SIGKILL", "").split(",")}
 launches = [launch("warmup-%d" % i, True, 9) for i in range(1, config["warmup"] + 1)]
 launches += [launch("rep-%d" % i, False, i) for i in range(1, config["repetitions"] + 1)]
 status = os.environ.get("FAKE_STATUS", "ok")
@@ -704,4 +705,24 @@ fn the_app_driver_is_valid_javascript() {
         .output()
         .expect("node runs");
     assert!(out.status.success(), "{}", stderr(&out));
+}
+
+#[test]
+fn launches_killed_after_sigterm_are_flagged() {
+    let sandbox = Sandbox::new("sigkill");
+    let out = sandbox.bench_with(&[], &[("FAKE_SIGKILL", "warmup-1,rep-2")]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let notes = sandbox.report()["notes"].clone();
+    let flagged = notes
+        .as_array()
+        .expect("notes")
+        .iter()
+        .find(|n| n["text"].as_str().is_some_and(|t| t.contains("SIGKILL")))
+        .unwrap_or_else(|| panic!("no SIGKILL note in {notes:#}"));
+    assert_eq!(flagged["label"], "measured");
+    let text = flagged["text"].as_str().expect("text");
+    assert!(text.contains("2 of 4 launches"), "{text}");
+    assert!(text.contains("warmup-1, rep-2"), "{text}");
+    let report = fs::read_to_string(sandbox.run_folder().join("report.txt")).expect("report.txt");
+    assert!(report.contains("warmup-1, rep-2"), "{report}");
 }

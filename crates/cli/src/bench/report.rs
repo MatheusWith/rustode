@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
 
-use super::app_side::{Launch, Outcome};
+use super::app_side::{DriverResults, Launch, Outcome};
 use super::guard::{ABORT_BELOW_MB, ABORT_PSI, MIN_AVAILABLE_MB};
 use super::plan::{CDP_PORT, Plan};
 use super::{Status, display, guard};
@@ -304,11 +304,16 @@ impl Report<'_> {
                 "  The App ran from a verified copy outside 01-app/, deleted after the run{}.",
                 if app.reaper { "" } else { " (no reaper unit)" }
             );
+            let count = app.copy_writes.len();
             let _ = writeln!(
                 out,
-                "  The App added {} files to its copy during the run (app/copy-writes.txt; measured).",
-                app.copy_writes.len()
+                "  The App added {count} file{} to its copy during the run (measured; app/copy-writes.txt){}",
+                if count == 1 { "" } else { "s" },
+                if count == 0 { "." } else { ":" }
             );
+            for file in app.copy_writes.iter().take(5) {
+                let _ = writeln!(out, "    {file}");
+            }
         }
         if let Some(results) = &app.results {
             let _ = writeln!(
@@ -373,6 +378,9 @@ impl Report<'_> {
                     self.plan.scenario.app.poll_ms
                 ),
             ));
+            if let Some(note) = app.results.as_ref().and_then(sigkill_note) {
+                notes.push((Some("measured"), note));
+            }
             if app.leftovers_killed {
                 notes.push((
                     None,
@@ -519,10 +527,30 @@ impl Report<'_> {
                 "spawn_to_workbench_ms": l.spawn_to_workbench_ms,
                 "spawn_to_first_line_ms": l.spawn_to_first_line_ms,
                 "shutdown_ms": l.shutdown_ms,
+                "needed_sigkill": l.needed_sigkill,
                 "peak_rss_mb": l.peak_rss_mb,
             })).collect::<Vec<_>>()),
         })
     }
+}
+
+/// Which launches did not exit within 10 s of SIGTERM, if any: their
+/// shutdown times include that wait.
+fn sigkill_note(results: &DriverResults) -> Option<String> {
+    let killed: Vec<&str> = results
+        .launches
+        .iter()
+        .filter(|l| l.needed_sigkill == Some(true))
+        .map(|l| l.label.as_str())
+        .collect();
+    (!killed.is_empty()).then(|| {
+        format!(
+            "{} of {} launches did not exit within 10 s of SIGTERM and were killed with SIGKILL: {}; their shutdown times include the 10 s wait.",
+            killed.len(),
+            results.launches.len(),
+            killed.join(", ")
+        )
+    })
 }
 
 fn row_json(row: &Row) -> Option<Value> {
