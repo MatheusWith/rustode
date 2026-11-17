@@ -85,12 +85,12 @@ Every file in 01 to 08 is a real, independent copy, with no symbolic or hard lin
 
 | Item (in `02-engenharia-reversa/`) | What it is |
 |---|---|
-| `fonte/arvore/` | **the exact source code that produced the binary**: base commit + patches + post-install steps, without `node_modules` or build outputs (14,464 files) |
+| `fonte/arvore/` | **the exact source code that produced the binary**: base commit + patches + post-install steps, without `node_modules` or build outputs (14,465 files) |
 | `fonte/port-aplicado.diff` | the full difference between the original VS Code and the build tree; removed files appear only as removed |
 | `fonte/origem.txt` | VS Code commit, VSCodium commit, app version, Electron, build git tree |
 | `asar/node_modules.asar.extraido/` | runtime dependencies extracted from `node_modules.asar` (the native modules live in `01-app/…/node_modules.asar.unpacked/`); `asar/node_modules.asar.lista.txt` lists the contents |
 | `out-formatado/` | the 32 JavaScript files of `resources/app/out`, reformatted by esbuild (names stay minified) |
-| `manifesto-sha256.txt` | SHA-256 of the app's 2,995 files, for checking integrity and comparing builds |
+| `manifesto-sha256.txt` | SHA-256 of the app's 3,008 files, for checking integrity and comparing builds |
 | `binarios.txt` | the type of each binary and library (`file`) |
 | `product.json`, `package.json`, `versao.txt` | the product's identity and configuration as packaged |
 

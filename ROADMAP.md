@@ -14,12 +14,12 @@ This page is the summary. The details are in:
 
 | | Value | How |
 |---|---|---|
-| App built and intact | yes, 2,995 files | measured: `sha256sum -c` against `02-engenharia-reversa/manifesto-sha256.txt` |
+| App built and intact | yes, 3,008 files | measured: `sha256sum -c` against `02-engenharia-reversa/manifesto-sha256.txt` |
 | Patches applied | 55 (32 VSCodium unchanged, 19 adapted, 4 port-only); 6 skipped | measured: the `apply.sh` log (`06-port/logs/`) plus patch 96 |
 | Test runs on the build | 15, no unexplained failure | measured: `08-testes-do-build/RESUMO.md` |
 | Startup (workbench ready, p50) | 1905 ms (1.138: 2232 ms) | measured: `…-startup-bench`, 10 repetitions, virtual display |
 | Hosts contacted unprompted | 4 groups, none from Microsoft | measured: `…-codium1.147-rede/network-report.md` |
-| Build source tree | 14,464 files | measured: `find 02-engenharia-reversa/fonte/arvore -type f` |
+| Build source tree | 14,465 files | measured: `find 02-engenharia-reversa/fonte/arvore -type f` |
 | Recorded analyses | 1 | measured: `ls 09-analises/[0-9]*` |
 
 ## By dimension
