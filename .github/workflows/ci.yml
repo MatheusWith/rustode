@@ -69,7 +69,7 @@ jobs:
 
   bench-gate:
     # ADR 0026: the pull request's micro-benchmarks against its base commit,
-    # both measured on this runner, one after the other; a mean more than 10%
+    # both measured on this runner in alternating rounds; a mean more than 10%
     # slower fails. The benchmarks need no GUI, so no Vulkan here.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

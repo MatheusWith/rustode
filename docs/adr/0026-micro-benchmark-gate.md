@@ -28,7 +28,7 @@ No merge can make a benchmarked core operation more than 10% slower than `main` 
   - it builds both trees before measuring either, and then runs the built benchmarks directly, so that no compile, cargo lock wait or fingerprint check falls between two measurements;
   - the base builds into its own target directory, because the two trees' artifacts have the same names and would overwrite each other;
   - it measures in alternating rounds (2 by default) and keeps each benchmark's fastest mean per tree.
-- Measured on 2026-11-17, in the bench profile (release, thin LTO, one codegen unit), from the root of a clone at `0f429e8` (branch `feat/micro-benchmarks-gate`), with `cargo xtask bench-gate --base HEAD`, run twice. Both trees were then the same code. The machine (12 threads, 7.5 GiB) was shared with four other agents' builds, at a load average of 7.0 rising to 14.6:
+- Measured on 2026-11-17, in the bench profile (release, thin LTO, one codegen unit), from the root of a clone at `0f429e8` (branch `feat/micro-benchmarks-gate`), with `cargo xtask bench-gate --base HEAD` (through a copy of the `xtask` binary built at that commit), run twice. Both trees were then the same code. The machine (12 threads, 7.5 GiB) was shared with four other agents' builds, at a load average of 7.0 rising to 14.6:
   - one measurement of one tree took 26 to 34 s, and one gate run took 129 and 131 s, including an incremental build of the base (14 s);
   - the largest slowdown was +19.9% (`buffer/from_text_1mib`, second run), and the largest change overall was −32.5% (`edit/insert_char_at_random_offset`, first run);
   - each run reported two benchmarks above 5%, so on a loaded machine the gate fails without any change in the code.
