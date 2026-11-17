@@ -10,6 +10,7 @@ license = "MIT"
 repository = "https://github.com/MatheusWith/rustode"
 
 [workspace.dependencies]
+rustode-config = { path = "crates/config" }
 rustode-core = { path = "crates/core" }
 rustode-fs = { path = "crates/fs" }
 rustode-trace = { path = "crates/trace" }
