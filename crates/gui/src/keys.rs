@@ -8,10 +8,33 @@
 //!   `:2055-2056`, Delete `:2080`;
 //! - Ctrl+Z `src/vs/editor/browser/editorExtensions.ts:651`, Ctrl+Y and
 //!   Ctrl+Shift+Z `:678-680`, Ctrl+A `:708`;
-//! - Ctrl+S `src/vs/workbench/contrib/files/browser/fileCommands.ts:504`;
 //! - Ctrl+D, and Shift+Alt+Up/Down or Ctrl+Shift+Up/Down to add cursors:
 //!   `src/vs/editor/contrib/multicursor/browser/multicursor.ts:55-58`,
 //!   `:107-110`, `:734`.
+//!
+//! Workbench keys work whichever part has focus:
+//!
+//! - Ctrl+S saves (`src/vs/workbench/contrib/files/browser/fileCommands.ts:504`);
+//! - Ctrl+PageDown and Ctrl+PageUp switch to the next and previous tab
+//!   (`src/vs/workbench/browser/parts/editor/editorActions.ts:1277`, `:1325`);
+//! - Ctrl+Tab and Ctrl+Shift+Tab switch to the previously and the least
+//!   recently used tab (`:1868-1905`);
+//! - Ctrl+W closes the active tab
+//!   (`src/vs/workbench/browser/parts/editor/editorCommands.ts:841`);
+//! - Ctrl+B shows or hides the sidebar
+//!   (`src/vs/workbench/browser/actions/layoutActions.ts:308-311`);
+//! - Ctrl+Shift+E focuses the explorer
+//!   (`src/vs/workbench/contrib/files/browser/explorerViewlet.ts:271`);
+//! - F6 moves focus to the next part
+//!   (`src/vs/workbench/browser/actions/navigationActions.ts:362-367`).
+//!
+//! In the explorer, as in VS Code's lists
+//! (`src/vs/workbench/browser/actions/listCommands.ts:336-365`, `:461-464`,
+//! `:559-562`, `:754-757`): Up, Down, Page Up, Page Down, Home and End move
+//! the selection, Left collapses a folder or goes to its parent, Right
+//! expands one or goes to its first child, Enter opens and moves focus to
+//! the editor, Space opens and keeps it; Escape goes back to the editor, as
+//! in the TUI.
 //!
 //! User keybindings (`keybindings.json`) are not applied yet: the workspace
 //! has no command dispatcher for frontends.
@@ -31,7 +54,6 @@ pub(crate) enum Command {
     Move(Movement, bool),
     Undo,
     Redo,
-    Save,
     SelectAll,
     Escape,
     AddNextOccurrence,
@@ -99,9 +121,101 @@ fn ctrl_key(key: Key, shift: bool) -> Option<Command> {
         (Key::ArrowDown, true) => Command::AddCursorBelow,
         (Key::Z, false) => Command::Undo,
         (Key::Z, true) | (Key::Y, false) => Command::Redo,
-        (Key::S, false) => Command::Save,
         (Key::A, false) => Command::SelectAll,
         (Key::D, false) => Command::AddNextOccurrence,
+        _ => return None,
+    })
+}
+
+/// What a workbench key asks for, whichever part has focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Workbench {
+    Save,
+    NextTab,
+    PreviousTab,
+    /// Ctrl+Tab: the tab used before the active one.
+    RecentTab,
+    /// Ctrl+Shift+Tab: the tab used longest ago.
+    LeastRecentTab,
+    CloseTab,
+    ToggleSidebar,
+    FocusExplorer,
+    FocusNextPart,
+}
+
+/// The workbench command for one input event, if it is a workbench key.
+pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
+    let Event::Key {
+        key,
+        pressed: true,
+        modifiers,
+        ..
+    } = event
+    else {
+        return None;
+    };
+    let ctrl = modifiers.command || modifiers.ctrl;
+    Some(match (key, ctrl, modifiers.shift, modifiers.alt) {
+        (Key::S, true, false, false) => Workbench::Save,
+        (Key::PageDown, true, false, false) => Workbench::NextTab,
+        (Key::PageUp, true, false, false) => Workbench::PreviousTab,
+        (Key::Tab, true, false, false) => Workbench::RecentTab,
+        (Key::Tab, true, true, false) => Workbench::LeastRecentTab,
+        (Key::W, true, false, false) => Workbench::CloseTab,
+        (Key::B, true, false, false) => Workbench::ToggleSidebar,
+        (Key::E, true, true, false) => Workbench::FocusExplorer,
+        (Key::F6, false, false, false) => Workbench::FocusNextPart,
+        _ => return None,
+    })
+}
+
+/// What a key does while the explorer has focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExplorerKey {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    /// Enter opens and moves focus to the editor; Space keeps it here.
+    Open {
+        keep_focus: bool,
+    },
+    /// Left: collapse a folder, or go to the parent.
+    Collapse,
+    /// Right: expand a folder, or go to its first child.
+    Expand,
+    /// Escape: back to the editor.
+    Leave,
+}
+
+/// The explorer's command for one input event.
+pub(crate) fn explorer_key(event: &Event) -> Option<ExplorerKey> {
+    let Event::Key {
+        key,
+        pressed: true,
+        modifiers,
+        ..
+    } = event
+    else {
+        return None;
+    };
+    if modifiers.any() {
+        return None;
+    }
+    Some(match key {
+        Key::ArrowUp => ExplorerKey::Up,
+        Key::ArrowDown => ExplorerKey::Down,
+        Key::PageUp => ExplorerKey::PageUp,
+        Key::PageDown => ExplorerKey::PageDown,
+        Key::Home => ExplorerKey::Home,
+        Key::End => ExplorerKey::End,
+        Key::Enter => ExplorerKey::Open { keep_focus: false },
+        Key::Space => ExplorerKey::Open { keep_focus: true },
+        Key::ArrowLeft => ExplorerKey::Collapse,
+        Key::ArrowRight => ExplorerKey::Expand,
+        Key::Escape => ExplorerKey::Leave,
         _ => return None,
     })
 }

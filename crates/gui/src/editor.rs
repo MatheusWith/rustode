@@ -13,7 +13,8 @@
 //! (`src/vs/platform/theme/common/colors/editorColors.ts:121-123`,
 //! `src/vs/editor/common/core/editorColorRegistry.ts:22`).
 //!
-//! The caret does not blink, so an idle window draws no frames.
+//! The caret does not blink, so an idle window draws no frames, and as in
+//! VS Code it is hidden while the editor does not have focus.
 
 use crate::keys::{self, Command};
 use crate::text::DisplayLine;
@@ -41,7 +42,7 @@ const CARET_WIDTH: f32 = 2.0;
 /// Margin kept between the caret and the right edge when it is revealed.
 const REVEAL_MARGIN: f32 = 30.0;
 
-/// The id of the editor widget (the tracer has one).
+/// The id of the editor widget: one widget shows the active tab's document.
 pub(crate) fn id() -> Id {
     Id::new("rustode-editor")
 }
@@ -69,8 +70,6 @@ pub(crate) struct Outcome {
     pub(crate) changed: bool,
     /// Why the last failed command failed, for the status bar.
     pub(crate) error: Option<String>,
-    /// Whether a save succeeded.
-    pub(crate) saved: bool,
 }
 
 /// Where things go this frame, and how tabs are drawn.
@@ -177,7 +176,7 @@ pub(crate) fn show(
     };
     let tab_size = workspace.tab_size(document).unwrap_or(4);
     let layout = Layout::new(ui, rect, line_count, tab_size);
-    if response.clicked() || ui.memory(|memory| memory.focused().is_none()) {
+    if response.is_pointer_button_down_on() {
         response.request_focus();
     }
     if ui.memory(|memory| memory.has_focus(id())) {
@@ -230,7 +229,6 @@ fn keyboard(
 
 fn run(workspace: &mut Workspace, id: DocumentId, command: Command, outcome: &mut Outcome) {
     outcome.changed = true;
-    let save = command == Command::Save;
     let result = match command {
         Command::Type(text) => workspace.type_text(id, &text),
         Command::DeleteLeft => workspace.delete_left(id),
@@ -240,17 +238,14 @@ fn run(workspace: &mut Workspace, id: DocumentId, command: Command, outcome: &mu
         Command::Move(movement, select) => workspace.move_cursor(id, movement, select),
         Command::Undo => workspace.undo(id).map(drop),
         Command::Redo => workspace.redo(id).map(drop),
-        Command::Save => workspace.save(id),
         Command::SelectAll => workspace.select_all(id),
         Command::Escape => workspace.cancel_selections(id).map(drop),
         Command::AddNextOccurrence => workspace.add_next_occurrence(id).map(drop),
         Command::AddCursorAbove => workspace.add_cursor_above(id).map(drop),
         Command::AddCursorBelow => workspace.add_cursor_below(id).map(drop),
     };
-    match result {
-        Ok(()) => outcome.saved |= save,
-        Err(err) if save => outcome.error = Some(format!("Save failed: {err}")),
-        Err(err) => outcome.error = Some(err.to_string()),
+    if let Err(err) = result {
+        outcome.error = Some(err.to_string());
     }
 }
 
@@ -446,8 +441,12 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
         let pos = Pos2::new(layout.text.left() - view.left, y);
         text_painter.galley(pos, Arc::clone(&row.galley), FOREGROUND);
     }
-    for caret in carets {
-        text_painter.rect_filled(caret, 0.0, CARET);
+    // VS Code hides the cursors of an editor without focus
+    // (`src/vs/editor/browser/viewParts/viewCursors/viewCursors.ts:233-235`).
+    if ui.memory(|memory| memory.has_focus(id())) {
+        for caret in carets {
+            text_painter.rect_filled(caret, 0.0, CARET);
+        }
     }
     let active = doc.position_of(doc.primary_selection().head).line;
     for row in rows {
