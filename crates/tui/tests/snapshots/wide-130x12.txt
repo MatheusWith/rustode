@@ -1,0 +1,12 @@
+ EXPLORER               │   1 fn main() {
+   main.rs              │   2     println!("héllo 日本");
+                        │   3 }
+                        │   4
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
+ main.rs                                                                                             Ln 1, Col 1  UTF-8  LF  Rust

@@ -8,5 +8,15 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[[bin]]
+name = "rustode-tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui.workspace = true
+rustode-workspace.workspace = true
+tracing.workspace = true
+unicode-width.workspace = true
+
 [lints]
 workspace = true

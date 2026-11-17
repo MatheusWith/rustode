@@ -19,8 +19,10 @@ encoding_rs = "0.8"
 notify = "8.2.2"
 # Only CR, LF and CRLF end lines, as in VS Code (no Unicode line separators).
 ropey = { version = "1.6", default-features = false, features = ["cr_lines", "simd"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
 serde_json = "1.0.154"
 tracing = "0.1.44"
+unicode-width = "0.2.3"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "env-filter", "fmt", "json", "std"] }
 
 [workspace.lints.rust]
