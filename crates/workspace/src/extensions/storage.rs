@@ -1,0 +1,455 @@
+//! The extensions folder, in VS Code's layout, so that a later extension
+//! host finds installed extensions where VS Code would:
+//!
+//! - each extension in `<folder>/<publisher>.<name>-<version>[-<platform>]/`
+//!   holding the VSIX's `extension/` contents (`ExtensionKey.toString`,
+//!   `src/vs/platform/extensionManagement/common/extensionManagementUtil.ts:55-57`;
+//!   `extractUserExtension`, `src/vs/platform/extensionManagement/node/extensionManagementService.ts:619-698`),
+//!   extracted into a `.`-prefixed temporary folder first and renamed into
+//!   place, with `__metadata` (install time, platform, size) added to its
+//!   `package.json` (`extensionsScannerService.ts:39-43`, `:304-311`);
+//! - an `extensions.json` index: an array of `{identifier, version,
+//!   location, relativeLocation, metadata}`, where `location` is a `file`
+//!   URI kept for old readers and `relativeLocation` the folder name
+//!   (`extensionsProfileScannerService.ts:23-29`, `:243-298`, `:394-401`), with
+//!   the metadata an install from the gallery records
+//!   (`extensionManagementService.ts:1083-1124`);
+//! - uninstalling removes the index entry, then the folder: it is marked in
+//!   `.obsolete`, renamed to `<folder>.<hex>.vsctmp`, deleted, and unmarked
+//!   (`extensionManagementService.ts:721-756`, `:813-850`). VS Code deletes it
+//!   at the next start, once no profile uses it (`extensionsWatcher.ts:105-136`);
+//!   rustode loads nothing, so it deletes it at once. A listing first
+//!   removes what an interrupted deletion left: `.vsctmp` folders and
+//!   folders still marked obsolete (`extensionManagementService.ts:561-567`,
+//!   `:959-1000`).
+
+use super::InstalledExtension;
+use super::registry::{Release, UNIVERSAL};
+use serde::Serialize;
+use serde_json::{Map, Value};
+use std::fs;
+use std::hash::{BuildHasher, RandomState};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const INDEX: &str = "extensions.json";
+const OBSOLETE: &str = ".obsolete";
+const DELETED: &str = ".vsctmp";
+
+/// A random hex string for temporary names.
+pub(crate) fn random_hex() -> String {
+    format!("{:016x}", RandomState::new().hash_one(SystemTime::now()))
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+fn io_error(path: &Path, err: &io::Error) -> String {
+    format!("{}: {err}", path.display())
+}
+
+/// Writes `bytes` to `path` through a temporary file and a rename.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temp = path.with_file_name(format!(".{name}.{}.tmp", random_hex()));
+    fs::write(&temp, bytes).map_err(|err| io_error(&temp, &err))?;
+    fs::rename(&temp, path).map_err(|err| {
+        let _ = fs::remove_file(&temp);
+        io_error(path, &err)
+    })
+}
+
+/// The index entry's identifier, as VS Code compares it: lower case.
+fn entry_id(entry: &Value) -> Option<String> {
+    entry["identifier"]["id"]
+        .as_str()
+        .map(str::to_ascii_lowercase)
+}
+
+/// An extension's package.json, as far as listing it needs.
+#[derive(Debug, serde::Deserialize)]
+struct Manifest {
+    name: String,
+    publisher: Option<String>,
+    version: String,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    description: Option<String>,
+}
+
+/// A `%key%` placeholder resolved from `package.nls.json`, as VS Code
+/// localizes manifests (`src/vs/platform/extensionManagement/common/extensionNls.ts`).
+fn localized(value: Option<String>, nls: &Value) -> Option<String> {
+    let value = value?;
+    let key = value.strip_prefix('%').and_then(|v| v.strip_suffix('%'));
+    match key.and_then(|key| nls.get(key)) {
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::Object(message)) => message["message"].as_str().map(str::to_owned),
+        _ => Some(value),
+    }
+}
+
+/// An extracted extension waiting to be put in place.
+pub(crate) struct Staged {
+    pub release: Release,
+    pub folder: PathBuf,
+    pub size: u64,
+}
+
+/// The extensions folder.
+pub(crate) struct Store<'a> {
+    pub dir: &'a Path,
+}
+
+impl Store<'_> {
+    /// A path in the folder for temporary data, hidden like VS Code's
+    /// `.<uuid>` extraction folders.
+    pub(crate) fn temp(&self, suffix: &str) -> PathBuf {
+        self.dir.join(format!(".{}{suffix}", random_hex()))
+    }
+
+    /// The index entries; an empty list when there is no index yet.
+    fn read_index(&self) -> Result<Vec<Value>, String> {
+        let path = self.dir.join(INDEX);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(io_error(&path, &err)),
+        };
+        let invalid = || {
+            format!(
+                "{} is not a valid extensions index; it was left unchanged",
+                path.display()
+            )
+        };
+        if text.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Array(entries))
+                if entries
+                    .iter()
+                    .all(|e| entry_id(e).is_some() && e["version"].is_string()) =>
+            {
+                Ok(entries)
+            }
+            _ => Err(invalid()),
+        }
+    }
+
+    fn write_index(&self, entries: &[Value]) -> Result<(), String> {
+        let bytes = serde_json::to_vec(entries).map_err(|err| err.to_string())?;
+        write_atomic(&self.dir.join(INDEX), &bytes)
+    }
+
+    /// Where an entry's extension lives: `relativeLocation` in the folder,
+    /// else the path of its `file` URI.
+    fn location(&self, entry: &Value) -> Option<PathBuf> {
+        if let Some(relative) = entry["relativeLocation"].as_str().filter(|r| !r.is_empty()) {
+            return super::vsix::safe_path(relative)
+                .filter(|p| p.components().count() == 1)
+                .map(|p| self.dir.join(p));
+        }
+        let location = &entry["location"];
+        (location["scheme"].as_str() == Some("file"))
+            .then(|| location["path"].as_str().map(PathBuf::from))
+            .flatten()
+    }
+
+    /// Whether `path` is a folder directly inside the extensions folder.
+    fn is_ours(&self, path: &Path) -> bool {
+        path.parent() == Some(self.dir)
+    }
+
+    fn obsolete(&self) -> Map<String, Value> {
+        fs::read_to_string(self.dir.join(OBSOLETE))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Map<String, Value>>(&text).ok())
+            .unwrap_or_default()
+    }
+
+    fn set_obsolete(&self, key: &str, obsolete: bool) -> Result<(), String> {
+        let mut marked = self.obsolete();
+        if obsolete {
+            marked.insert(key.to_owned(), Value::Bool(true));
+        } else if marked.remove(key).is_none() {
+            return Ok(());
+        }
+        let path = self.dir.join(OBSOLETE);
+        if marked.is_empty() {
+            return match fs::remove_file(&path) {
+                Err(err) if err.kind() != io::ErrorKind::NotFound => Err(io_error(&path, &err)),
+                _ => Ok(()),
+            };
+        }
+        let bytes = serde_json::to_vec(&marked).map_err(|err| err.to_string())?;
+        write_atomic(&path, &bytes)
+    }
+
+    /// Deletes an extension folder the way VS Code does: marked obsolete,
+    /// renamed aside, deleted, unmarked. An interruption leaves it marked
+    /// for the next listing to finish.
+    fn delete_folder(&self, folder: &Path) -> Result<(), String> {
+        let Some(key) = folder.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            return Ok(());
+        };
+        self.set_obsolete(&key, true)?;
+        let aside = folder.with_file_name(format!("{key}.{}{DELETED}", random_hex()));
+        fs::rename(folder, &aside).map_err(|err| io_error(folder, &err))?;
+        fs::remove_dir_all(&aside).map_err(|err| io_error(&aside, &err))?;
+        self.set_obsolete(&key, false)
+    }
+
+    /// Removes what interrupted deletions left behind.
+    fn clean_up(&self, entries: &[Value]) {
+        self.remove_deleted_folders();
+        let used: Vec<PathBuf> = entries.iter().filter_map(|e| self.location(e)).collect();
+        for key in self.obsolete().keys() {
+            if let Err(err) = self.finish_obsolete(key, &used) {
+                tracing::warn!(%key, %err, "cannot remove an obsolete extension");
+            }
+        }
+    }
+
+    /// Deletes the `.vsctmp` folders left by interrupted deletions
+    /// (`removeTemporarilyDeletedFolders`).
+    fn remove_deleted_folders(&self) {
+        let Ok(children) = fs::read_dir(self.dir) else {
+            return;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            if path.is_dir()
+                && child.file_name().to_string_lossy().ends_with(DELETED)
+                && let Err(err) = fs::remove_dir_all(&path)
+            {
+                tracing::warn!(path = %path.display(), %err, "cannot remove a deleted extension");
+            }
+        }
+    }
+
+    /// Deletes a folder marked obsolete unless the index still uses it;
+    /// unmarks it once it is gone.
+    fn finish_obsolete(&self, key: &str, used: &[PathBuf]) -> Result<(), String> {
+        let Some(relative) = super::vsix::safe_path(key) else {
+            return Ok(());
+        };
+        let folder = self.dir.join(relative);
+        if !folder.exists() {
+            self.set_obsolete(key, false)
+        } else if used.contains(&folder) {
+            Ok(())
+        } else {
+            self.delete_folder(&folder)
+        }
+    }
+
+    /// The installed extensions, sorted by name, after cleaning up.
+    pub(crate) fn scan(&self) -> Result<Vec<InstalledExtension>, String> {
+        let entries = self.read_index()?;
+        self.clean_up(&entries);
+        let mut list: Vec<InstalledExtension> = entries
+            .iter()
+            .filter_map(|entry| {
+                let id = entry_id(entry)?;
+                let location = self.location(entry)?;
+                let found = read_extension(&id, entry, &location);
+                if found.is_none() {
+                    tracing::warn!(%id, location = %location.display(), "an indexed extension is missing");
+                }
+                found
+            })
+            .collect();
+        list.sort_by_key(|e| (e.display_name.to_lowercase(), e.id.clone()));
+        Ok(list)
+    }
+
+    /// The installed version of `id`, if any; fails when the index is invalid.
+    pub(crate) fn installed_version(&self, id: &str) -> Result<Option<String>, String> {
+        let entries = self.read_index()?;
+        Ok(entries
+            .iter()
+            .find(|e| {
+                entry_id(e).as_deref() == Some(id) && self.location(e).is_some_and(|l| l.is_dir())
+            })
+            .and_then(|e| e["version"].as_str().map(str::to_owned)))
+    }
+
+    /// Puts a staged extension in place and indexes it, replacing any other
+    /// version of it.
+    pub(crate) fn add(&self, staged: &Staged) -> Result<(), String> {
+        let release = &staged.release;
+        let id = format!("{}.{}", release.namespace, release.name).to_ascii_lowercase();
+        let mut entries = self.read_index()?;
+        check_manifest(&staged.folder, &id, &release.version)?;
+        write_manifest_metadata(&staged.folder, release, staged.size)?;
+        let key = format!("{id}-{}-{}", release.version, release.target_platform);
+        let target = self.dir.join(&key);
+        if target.exists() {
+            self.delete_folder(&target)?;
+        }
+        fs::rename(&staged.folder, &target).map_err(|err| io_error(&target, &err))?;
+        let (old, kept): (Vec<Value>, Vec<Value>) = entries
+            .drain(..)
+            .partition(|e| entry_id(e).as_deref() == Some(id.as_str()));
+        entries = kept;
+        entries.push(new_entry(&id, release, &target, &key, !old.is_empty()));
+        self.write_index(&entries)?;
+        for folder in old.iter().filter_map(|e| self.location(e)) {
+            if folder != target && self.is_ours(&folder) && folder.exists() {
+                self.delete_folder(&folder)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes `id` from the index, then deletes its folders.
+    pub(crate) fn remove(&self, id: &str) -> Result<(), String> {
+        let entries = self.read_index()?;
+        let (removed, kept): (Vec<Value>, Vec<Value>) = entries
+            .into_iter()
+            .partition(|e| entry_id(e).as_deref() == Some(id));
+        if removed.is_empty() {
+            return Err(format!("{id} is not installed"));
+        }
+        self.write_index(&kept)?;
+        let used: Vec<PathBuf> = kept.iter().filter_map(|e| self.location(e)).collect();
+        for folder in removed.iter().filter_map(|e| self.location(e)) {
+            if self.is_ours(&folder) && folder.exists() && !used.contains(&folder) {
+                self.delete_folder(&folder)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// An installed extension from its index entry and package.json.
+fn read_extension(id: &str, entry: &Value, location: &Path) -> Option<InstalledExtension> {
+    let text = fs::read_to_string(location.join("package.json")).ok()?;
+    let manifest: Manifest = serde_json::from_str(&text).ok()?;
+    let nls = fs::read_to_string(location.join("package.nls.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .unwrap_or(Value::Null);
+    let metadata = &entry["metadata"];
+    Some(InstalledExtension {
+        id: id.to_owned(),
+        version: entry["version"]
+            .as_str()
+            .unwrap_or(&manifest.version)
+            .to_owned(),
+        display_name: localized(manifest.display_name, &nls)
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| manifest.name.clone()),
+        description: localized(manifest.description, &nls).unwrap_or_default(),
+        publisher_display_name: metadata["publisherDisplayName"].as_str().map(str::to_owned),
+        target_platform: metadata["targetPlatform"].as_str().map(str::to_owned),
+        location: location.to_owned(),
+    })
+}
+
+/// The extracted package.json must name the extension and version asked
+/// for, as VS Code checks the gallery's identity against the manifest
+/// (`extensionManagementService.ts:309-311`).
+fn check_manifest(folder: &Path, id: &str, version: &str) -> Result<(), String> {
+    let path = folder.join("package.json");
+    let text = fs::read_to_string(&path)
+        .map_err(|_| "the VSIX has no extension/package.json".to_owned())?;
+    let manifest: Manifest = serde_json::from_str(&text)
+        .map_err(|err| format!("the VSIX's package.json is not valid: {err}"))?;
+    let found = format!(
+        "{}.{}",
+        manifest.publisher.unwrap_or_default(),
+        manifest.name
+    )
+    .to_ascii_lowercase();
+    if found != id || manifest.version != version {
+        return Err(format!(
+            "the VSIX holds {found} {}, not {id} {version}",
+            manifest.version
+        ));
+    }
+    Ok(())
+}
+
+/// Adds `__metadata` to the extracted package.json, keeping what is there.
+fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Result<(), String> {
+    let path = folder.join("package.json");
+    let text = fs::read_to_string(&path).map_err(|err| io_error(&path, &err))?;
+    let mut manifest: Value = serde_json::from_str(&text).map_err(|err| err.to_string())?;
+    let Some(object) = manifest.as_object_mut() else {
+        return Err("the VSIX's package.json is not an object".to_owned());
+    };
+    let metadata = object
+        .entry("__metadata")
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(metadata) = metadata.as_object_mut() {
+        metadata.insert("installedTimestamp".into(), now_millis().into());
+        metadata.insert(
+            "targetPlatform".into(),
+            release.target_platform.clone().into(),
+        );
+        metadata.insert("size".into(), size.into());
+    }
+    let mut bytes = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"\t");
+    let mut serializer = serde_json::Serializer::with_formatter(&mut bytes, formatter);
+    manifest
+        .serialize(&mut serializer)
+        .map_err(|err| err.to_string())?;
+    fs::write(&path, bytes).map_err(|err| io_error(&path, &err))
+}
+
+/// The metadata VS Code records for an install from the gallery; the
+/// fields it leaves undefined are left out. (Keys are written sorted.)
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)] // one field per flag VS Code records
+struct EntryMetadata<'a> {
+    installed_timestamp: u64,
+    source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publisher_display_name: Option<&'a str>,
+    target_platform: &'a str,
+    updated: bool,
+    private: bool,
+    is_pre_release_version: bool,
+    has_pre_release_version: bool,
+    pre_release: bool,
+}
+
+fn new_entry(id: &str, release: &Release, folder: &Path, key: &str, updated: bool) -> Value {
+    let metadata = EntryMetadata {
+        installed_timestamp: now_millis(),
+        source: "gallery",
+        publisher_display_name: release.namespace_display_name.as_deref(),
+        target_platform: if release.target_platform.is_empty() {
+            UNIVERSAL
+        } else {
+            &release.target_platform
+        },
+        updated,
+        private: false,
+        is_pre_release_version: release.is_prerelease,
+        has_pre_release_version: release.is_prerelease,
+        pre_release: release.is_prerelease,
+    };
+    serde_json::json!({
+        "identifier": { "id": id },
+        "version": release.version,
+        "location": {
+            "$mid": 1,
+            "path": folder.to_string_lossy(),
+            "scheme": "file",
+        },
+        "relativeLocation": key,
+        "metadata": metadata,
+    })
+}

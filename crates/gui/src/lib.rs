@@ -14,6 +14,10 @@
 //!   status node of labels.
 //! - **Input-to-present latency** is timed by [`run`]; see [`latency`].
 //!
+//! - **Extensions view** in the sidebar on Ctrl+Shift+X: Open VSX search, install,
+//!   uninstall and the installed list, all in the background; nothing is
+//!   loaded (`extensions.rs`).
+//!
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
 
@@ -21,6 +25,7 @@ mod a11y;
 mod app;
 mod editor;
 mod explorer;
+mod extensions;
 pub mod fonts;
 mod keys;
 pub mod latency;

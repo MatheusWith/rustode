@@ -14,7 +14,22 @@ rustode-core.workspace = true
 rustode-fs.workspace = true
 rustode-trace.workspace = true
 regex.workspace = true
+rustls-native-certs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 tracing.workspace = true
+ureq.workspace = true
+zip.workspace = true
+
+[features]
+# The local Open VSX stand-in (`extensions::stand_in`), for tests only:
+# frontends enable it in their dev-dependencies, so it never ships.
+stand-in = []
+
+[dev-dependencies]
+# The crate's own tests use the stand-in too.
+rustode-workspace = { path = ".", features = ["stand-in"] }
 
 [lints]
 workspace = true

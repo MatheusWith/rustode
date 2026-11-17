@@ -1,0 +1,14 @@
+ EXTENSIONS                                │ notes.txt │
+ hello                                     │   1 hello
+ OPEN VSX · 2 of 42                        │   2
+ Hello World                      Installed│
+   Not loaded in this phase                │
+ Rainbow Brackets                   Install│
+   acme · 0.4.0                            │
+ INSTALLED · 1                             │
+ Hello World                      Uninstall│
+   1.2.3 · Not loaded in this phase        │
+                                           │
+                                           │
+                                           │
+ notes.txt  Installed acme.hello 1.2.3 (not loaded in this phase)Ln 1, Col 1  UTF-8  LF  Plain Text

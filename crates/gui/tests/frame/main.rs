@@ -8,6 +8,7 @@
 //! `UPDATE_SNAPSHOTS=1 cargo nextest run -p rustode-gui`.
 
 mod editor;
+mod extensions;
 mod workbench;
 
 use eframe::egui::{Key, Modifiers, Vec2, accesskit::Role};

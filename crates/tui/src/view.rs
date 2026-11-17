@@ -29,10 +29,10 @@ struct Areas {
     status: Option<Rect>,
 }
 
-/// The width bands: sidebar at 120 columns or more (or while the explorer
+/// The width bands: sidebar at 120 columns or more (or while the sidebar
 /// has focus), status bar from 60, editor only below 60 — where a focused
-/// explorer takes the whole width.
-fn areas(area: Rect, explorer_focused: bool) -> Option<Areas> {
+/// sidebar takes the whole width. The sidebar is `sidebar_width` wide.
+fn areas(area: Rect, explorer_focused: bool, sidebar_width: u16) -> Option<Areas> {
     if area.width < 40 || area.height < 10 {
         return None;
     }
@@ -51,7 +51,7 @@ fn areas(area: Rect, explorer_focused: bool) -> Option<Areas> {
         }
     } else if area.width >= 120 || explorer_focused {
         let [sidebar, editor] =
-            Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(1)]).areas(body);
+            Layout::horizontal([Constraint::Length(sidebar_width), Constraint::Min(1)]).areas(body);
         Areas {
             sidebar: Some(sidebar),
             editor: Some(editor),
@@ -72,13 +72,23 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
     app.hits = Hits::default();
     let screen = frame.area();
     frame.buffer_mut().set_style(screen, theme.editor);
-    let Some(areas) = areas(screen, app.focus == Focus::Explorer) else {
+    let sidebar_focused = matches!(app.focus, Focus::Explorer | Focus::Extensions);
+    let sidebar_width = if app.extensions.shown {
+        crate::extensions::WIDTH
+    } else {
+        SIDEBAR_WIDTH
+    };
+    let Some(areas) = areas(screen, sidebar_focused, sidebar_width) else {
         draw_notice(frame);
         return;
     };
     if let Some(sidebar) = areas.sidebar {
         frame.buffer_mut().set_style(sidebar, theme.sidebar);
-        draw_sidebar(app, frame, sidebar);
+        if app.extensions.shown {
+            crate::extensions::draw(app, frame, sidebar);
+        } else {
+            draw_sidebar(app, frame, sidebar);
+        }
     }
     if let Some(editor) = areas.editor {
         draw_editor_group(app, frame, editor);
@@ -780,15 +790,15 @@ mod tests {
 
     #[test]
     fn a_focused_explorer_shows_at_any_width() {
-        let narrow = areas(Rect::new(0, 0, 50, 12), true).expect("areas");
+        let narrow = areas(Rect::new(0, 0, 50, 12), true, SIDEBAR_WIDTH).expect("areas");
         assert!(
             narrow.editor.is_none(),
             "below 60 the explorer takes the width"
         );
-        let medium = areas(Rect::new(0, 0, 100, 12), true).expect("areas");
+        let medium = areas(Rect::new(0, 0, 100, 12), true, SIDEBAR_WIDTH).expect("areas");
         assert!(medium.sidebar.is_some() && medium.editor.is_some());
         assert!(
-            areas(Rect::new(0, 0, 100, 12), false)
+            areas(Rect::new(0, 0, 100, 12), false, SIDEBAR_WIDTH)
                 .expect("areas")
                 .sidebar
                 .is_none()

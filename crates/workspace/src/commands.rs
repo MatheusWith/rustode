@@ -9,7 +9,13 @@
 //! (`src/vs/workbench/contrib/quickaccess/browser/commandsQuickAccess.ts:275-285`),
 //! "Go to Line/Column..." on Ctrl+G
 //! (`src/vs/workbench/contrib/codeEditor/browser/quickaccess/gotoLineQuickAccess.ts:71-84`),
-//! redo on Ctrl+Y (`src/vs/editor/browser/editorExtensions.ts:673-680`).
+//! redo on Ctrl+Y (`src/vs/editor/browser/editorExtensions.ts:673-680`),
+//! "View: Show Extensions" on Ctrl+Shift+X
+//! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:116-123`,
+//! titled "Show {0}" in the View category by
+//! `src/vs/workbench/services/views/browser/viewsService.ts:404-421`).
+//! Commands that take an argument ([`Workspace::execute_with`]) are not
+//! listed in the palette, as in VS Code.
 //! The palette lists matching commands alphabetically; VS Code also puts
 //! recently used ones first and matches word starts
 //! (`AbstractCommandsQuickAccessProvider`), which is not done yet.
@@ -91,6 +97,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         "View: Show Explorer",
         Workbench,
         Some("Ctrl+Shift+E"),
+    ),
+    command(
+        "workbench.view.extensions",
+        "View: Show Extensions",
+        Workbench,
+        Some("Ctrl+Shift+X"),
     ),
     command(
         "workbench.action.focusNextPart",
@@ -274,6 +286,26 @@ impl Workspace {
                 };
                 return self.execute_on(document, id);
             }
+        }
+        Ok(true)
+    }
+
+    /// Runs a command that takes one argument, by VS Code id:
+    /// `workbench.extensions.installExtension` and
+    /// `workbench.extensions.uninstallExtension` take an extension id,
+    /// `workbench.extensions.search` a search text
+    /// (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:432-580`).
+    /// Returns `false` for an unknown command.
+    ///
+    /// # Errors
+    /// When an extension command is refused (see
+    /// [`Workspace::install_extension`]).
+    pub fn execute_with(&mut self, id: &str, arg: &str) -> Result<bool, crate::ExtensionError> {
+        match id {
+            "workbench.extensions.installExtension" => self.install_extension(arg)?,
+            "workbench.extensions.uninstallExtension" => self.uninstall_extension(arg)?,
+            "workbench.extensions.search" => self.search_extensions(arg),
+            _ => return Ok(false),
         }
         Ok(true)
     }

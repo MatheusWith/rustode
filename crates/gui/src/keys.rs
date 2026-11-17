@@ -141,6 +141,8 @@ pub(crate) enum Workbench {
     ToggleSidebar,
     FocusExplorer,
     FocusNextPart,
+    /// Ctrl+Shift+X: the Extensions view in the sidebar.
+    ShowExtensions,
 }
 
 /// The workbench command for one input event, if it is a workbench key.
@@ -164,6 +166,7 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::W, true, false, false) => Workbench::CloseTab,
         (Key::B, true, false, false) => Workbench::ToggleSidebar,
         (Key::E, true, true, false) => Workbench::FocusExplorer,
+        (Key::X, true, true, false) => Workbench::ShowExtensions,
         (Key::F6, false, false, false) => Workbench::FocusNextPart,
         _ => return None,
     })

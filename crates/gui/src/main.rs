@@ -51,7 +51,12 @@ fn main() -> ExitCode {
 }
 
 fn open(paths: &[PathBuf]) -> ExitCode {
-    let app = match rustode_gui::EditorApp::open_paths(paths) {
+    let mut workspace = rustode_workspace::Workspace::new();
+    // rustode's own extensions folder, never a VS Code profile's.
+    if let Some(dir) = rustode_workspace::default_extensions_dir(|key| std::env::var_os(key)) {
+        workspace.set_extensions_location(&dir);
+    }
+    let app = match rustode_gui::EditorApp::open_paths_in(workspace, paths) {
         Ok(app) => app,
         Err(err) => {
             eprintln!("error: {err}");

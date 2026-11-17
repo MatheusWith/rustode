@@ -27,6 +27,8 @@ const DISK_POLL: Duration = Duration::from_millis(250);
 pub(crate) enum Focus {
     Editor,
     Explorer,
+    /// The Extensions view in the sidebar.
+    Extensions,
 }
 
 /// Where a document's view is scrolled to.
@@ -114,6 +116,8 @@ pub struct App {
     pub(crate) find: Option<crate::find::FindWidget>,
     /// Whether the find widget is shown.
     pub(crate) find_visible: bool,
+    /// The Extensions view's state.
+    pub(crate) extensions: crate::extensions::ExtensionsView,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -164,6 +168,7 @@ impl App {
             quick: None,
             find: None,
             find_visible: false,
+            extensions: crate::extensions::ExtensionsView::default(),
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
@@ -181,6 +186,19 @@ impl App {
     #[must_use]
     pub fn workspace(&self) -> &Workspace {
         &self.workspace
+    }
+
+    /// The workspace, to configure it (e.g. its extensions folder).
+    pub fn workspace_mut(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+
+    /// Takes the results of background work (extension searches,
+    /// installs, uninstalls). Returns whether anything changed, so the
+    /// screen needs drawing.
+    pub fn poll(&mut self) -> bool {
+        self.workspace.poll_extensions();
+        self.take_events()
     }
 
     /// The document in the active tab.
@@ -239,6 +257,7 @@ impl App {
                 self.step(terminal, &event)?;
             } else {
                 self.workspace.poll_external_changes();
+                self.workspace.poll_extensions();
                 let config_changed = !self.workspace.reload_config().is_empty();
                 if config_changed {
                     self.report_config_problems();
@@ -265,6 +284,7 @@ impl App {
             }
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(*key),
             Event::Mouse(mouse) => self.mouse(*mouse),
+            Event::Paste(text) if self.focus == Focus::Extensions => self.extensions_paste(text),
             Event::Paste(text) if self.focus == Focus::Editor => {
                 self.confirm_quit = false;
                 self.message = None;
@@ -272,6 +292,7 @@ impl App {
             }
             _ => {}
         }
+        self.workspace.poll_extensions();
         self.take_events();
     }
 
@@ -295,14 +316,20 @@ impl App {
             }
             Focus::Explorer => {
                 if let Some(command) = keys::global(key) {
-                    if !self.removed(&command, key) {
-                        self.run_command(command);
-                    }
+                    self.run_global(command, key);
                 } else if let Some(explorer_key) = keys::explorer_key(key) {
                     self.message = None;
                     self.explorer_key(explorer_key);
                 }
             }
+            Focus::Extensions => self.extensions_key(key),
+        }
+    }
+
+    /// Runs a key's workbench command unless the user removed its key.
+    pub(crate) fn run_global(&mut self, command: Command, key: KeyEvent) {
+        if !self.removed(&command, key) {
+            self.run_command(command);
         }
     }
 
@@ -417,6 +444,7 @@ impl App {
             Command::PreviousTab => self.workspace.previous_tab(),
             Command::FocusExplorer => self.focus_explorer(),
             Command::FocusNextPart => self.focus_next_part(),
+            Command::ShowExtensions => self.show_extensions(),
             Command::Reload => self.reload(),
             Command::QuickOpen => self.open_quick(""),
             Command::ShowCommands => self.open_quick(">"),
@@ -543,6 +571,7 @@ impl App {
             return;
         }
         self.focus = Focus::Explorer;
+        self.extensions.shown = false;
         let active = self
             .document()
             .and_then(|id| self.workspace.document(id))
@@ -556,8 +585,10 @@ impl App {
     fn focus_next_part(&mut self) {
         match self.focus {
             Focus::Editor => self.focus_explorer(),
-            Focus::Explorer if self.document().is_some() => self.focus = Focus::Editor,
-            Focus::Explorer => {}
+            Focus::Explorer | Focus::Extensions if self.document().is_some() => {
+                self.focus = Focus::Editor;
+            }
+            Focus::Explorer | Focus::Extensions => {}
         }
     }
 
@@ -851,6 +882,10 @@ impl App {
                     format!("The file was renamed to {}", to.display())
                 }
                 WorkspaceEvent::Reloaded { .. } => "Reloaded from disk".to_owned(),
+                WorkspaceEvent::Extension(event) => match crate::extensions::message(event) {
+                    Some(message) => message,
+                    None => continue,
+                },
                 _ => continue,
             };
             self.message = Some(message);
