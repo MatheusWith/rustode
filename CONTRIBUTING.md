@@ -87,7 +87,7 @@ A change may not make a benchmarked core operation slower than on `main`: more t
   - It keeps each benchmark's fastest mean per tree, because other programs can only slow a run down. It prints a table of those means and exits with 1 when a benchmark is slower than the limit, or with 2 when it could not run.
 - **In the pre-push hook** the gate is opt-in, because it takes minutes: `RUSTODE_BENCH_GATE=1 git push`. Without the variable the hook passes at once.
 - **In CI**, the `bench-gate` job runs on every pull request: `cargo xtask bench-gate --base <base commit> --threshold 10`, with both trees measured on the same runner.
-- **Measure on a quiet machine.** The gate compares two runs made minutes apart, so a build or another editor running at the same time shows up as a change. Close them first, as for any benchmark (AGENTS.md §11.5). BENCH_NOISE_PLACEHOLDER
+- **Measure on a quiet machine.** The gate compares two runs made minutes apart, so a build or another editor running at the same time shows up as a change. Close them first, as for any benchmark (AGENTS.md §11.5). On 2026-11-17, on a machine busy with other builds, two runs against the same commit showed changes of up to 20% slower and 33% faster ([ADR 0026](docs/adr/0026-micro-benchmark-gate.md), "Consequences").
 - **When the gate fails**, run it again. If the same benchmark is still slower, the slowdown is real, and the fix belongs in the same pull request. The gate has no override.
 - **When a pull request changes what a benchmark measures**, it renames the benchmark. The gate then reports it as new, instead of comparing two different workloads. Reviewers check such renames.
 
