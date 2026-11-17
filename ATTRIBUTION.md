@@ -64,13 +64,16 @@ The other 90 built-in extensions come from the source tree (`fonte/arvore/extens
 
 ## Behavior studied and reimplemented by the editor
 
-The rustode editor reimplements behavior studied in the source tree (`02-engenharia-reversa/fonte/arvore/`). No code is copied; the behavior is credited here, and in the doc comments of `history.rs` and `editor.rs`.
+The rustode editor reimplements behavior studied in the source tree (`02-engenharia-reversa/fonte/arvore/`). No code is copied; the behavior is credited here, and in the doc comments of the files listed.
 
 | Behavior | Studied in (Code - OSS, MIT) | Reimplemented in |
 |---|---|---|
 | Decoding order (BOM, UTF-8, fallback) and lossy UTF-8 decoding | `src/vs/workbench/services/textfile/common/encoding.ts:88-91` | `crates/fs/src/encoding.rs` |
 | Undo grouping of typing (space starts a step, the next word joins it; typing and deleting never share a step) | `src/vs/editor/common/cursor/cursorTypeEditOperations.ts:1011-1046` (`getTypingOperation`, `shouldPushStackElementBetween`); tests in `src/vs/editor/test/browser/controller/cursor.test.ts:5925-6240` | `crates/core/src/history.rs` |
 | Multi-cursor: box selection skipping short lines, add cursor above/below, add next occurrence (`Ctrl+D`) | `src/vs/editor/common/cursor/cursorColumnSelection.ts:12-77`; `src/vs/editor/common/cursor/cursorMoveCommands.ts:18-46`; `src/vs/editor/contrib/multicursor/browser/multicursor.ts:355-410`, `:592-620` | `crates/core/src/editor.rs`, `crates/core/src/selection.rs` |
+| External changes: a clean document reloads, a dirty one never does; the reload is one undoable edit and leaves the document clean | `src/vs/workbench/services/textfile/common/textFileEditorModelManager.ts:134-147`; `src/vs/editor/common/services/modelService.ts:365-387`; `src/vs/workbench/services/textfile/common/textFileEditorModel.ts:650` | `crates/workspace/src/external.rs` |
+| Deleted files leave the document open and orphaned until the file returns or is saved; a deletion is believed after 100 ms | `src/vs/workbench/services/textfile/common/textFileEditorModel.ts:158-201`, `:1063-1064` | `crates/workspace/src/external.rs`, `crates/fs/src/watch.rs` |
+| Conflicts between unsaved edits and a newer file are settled by reverting or overwriting; the outdated saved text no longer counts as saved | `src/vs/workbench/contrib/files/browser/editors/textFileSaveErrorHandler.ts:113-135`, `:418-442`; `src/vs/workbench/services/textfile/common/textFileEditorModel.ts:404-406` | `crates/workspace/src/external.rs` |
 
 ## Trademarks
 

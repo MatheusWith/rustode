@@ -4,6 +4,25 @@ use rustode_core::{EditError, Editor, Range, Selection};
 use rustode_fs::{EncodeError, Encoding, Eol};
 use std::path::{Path, PathBuf};
 
+/// Length and 64-bit hash of a file's bytes. Two different contents share a
+/// stamp with negligible probability (about 2^-64 per comparison).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiskStamp {
+    len: usize,
+    hash: u64,
+}
+
+impl DiskStamp {
+    pub(crate) fn of(bytes: &[u8]) -> Self {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+        let hash = BuildHasherDefault::<DefaultHasher>::default().hash_one(bytes);
+        Self {
+            len: bytes.len(),
+            hash,
+        }
+    }
+}
+
 /// Identifies an open document within a workspace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DocumentId(pub(crate) usize);
@@ -19,15 +38,24 @@ pub struct Document {
     encoding: Encoding,
     bom: bool,
     saved_version: u64,
+    /// A fingerprint of the bytes last read from or written to the file:
+    /// what "unchanged on disk" is measured against. A fingerprint rather
+    /// than the bytes, so a large file is not held twice.
+    pub(crate) disk: DiskStamp,
+    /// Whether the file is gone from disk (deleted or renamed away).
+    pub(crate) orphaned: bool,
+    /// The file's bytes when it changed under unsaved edits, until resolved.
+    pub(crate) conflict: Option<Vec<u8>>,
 }
 
 impl Document {
     /// Decodes a file's bytes, without copying valid UTF-8 (large files).
     pub(crate) fn from_owned_bytes(path: PathBuf, bytes: Vec<u8>) -> Self {
-        Self::from_decoded(path, rustode_fs::decode_owned(bytes))
+        let disk = DiskStamp::of(&bytes);
+        Self::from_decoded(path, rustode_fs::decode_owned(bytes), disk)
     }
 
-    fn from_decoded(path: PathBuf, decoded: rustode_fs::Decoded) -> Self {
+    fn from_decoded(path: PathBuf, decoded: rustode_fs::Decoded, disk: DiskStamp) -> Self {
         let rustode_fs::Decoded {
             text,
             encoding,
@@ -39,6 +67,9 @@ impl Document {
             encoding,
             bom,
             saved_version: 0,
+            disk,
+            orphaned: false,
+            conflict: None,
         }
     }
 
@@ -89,8 +120,37 @@ impl Document {
         &mut self.editor
     }
 
-    pub(crate) fn mark_saved(&mut self) {
+    /// Records that the text is now what `bytes`, the file's content, holds.
+    pub(crate) fn mark_saved(&mut self, bytes: &[u8]) {
         self.saved_version = self.editor.version();
+        self.disk = DiskStamp::of(bytes);
+        self.orphaned = false;
+        self.conflict = None;
+    }
+
+    /// Makes no version of the text count as saved, so the document stays
+    /// dirty until it is saved again, even if undone to its old state.
+    pub(crate) fn forget_saved_version(&mut self) {
+        self.saved_version = u64::MAX;
+    }
+
+    pub(crate) fn set_stored_encoding(&mut self, encoding: Encoding, bom: bool) {
+        self.encoding = encoding;
+        self.bom = bom;
+    }
+
+    /// Whether the file was deleted or renamed away since it was opened or
+    /// saved. The text is kept; saving writes the file again.
+    #[must_use]
+    pub fn is_orphaned(&self) -> bool {
+        self.orphaned
+    }
+
+    /// Whether the file changed on disk under unsaved edits and the user has
+    /// not chosen yet which version to keep.
+    #[must_use]
+    pub fn has_conflict(&self) -> bool {
+        self.conflict.is_some()
     }
 
     /// The encoding used on save.

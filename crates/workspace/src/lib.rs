@@ -1,8 +1,10 @@
 //! The single in-process API that every frontend uses.
 
 mod document;
+mod external;
 
 pub use document::{Document, DocumentId};
+pub use external::Resolution;
 pub use rustode_core::{EditError, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
 
@@ -27,6 +29,11 @@ pub enum Error {
     UnknownDocument(DocumentId),
     /// An edit was refused.
     Edit(EditError),
+    /// The file changed on disk under unsaved edits; resolve the conflict
+    /// with [`Workspace::resolve_conflict`] before saving.
+    Conflict(DocumentId),
+    /// [`Workspace::resolve_conflict`] was called with no conflict pending.
+    NoConflict(DocumentId),
 }
 
 /// Something that happened in the workspace, for frontends to react to.
@@ -35,6 +42,38 @@ pub enum Error {
 pub enum Event {
     /// The text of a document changed (edit, undo or redo).
     DocumentChanged {
+        /// The document.
+        id: DocumentId,
+    },
+    /// A clean document was reloaded because its file changed on disk; it
+    /// now matches the file. The reload is one undo step.
+    Reloaded {
+        /// The document.
+        id: DocumentId,
+    },
+    /// The file of a dirty document changed on disk. The text is untouched;
+    /// the frontend asks the user to [`Resolution::ReloadTheirs`] or
+    /// [`Resolution::KeepMine`].
+    Conflict {
+        /// The document.
+        id: DocumentId,
+    },
+    /// The file of a document was deleted. The text is kept; saving
+    /// writes the file again.
+    Deleted {
+        /// The document.
+        id: DocumentId,
+    },
+    /// The file of a document was renamed away. The document stays on its
+    /// old path, as after a delete; `to` lets the frontend offer to follow.
+    Renamed {
+        /// The document.
+        id: DocumentId,
+        /// Where the file went.
+        to: PathBuf,
+    },
+    /// The file of a deleted or renamed document is back on disk.
+    Restored {
         /// The document.
         id: DocumentId,
     },
@@ -47,6 +86,11 @@ impl fmt::Display for Error {
             Self::Encode(err) => err.fmt(f),
             Self::UnknownDocument(id) => write!(f, "no open document {id:?}"),
             Self::Edit(err) => err.fmt(f),
+            Self::Conflict(id) => write!(
+                f,
+                "{id:?} changed on disk under unsaved edits; reload or keep the edits first"
+            ),
+            Self::NoConflict(id) => write!(f, "{id:?} has no conflict to resolve"),
         }
     }
 }
@@ -58,6 +102,9 @@ impl std::error::Error for Error {}
 pub struct Workspace {
     documents: Vec<Option<Document>>,
     events: Vec<Event>,
+    /// Watches the files of open documents; `None` until the first open, or
+    /// if the platform watcher could not be created.
+    watcher: Option<rustode_fs::Watcher>,
 }
 
 impl Workspace {
@@ -79,6 +126,7 @@ impl Workspace {
         let document = Document::from_owned_bytes(path.to_owned(), bytes);
         tracing::debug!(path = %path.display(), encoding = document.encoding().label(), "opened");
         self.documents.push(Some(document));
+        self.watch(path);
         Ok(DocumentId(self.documents.len() - 1))
     }
 
@@ -98,13 +146,17 @@ impl Workspace {
     /// Writes the document to its file in its encoding, BOM and line endings.
     ///
     /// # Errors
-    /// When the text cannot be encoded or the file cannot be written.
+    /// When the text cannot be encoded or the file cannot be written, or
+    /// while the file's external change is an unresolved conflict.
     pub fn save(&mut self, id: DocumentId) -> Result<(), Error> {
         let document = self.document_mut(id)?;
+        if document.has_conflict() {
+            return Err(Error::Conflict(id));
+        }
         let bytes = document.encoded().map_err(Error::Encode)?;
         let path = document.path().to_owned();
         rustode_fs::write_file(&path, &bytes).map_err(|source| Error::Io { path, source })?;
-        document.mark_saved();
+        document.mark_saved(&bytes);
         Ok(())
     }
 
