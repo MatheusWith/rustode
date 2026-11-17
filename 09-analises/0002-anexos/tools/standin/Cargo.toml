@@ -1,0 +1,9 @@
+[package]
+name = "standin"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+eframe = { version = "=0.36.2", default-features = false, features = ["glow", "wayland", "default_fonts"] }
+
+# Throwaway spike tool, kept outside the rustode workspace.
+[workspace]

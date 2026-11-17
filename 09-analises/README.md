@@ -12,3 +12,4 @@ Every analysis is written in English.
 | # | Question | Confidence |
 |---|---|---|
 | [0001](0001-trafego-de-rede.md) | Which servers does the app connect to on its own? | measured |
+| [0002](0002-entrada-virtual-wayland.md) | Can keystrokes be injected into rustode and the App on the virtual display? | measured |
