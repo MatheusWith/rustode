@@ -1,6 +1,6 @@
 //! One open document: its text and how it is stored on disk.
 
-use rustode_core::{EditError, Editor, Range};
+use rustode_core::{EditError, Editor, Range, Selection};
 use rustode_fs::{EncodeError, Encoding, Eol};
 use std::path::{Path, PathBuf};
 
@@ -55,6 +55,18 @@ impl Document {
     #[must_use]
     pub fn cursor(&self) -> usize {
         self.editor.cursor()
+    }
+
+    /// All selections, sorted and never overlapping.
+    #[must_use]
+    pub fn selections(&self) -> &[Selection] {
+        self.editor.selections()
+    }
+
+    /// The primary selection, the one a frontend reveals.
+    #[must_use]
+    pub fn primary_selection(&self) -> Selection {
+        self.editor.primary()
     }
 
     /// Whether the text differs from the last saved (or opened) state.

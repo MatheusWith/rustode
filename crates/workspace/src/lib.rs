@@ -3,7 +3,7 @@
 mod document;
 
 pub use document::{Document, DocumentId};
-pub use rustode_core::{EditError, Range};
+pub use rustode_core::{EditError, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
 
 use rustode_core::Editor;
@@ -139,6 +139,64 @@ impl Workspace {
     /// When there is no such document or `offset` is past its end.
     pub fn set_cursor(&mut self, id: DocumentId, offset: usize) -> Result<(), Error> {
         self.edit(id, |editor| editor.set_cursor(offset).map(|()| false))
+    }
+
+    /// Replaces all selections of a document; `primary` indexes `list`.
+    ///
+    /// # Errors
+    /// When there is no such document, `list` is empty or out of range.
+    pub fn set_selections(
+        &mut self,
+        id: DocumentId,
+        list: Vec<Selection>,
+        primary: usize,
+    ) -> Result<(), Error> {
+        self.edit(id, |editor| {
+            editor.set_selections(list, primary).map(|()| false)
+        })
+    }
+
+    /// Adds a selection at the next occurrence of the primary selection
+    /// (`Ctrl+D`); with an empty selection, selects the word first. Returns
+    /// whether the selections changed.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn add_next_occurrence(&mut self, id: DocumentId) -> Result<bool, Error> {
+        self.select(id, Editor::add_next_occurrence)
+    }
+
+    /// Adds a cursor below each cursor. Returns whether one was added.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn add_cursor_below(&mut self, id: DocumentId) -> Result<bool, Error> {
+        self.select(id, Editor::add_cursor_below)
+    }
+
+    /// Adds a cursor above each cursor. Returns whether one was added.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn add_cursor_above(&mut self, id: DocumentId) -> Result<bool, Error> {
+        self.select(id, Editor::add_cursor_above)
+    }
+
+    /// Box selection from `from` to `to`.
+    ///
+    /// # Errors
+    /// When there is no such document or a line does not exist.
+    pub fn column_select(
+        &mut self,
+        id: DocumentId,
+        from: Position,
+        to: Position,
+    ) -> Result<(), Error> {
+        self.edit(id, |editor| editor.column_select(from, to).map(|()| false))
+    }
+
+    fn select(&mut self, id: DocumentId, f: fn(&mut Editor) -> bool) -> Result<bool, Error> {
+        Ok(f(self.document_mut(id)?.editor_mut()))
     }
 
     /// Types `text` at the cursor, grouping undo steps the way VS Code does.

@@ -146,13 +146,15 @@ fn any_edit_sequence_followed_by_full_undo_restores_the_original() {
         let (mut ws, id, _) = open(&format!("prop{round}"), original);
         for _ in 0..40 {
             let len = ws.document(id).expect("doc").len_chars();
-            match next(5) {
+            match next(7) {
                 0 => ws.set_cursor(id, next(len + 1)).expect("cursor"),
                 1 => ws
                     .type_text(id, ["a", " ", "\n", "é", "日"][next(5)])
                     .expect("type"),
                 2 => ws.delete_left(id).expect("delete"),
                 3 => ws.delete_right(id).expect("delete"),
+                4 => assert!(ws.add_cursor_below(id).is_ok()),
+                5 => assert!(ws.add_next_occurrence(id).is_ok()),
                 _ => {
                     let start = next(len + 1);
                     let end = start + next(len - start + 1);

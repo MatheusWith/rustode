@@ -49,6 +49,38 @@ impl Buffer {
         self.rope.slice(range.start..range.end).to_string()
     }
 
+    /// The line holding char `offset` (zero-based). `offset` may equal the length.
+    #[must_use]
+    pub fn line_of(&self, offset: usize) -> usize {
+        self.rope.char_to_line(offset)
+    }
+
+    /// The char offset where `line` starts. `line` must exist.
+    #[must_use]
+    pub fn line_start(&self, line: usize) -> usize {
+        self.rope.line_to_char(line)
+    }
+
+    /// The number of chars in `line`, without its line break. `line` must exist.
+    #[must_use]
+    pub fn line_len(&self, line: usize) -> usize {
+        let slice = self.rope.line(line);
+        let mut len = slice.len_chars();
+        if len > 0 && slice.char(len - 1) == '\n' {
+            len -= 1;
+        }
+        if len > 0 && slice.char(len - 1) == '\r' {
+            len -= 1;
+        }
+        len
+    }
+
+    /// The char offset of `line`, `column`, clamping the column to the line.
+    #[must_use]
+    pub fn offset_of(&self, line: usize, column: usize) -> usize {
+        self.line_start(line) + column.min(self.line_len(line))
+    }
+
     pub(crate) fn insert(&mut self, offset: usize, text: &str) {
         self.rope.insert(offset, text);
     }
@@ -71,5 +103,9 @@ mod tests {
         assert_eq!(buffer.char_at(1), Some('\r'));
         assert_eq!(buffer.char_at(6), None);
         assert_eq!(Buffer::default().len_lines(), 1);
+        assert_eq!(buffer.line_len(0), 1);
+        assert_eq!(buffer.line_start(1), 3);
+        assert_eq!(buffer.line_of(3), 1);
+        assert_eq!(buffer.offset_of(1, 9), 4);
     }
 }

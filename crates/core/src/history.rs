@@ -4,6 +4,8 @@
 //! `getTypingOperation` in `src/vs/editor/common/cursor/cursorTypeEditOperations.ts`)
 //! and reimplemented here; see `ATTRIBUTION.md`.
 
+use crate::selection::Selections;
+
 /// What kind of edit produced a change; decides where undo steps begin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditKind {
@@ -69,12 +71,13 @@ pub(crate) struct Change {
     pub inserted: String,
 }
 
-/// One undo step: its changes in order, and the cursor and version around it.
+/// One undo step: its changes in the order applied, and the selections and
+/// version around it.
 #[derive(Debug, Clone)]
 pub(crate) struct Step {
     pub changes: Vec<Change>,
-    pub cursor_before: usize,
-    pub cursor_after: usize,
+    pub cursor_before: Selections,
+    pub cursor_after: Selections,
     pub version_before: u64,
     pub version_after: u64,
 }
@@ -110,24 +113,25 @@ impl History {
         self.reset();
     }
 
-    /// Records a change made by an edit of `kind`.
+    /// Records the changes made by one edit of `kind` (one per cursor, in the
+    /// order applied).
     pub fn record(
         &mut self,
         kind: EditKind,
-        change: Change,
-        cursors: (usize, usize),
+        changes: Vec<Change>,
+        cursors: (Selections, Selections),
         versions: (u64, u64),
     ) {
         self.redo.clear();
         let extend = self.open && kind != EditKind::Other && !starts_new_step(self.previous, kind);
         match self.undo.last_mut() {
             Some(step) if extend => {
-                step.changes.push(change);
+                step.changes.extend(changes);
                 step.cursor_after = cursors.1;
                 step.version_after = versions.1;
             }
             _ => self.undo.push(Step {
-                changes: vec![change],
+                changes,
                 cursor_before: cursors.0,
                 cursor_after: cursors.1,
                 version_before: versions.0,

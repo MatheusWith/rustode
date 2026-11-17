@@ -64,12 +64,13 @@ The other 90 built-in extensions come from the source tree (`fonte/arvore/extens
 
 ## Behavior studied and reimplemented by the editor
 
-The rustode editor reimplements behavior studied in the source tree (`02-engenharia-reversa/fonte/arvore/`). No code is copied; the behavior is credited here, and in the doc comments of `history.rs`.
+The rustode editor reimplements behavior studied in the source tree (`02-engenharia-reversa/fonte/arvore/`). No code is copied; the behavior is credited here, and in the doc comments of `history.rs` and `editor.rs`.
 
 | Behavior | Studied in (Code - OSS, MIT) | Reimplemented in |
 |---|---|---|
 | Decoding order (BOM, UTF-8, fallback) and lossy UTF-8 decoding | `src/vs/workbench/services/textfile/common/encoding.ts:88-91` | `crates/fs/src/encoding.rs` |
 | Undo grouping of typing (space starts a step, the next word joins it; typing and deleting never share a step) | `src/vs/editor/common/cursor/cursorTypeEditOperations.ts:1011-1046` (`getTypingOperation`, `shouldPushStackElementBetween`); tests in `src/vs/editor/test/browser/controller/cursor.test.ts:5925-6240` | `crates/core/src/history.rs` |
+| Multi-cursor: box selection skipping short lines, add cursor above/below, add next occurrence (`Ctrl+D`) | `src/vs/editor/common/cursor/cursorColumnSelection.ts:12-77`; `src/vs/editor/common/cursor/cursorMoveCommands.ts:18-46`; `src/vs/editor/contrib/multicursor/browser/multicursor.ts:355-410`, `:592-620` | `crates/core/src/editor.rs`, `crates/core/src/selection.rs` |
 
 ## Trademarks
 
