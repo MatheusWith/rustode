@@ -12,6 +12,7 @@ publish = false
 rustode-config.workspace = true
 rustode-core.workspace = true
 rustode-fs.workspace = true
+rustode-trace.workspace = true
 tracing.workspace = true
 
 [lints]

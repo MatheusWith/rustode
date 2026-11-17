@@ -257,7 +257,7 @@ dependencies = [
 name = "rustode-cli"
 version = "0.1.0"
 dependencies = [
- "rustode-trace",
+ "rustode-workspace",
  "serde_json",
  "tracing",
 ]
@@ -313,6 +313,7 @@ dependencies = [
  "rustode-config",
  "rustode-core",
  "rustode-fs",
+ "rustode-trace",
  "tracing",
 ]
 

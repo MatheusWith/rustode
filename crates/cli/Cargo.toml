@@ -13,7 +13,7 @@ name = "rustode"
 path = "src/main.rs"
 
 [dependencies]
-rustode-trace.workspace = true
+rustode-workspace.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

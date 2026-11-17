@@ -21,7 +21,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Command {
 }
 
 fn main() -> ExitCode {
-    if let Err(err) = rustode_trace::init_from_env() {
+    if let Err(err) = rustode_workspace::trace::init_from_env() {
         eprintln!("warning: {err}");
     }
     let command = parse(std::env::args().skip(1));

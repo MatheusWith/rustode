@@ -13,6 +13,10 @@ pub use document::{Document, DocumentId};
 pub use external::Resolution;
 pub use rustode_core::{EditError, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
+/// Shared tracing and metrics setup, re-exported so frontends depend on the
+/// workspace alone: call `trace::init_from_env()` at startup and record
+/// input-to-frame latency with `trace::LatencyRecorder`.
+pub use rustode_trace as trace;
 
 use rustode_core::Editor;
 
