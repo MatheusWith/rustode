@@ -11,8 +11,8 @@ mod quick_open;
 mod tabs;
 
 pub use config::{
-    Chord, Config, ConfigChange, ConfigFile, Diagnostic, DiagnosticKind, Keybinding, Location,
-    SettingChange, Severity, Value, When,
+    Chord, Config, ConfigChange, ConfigFile, ContextValue, Diagnostic, DiagnosticKind, Keybinding,
+    Location, SettingChange, Severity, Value, When,
 };
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};

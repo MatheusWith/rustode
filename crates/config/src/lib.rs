@@ -22,7 +22,7 @@ pub use settings::{
     Schema, SettingSchema, SettingType, Settings, SettingsFile, override_languages, parse_settings,
     validate,
 };
-pub use when::{When, WhenError, parse_when};
+pub use when::{ContextValue, When, WhenError, parse_when};
 
 use diagnostic::LineIndex;
 

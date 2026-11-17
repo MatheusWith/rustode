@@ -81,6 +81,85 @@ pub enum When {
     Negate(Box<When>),
 }
 
+/// A context key's value while evaluating a `when` clause.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContextValue {
+    /// The key is not set (`undefined`): falsy.
+    Undefined,
+    /// A boolean.
+    Bool(bool),
+    /// A string; empty is falsy.
+    Str(String),
+    /// A number; zero is falsy.
+    Number(f64),
+}
+
+impl ContextValue {
+    fn truthy(&self) -> bool {
+        match self {
+            Self::Undefined => false,
+            Self::Bool(b) => *b,
+            Self::Str(s) => !s.is_empty(),
+            Self::Number(n) => *n != 0.0,
+        }
+    }
+
+    /// JavaScript's loose `==` against a clause value, which VS Code parses
+    /// as `true`, `false` or a string.
+    fn loose_equals(&self, value: &str) -> bool {
+        match (self, value) {
+            (Self::Bool(b), "true") => *b,
+            (Self::Bool(b), "false") => !*b,
+            (Self::Str(s), v) => s == v,
+            (Self::Number(n), v) => v.parse::<f64>().is_ok_and(|x| (x - n).abs() < f64::EPSILON),
+            _ => false,
+        }
+    }
+
+    fn number(&self) -> Option<f64> {
+        match self {
+            Self::Number(n) => Some(*n),
+            Self::Str(s) => s.parse().ok(),
+            _ => None,
+        }
+    }
+}
+
+impl When {
+    /// Evaluates the clause with `context` giving each key's value, following
+    /// VS Code: a key alone is truthiness (`ContextKeyDefinedExpr`), `==` is
+    /// JavaScript's loose equality (`ContextKeyEqualsExpr`), comparisons are
+    /// numeric (`src/vs/platform/contextkey/common/contextkey.ts:766-1460`).
+    /// Regex matches and `in` are not evaluated yet: `=~` and `in` are false,
+    /// `not in` true.
+    #[must_use]
+    pub fn evaluate(&self, context: &dyn Fn(&str) -> ContextValue) -> bool {
+        let compare = |key: &str, value: &str, test: fn(f64, f64) -> bool| match (
+            context(key).number(),
+            value.parse::<f64>(),
+        ) {
+            (Some(a), Ok(b)) => test(a, b),
+            _ => false,
+        };
+        match self {
+            // Regex matches and `in` are not evaluated yet.
+            Self::True | Self::NotIn { .. } => true,
+            Self::False | Self::Regex { .. } | Self::In { .. } => false,
+            Self::Has(key) => context(key).truthy(),
+            Self::Not(key) => !context(key).truthy(),
+            Self::Equals(key, value) => context(key).loose_equals(value),
+            Self::NotEquals(key, value) => !context(key).loose_equals(value),
+            Self::Smaller(key, value) => compare(key, value, |a, b| a < b),
+            Self::SmallerEquals(key, value) => compare(key, value, |a, b| a <= b),
+            Self::Greater(key, value) => compare(key, value, |a, b| a > b),
+            Self::GreaterEquals(key, value) => compare(key, value, |a, b| a >= b),
+            Self::And(all) => all.iter().all(|w| w.evaluate(context)),
+            Self::Or(any) => any.iter().any(|w| w.evaluate(context)),
+            Self::Negate(inner) => !inner.evaluate(context),
+        }
+    }
+}
+
 /// Why a `when` clause did not parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhenError {
@@ -758,5 +837,21 @@ mod tests {
             let parsed = ok(input);
             assert_eq!(ok(&parsed.to_string()), parsed, "{input} -> {parsed}");
         }
+    }
+
+    #[test]
+    fn clauses_evaluate_like_vs_code() {
+        let context = |key: &str| match key {
+            "editorTextFocus" => ContextValue::Bool(true),
+            "editorLangId" => ContextValue::Str("rust".into()),
+            "count" => ContextValue::Number(2.0),
+            _ => ContextValue::Undefined,
+        };
+        let eval = |clause: &str| parse_when(clause).expect("parses").evaluate(&context);
+        assert!(eval("editorTextFocus && editorLangId == rust"));
+        assert!(!eval("editorTextFocus && !editorTextFocus"));
+        assert!(eval("missing || editorTextFocus == true"));
+        assert!(eval("editorLangId != python && count > 1 && count <= 2"));
+        assert!(!eval("missing"));
     }
 }

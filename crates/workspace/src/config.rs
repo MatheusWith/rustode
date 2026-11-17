@@ -1,8 +1,8 @@
 //! Settings and keybindings, loaded from VS Code-format files and reloaded on demand.
 
 pub use rustode_config::{
-    Chord, Config, ConfigChange, ConfigFile, Diagnostic, DiagnosticKind, Keybinding, Location,
-    SettingChange, Severity, Value, When,
+    Chord, Config, ConfigChange, ConfigFile, ContextValue, Diagnostic, DiagnosticKind, Keybinding,
+    Location, SettingChange, Severity, Value, When,
 };
 
 use crate::Workspace;
