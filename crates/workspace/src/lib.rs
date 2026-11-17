@@ -1,10 +1,13 @@
 //! The single in-process API that every frontend uses.
 
+mod commands;
 mod config;
 mod document;
 mod explorer;
 mod external;
+mod fuzzy;
 mod language;
+mod quick_open;
 mod tabs;
 
 pub use config::{
@@ -12,9 +15,12 @@ pub use config::{
     SettingChange, Severity, Value, When,
 };
 
+pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
 pub use document::{Document, DocumentId};
 pub use explorer::{Explorer, ExplorerRow};
 pub use external::Resolution;
+pub use fuzzy::ItemScore;
+pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
 /// Shared tracing and metrics setup, re-exported so frontends depend on the
@@ -129,6 +135,8 @@ pub struct Workspace {
     group: EditorGroup,
     /// The opened folder, if any.
     explorer: Option<Explorer>,
+    /// The opened folder's files for quick open, listed on first use.
+    files: Option<Vec<PathBuf>>,
 }
 
 impl Workspace {
@@ -241,6 +249,7 @@ impl Workspace {
             source,
         })?;
         self.explorer = Some(explorer);
+        self.files = None;
         Ok(())
     }
 
@@ -271,6 +280,27 @@ impl Workspace {
         if let Some(explorer) = self.explorer.as_mut() {
             explorer.refresh();
         }
+        self.files = None;
+    }
+
+    /// Moves the cursor to a 1-based line and column (column 1 when `None`),
+    /// clamped to the text, as quick open's `:line:column` does.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn go_to_line(
+        &mut self,
+        id: DocumentId,
+        line: usize,
+        column: Option<usize>,
+    ) -> Result<(), Error> {
+        let document = self.document(id).ok_or(Error::UnknownDocument(id))?;
+        let position = Position::new(
+            line.saturating_sub(1),
+            column.unwrap_or(1).saturating_sub(1),
+        );
+        let offset = document.offset_of(position);
+        self.set_cursor(id, offset)
     }
 
     /// An open document.

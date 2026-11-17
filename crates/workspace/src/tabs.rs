@@ -30,6 +30,12 @@ impl EditorGroup {
         self.recent.first().copied()
     }
 
+    /// The tabs, most recently used first.
+    #[must_use]
+    pub fn recent(&self) -> &[DocumentId] {
+        &self.recent
+    }
+
     /// Adds `id` at the end if it has no tab yet, and activates it.
     pub(crate) fn open(&mut self, id: DocumentId) {
         if !self.tabs.contains(&id) {

@@ -16,6 +16,7 @@ rustode-fs = { path = "crates/fs" }
 rustode-trace = { path = "crates/trace" }
 rustode-workspace = { path = "crates/workspace" }
 encoding_rs = "0.8"
+ignore = "0.4.34"
 notify = "8.2.2"
 # Only CR, LF and CRLF end lines, as in VS Code (no Unicode line separators).
 ropey = { version = "1.6", default-features = false, features = ["cr_lines", "simd"] }
