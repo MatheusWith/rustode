@@ -1,4 +1,8 @@
 //! Selections: one or more cursors, each with an anchor and a head.
+//!
+//! As in VS Code, selections stay sorted and are merged when they overlap,
+//! or when they touch and one of them is a plain cursor
+//! (`CursorCollection`, `src/vs/editor/common/cursor/cursorCollection.ts:188-201`).
 
 use crate::editor::Range;
 
@@ -139,10 +143,13 @@ impl Selections {
 }
 
 fn overlaps(a: Selection, b: Selection) -> bool {
+    // `a` starts first: merge overlaps, and touches when one is a cursor.
     let (a, b) = (a.range(), b.range());
-    b.start < a.end
-        || (a.start == b.start && a.end == b.end)
-        || (a.is_empty() && b.start == a.start)
+    if a.is_empty() || b.is_empty() {
+        b.start <= a.end
+    } else {
+        b.start < a.end
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +170,12 @@ mod tests {
             [Selection::cursor(0), Selection::new(5, 10)]
         );
         assert_eq!(selections.primary(), Selection::new(5, 10));
+    }
+
+    #[test]
+    fn a_cursor_touching_a_selection_merges_into_it() {
+        let selections = Selections::from_list(vec![Selection::new(2, 5), Selection::cursor(5)], 1);
+        assert_eq!(selections.as_slice(), [Selection::new(2, 5)]);
     }
 
     #[test]

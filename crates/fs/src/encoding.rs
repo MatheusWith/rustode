@@ -1,4 +1,10 @@
 //! Detecting, decoding and encoding text files without losing bytes.
+//!
+//! The order follows VS Code: a byte order mark decides first, then UTF-8
+//! (`src/vs/workbench/services/textfile/common/encoding.ts:88-91`, studied
+//! and reimplemented). Unlike VS Code, which decodes invalid UTF-8 with
+//! replacement characters, invalid bytes fall back to Windows-1252, which
+//! maps every byte, so nothing is lost.
 
 use std::fmt;
 
