@@ -272,3 +272,12 @@ fn escape_and_select_all_go_through_the_workspace() {
         [Selection::cursor(3)]
     );
 }
+
+#[test]
+fn the_status_column_expands_tabs_like_vs_code() {
+    let (mut ws, id) = open("status-col", "\tab\n");
+    ws.set_cursor(id, 2).expect("cursor");
+    assert_eq!(ws.status_line_column(id).expect("status"), (1, 6));
+    ws.set_cursor(id, 4).expect("cursor");
+    assert_eq!(ws.status_line_column(id).expect("status"), (2, 1));
+}

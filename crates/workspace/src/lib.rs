@@ -343,6 +343,32 @@ impl Workspace {
         )
     }
 
+    /// The primary cursor as VS Code's status bar shows it: 1-based line, and
+    /// a 1-based column where tabs advance to the next tab stop and every
+    /// other char counts one (`CursorColumns.toStatusbarColumn`,
+    /// `src/vs/editor/common/core/cursorColumns.ts:61-77`).
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn status_line_column(&self, id: DocumentId) -> Result<(usize, usize), Error> {
+        let tab_size = self.tab_size(id)?;
+        let document = self.document(id).ok_or(Error::UnknownDocument(id))?;
+        let position = document.cursor_position();
+        let prefix: String = document
+            .line(position.line)
+            .chars()
+            .take(position.column)
+            .collect();
+        let column = prefix.chars().fold(0, |column, c| {
+            if c == '\t' {
+                (column / tab_size + 1) * tab_size
+            } else {
+                column + 1
+            }
+        });
+        Ok((position.line + 1, column + 1))
+    }
+
     /// Escape: drops secondary cursors, or else collapses the selection.
     /// Returns whether the selections changed.
     ///
