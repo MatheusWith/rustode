@@ -8,6 +8,8 @@
 //! and works in every terminal, Ctrl+PageDown/PageUp switch tabs
 //! (`src/vs/workbench/browser/parts/editor/editorActions.ts:1277`, `:1325`)
 //! and Ctrl+W closes one (`src/vs/workbench/browser/parts/editor/editorCommands.ts:841`).
+//! Ctrl+P opens quick open, Ctrl+Shift+P or F1 the command palette and
+//! Ctrl+G go to line (see `rustode_workspace`'s command registry).
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rustode_workspace::Movement;
@@ -37,6 +39,9 @@ pub(crate) enum Command {
     NextTab,
     PreviousTab,
     CloseTab,
+    QuickOpen,
+    ShowCommands,
+    GotoLine,
 }
 
 /// What a key does while the explorer has focus.
@@ -65,10 +70,14 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
     let (ctrl, shift, alt) = split(key.modifiers);
     match (key.code, ctrl, shift, alt) {
         (KeyCode::F(6), false, false, false) => Some(Command::FocusNextPart),
+        (KeyCode::F(1), false, false, false) => Some(Command::ShowCommands),
         (KeyCode::PageDown, true, false, false) => Some(Command::NextTab),
         (KeyCode::PageUp, true, false, false) => Some(Command::PreviousTab),
         (KeyCode::Char(c), true, _, false) => match (c.to_ascii_lowercase(), shift) {
             ('e', true) => Some(Command::FocusExplorer),
+            ('p', false) => Some(Command::QuickOpen),
+            ('p', true) => Some(Command::ShowCommands),
+            ('g', false) => Some(Command::GotoLine),
             ('w', false) => Some(Command::CloseTab),
             ('s', false) => Some(Command::Save),
             ('q', false) => Some(Command::Quit),

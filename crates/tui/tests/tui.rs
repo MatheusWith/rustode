@@ -344,3 +344,73 @@ fn the_explorer_takes_the_screen_below_60_columns() {
     );
     let _ = shift(KeyCode::Tab);
 }
+
+fn typed(text: &str) -> Vec<Event> {
+    text.chars().map(|c| key(KeyCode::Char(c))).collect()
+}
+
+#[test]
+fn ctrl_p_finds_a_file_and_enter_opens_it() {
+    let root = project("quick-open");
+    let mut app = App::open(&root).expect("open folder");
+    let mut terminal = terminal(100, 16);
+    send(&mut app, &mut terminal, &[ctrl('p')]);
+    send(&mut app, &mut terminal, &typed("main"));
+    assert_snapshot("quick-open-100x16", &screen(&terminal));
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    let shown = screen(&terminal);
+    assert!(
+        shown.contains("fn main() {}") && shown.contains("Rust"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn f1_runs_a_command_from_the_palette() {
+    let (mut app, path) = open_sample("palette");
+    let mut terminal = terminal(100, 16);
+    send(&mut app, &mut terminal, &[key(KeyCode::Char('x'))]);
+    send(&mut app, &mut terminal, &[key(KeyCode::F(1))]);
+    send(&mut app, &mut terminal, &typed("save"));
+    assert_snapshot("palette-100x16", &screen(&terminal));
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert!(
+        std::fs::read_to_string(&path)
+            .expect("read")
+            .starts_with("xfn main")
+    );
+    assert!(screen(&terminal).contains("Saved"), "{}", screen(&terminal));
+}
+
+#[test]
+fn ctrl_g_goes_to_a_line_and_escape_cancels() {
+    let (mut app, _) = open_sample("goto");
+    let mut terminal = terminal(100, 16);
+    send(&mut app, &mut terminal, &[ctrl('g')]);
+    send(&mut app, &mut terminal, &typed("3"));
+    assert!(
+        screen(&terminal).contains("Go to line 3"),
+        "{}",
+        screen(&terminal)
+    );
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert!(
+        screen(&terminal).contains("Ln 3, Col 1"),
+        "{}",
+        screen(&terminal)
+    );
+    send(
+        &mut app,
+        &mut terminal,
+        &[ctrl('p'), key(KeyCode::Esc), key(KeyCode::Char('y'))],
+    );
+    let text = app
+        .workspace()
+        .document(app.document().expect("doc"))
+        .expect("doc")
+        .text();
+    assert!(
+        text.ends_with("}\n") && text.contains("\ny}"),
+        "typing goes to the editor again: {text:?}"
+    );
+}

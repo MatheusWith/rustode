@@ -8,13 +8,13 @@
 //! paragraph separators and NEL, which do not end lines, are shown the same
 //! way so they cannot hide in a terminal.
 
-use crate::app::{App, Focus, Viewport};
+use crate::app::{App, Focus, QUICK_ROWS, QuickItem, Viewport};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use rustode_workspace::{Document, DocumentId, Eol, Position, Selection};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -82,6 +82,107 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
     if let Some(status) = areas.status {
         draw_status(app, frame, status);
     }
+    if app.quick.is_some() {
+        draw_quick(app, frame);
+    }
+}
+
+/// The quick input box, near the top in the middle like VS Code's: the
+/// text, then the matching rows with matched chars in bold.
+fn draw_quick(app: &mut App, frame: &mut Frame) {
+    let items = app.quick_items();
+    let Some(quick) = app.quick.as_ref() else {
+        return;
+    };
+    let area = frame.area();
+    let width = area.width.saturating_sub(4).min(80);
+    let rows = items.len().min(QUICK_ROWS);
+    let height = to_u16(rows + 3).min(area.height.saturating_sub(1));
+    let outer = Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + 1,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, outer);
+    let block = Block::bordered();
+    let inner = block.inner(outer);
+    frame.render_widget(block, outer);
+    let selected = quick.selected.min(items.len().saturating_sub(1));
+    let first = scroll(0, selected, rows);
+    let text_width = quick.text.width();
+    let buffer = frame.buffer_mut();
+    buffer.set_line(
+        inner.x,
+        inner.y,
+        &Line::from(format!(" {}", quick.text)),
+        inner.width,
+    );
+    for (row, (index, item)) in items.iter().enumerate().skip(first).take(rows).enumerate() {
+        let line = quick_line(item, usize::from(inner.width), index == selected);
+        buffer.set_line(inner.x, inner.y + 1 + to_u16(row), &line, inner.width);
+    }
+    let cursor_x = (inner.x + 1 + to_u16(text_width)).min(inner.right().saturating_sub(1));
+    frame.set_cursor_position((cursor_x, inner.y));
+}
+
+/// One row of the quick input list, padded to `width`.
+fn quick_line(item: &QuickItem, width: usize, selected: bool) -> Line<'static> {
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    let (mut spans, right) = match item {
+        QuickItem::File(file) => {
+            let mut spans = highlighted(&format!(" {}", file.label), &shift(&file.score.label));
+            spans.push(Span::styled(format!("  {}", file.description), dim));
+            (spans, String::new())
+        }
+        QuickItem::Command(found) => (
+            highlighted(
+                &format!(" {}", found.command.label),
+                &shift(&found.positions),
+            ),
+            found.keybinding.clone().unwrap_or_default(),
+        ),
+        QuickItem::Line { line, column } => {
+            let text = match column {
+                Some(column) => format!(" Go to line {line}, column {column}"),
+                None => format!(" Go to line {line}"),
+            };
+            (vec![Span::raw(text)], String::new())
+        }
+        QuickItem::Hint(hint) => (vec![Span::styled(format!(" {hint}"), dim)], String::new()),
+    };
+    let used: usize = spans.iter().map(|s| s.content.width()).sum();
+    let gap = width.saturating_sub(used + right.width() + 1);
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(format!("{right} "), dim));
+    let mut line = Line::from(spans);
+    if selected {
+        line = line.patch_style(SELECTED);
+    }
+    line
+}
+
+/// Positions moved past the leading space of a row.
+fn shift(positions: &[usize]) -> Vec<usize> {
+    positions.iter().map(|p| p + 1).collect()
+}
+
+/// `text` with the chars at `positions` in bold.
+fn highlighted(text: &str, positions: &[usize]) -> Vec<Span<'static>> {
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (index, c) in text.chars().enumerate() {
+        let style = if positions.contains(&index) {
+            bold
+        } else {
+            Style::new()
+        };
+        match spans.last_mut() {
+            Some(last) if last.style == style => last.content.to_mut().push(c),
+            _ => spans.push(Span::styled(c.to_string(), style)),
+        }
+    }
+    spans
 }
 
 fn draw_notice(frame: &mut Frame) {

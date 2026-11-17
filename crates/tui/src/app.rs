@@ -3,11 +3,12 @@
 use crate::keys::{self, Command, ExplorerKey};
 use ratatui::backend::Backend;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame, Terminal};
 use rustode_workspace::trace::{LatencyRecorder, LatencyReport};
 use rustode_workspace::{
-    Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow, Movement, Resolution,
-    Workspace,
+    CommandMatch, CommandScope, Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow,
+    FileMatch, Movement, QuickQuery, Resolution, Workspace, parse_quick_query,
 };
 use std::collections::HashMap;
 use std::io;
@@ -33,6 +34,25 @@ pub(crate) struct Viewport {
     pub left: usize,
 }
 
+/// The quick input box (Ctrl+P, F1, Ctrl+G): its text and selected item.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct QuickInput {
+    pub text: String,
+    pub selected: usize,
+}
+
+/// One row of the quick input list.
+#[derive(Debug, Clone)]
+pub(crate) enum QuickItem {
+    File(FileMatch),
+    Command(CommandMatch),
+    Line { line: usize, column: Option<usize> },
+    Hint(String),
+}
+
+/// Rows the quick input list shows at most.
+pub(crate) const QUICK_ROWS: usize = 10;
+
 /// The terminal editor: open documents in tabs, an optional folder in the
 /// explorer, and the time from each key to the frame that shows it.
 #[derive(Debug)]
@@ -51,6 +71,8 @@ pub struct App {
     pub(crate) explorer_height: usize,
     /// One line for the status bar: a save result, an error or a prompt.
     pub(crate) message: Option<String>,
+    /// The open quick input box, if any.
+    pub(crate) quick: Option<QuickInput>,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -95,6 +117,7 @@ impl App {
             explorer_top: 0,
             explorer_height: 1,
             message: None,
+            quick: None,
             confirm_quit: false,
             confirm_close: None,
             quit: false,
@@ -175,6 +198,15 @@ impl App {
     /// Applies one terminal event to the workspace.
     pub fn handle(&mut self, event: &Event) {
         match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release && self.quick.is_some() => {
+                self.quick_key(*key);
+            }
+            Event::Paste(text) if self.quick.is_some() => {
+                if let Some(quick) = self.quick.as_mut() {
+                    quick.text.push_str(text.lines().next().unwrap_or_default());
+                    quick.selected = 0;
+                }
+            }
             Event::Key(key) if key.kind != KeyEventKind::Release => match self.focus {
                 Focus::Editor => {
                     if let Some(command) = keys::command(*key) {
@@ -217,6 +249,9 @@ impl App {
             Command::FocusExplorer => self.focus_explorer(),
             Command::FocusNextPart => self.focus_next_part(),
             Command::Reload => self.reload(),
+            Command::QuickOpen => self.open_quick(""),
+            Command::ShowCommands => self.open_quick(">"),
+            Command::GotoLine => self.open_quick(":"),
             other => self.edit(other),
         }
     }
@@ -426,6 +461,115 @@ impl App {
 
     fn toggle(&mut self, path: &Path) {
         if let Err(err) = self.workspace.toggle_folder(path) {
+            self.message = Some(err.to_string());
+        }
+    }
+
+    fn open_quick(&mut self, prefix: &str) {
+        self.quick = Some(QuickInput {
+            text: prefix.to_owned(),
+            selected: 0,
+        });
+    }
+
+    /// The rows for the quick input's current text.
+    pub(crate) fn quick_items(&mut self) -> Vec<QuickItem> {
+        let Some(text) = self.quick.as_ref().map(|q| q.text.clone()) else {
+            return Vec::new();
+        };
+        match parse_quick_query(&text) {
+            QuickQuery::Files(query) => self
+                .workspace
+                .quick_open(query, QUICK_ROWS)
+                .into_iter()
+                .map(QuickItem::File)
+                .collect(),
+            QuickQuery::Commands(query) => self
+                .workspace
+                .commands(query)
+                .into_iter()
+                .map(QuickItem::Command)
+                .collect(),
+            QuickQuery::Line { line, column } => vec![QuickItem::Line { line, column }],
+            QuickQuery::NoLine => {
+                let lines = self
+                    .document()
+                    .and_then(|id| self.workspace.document(id))
+                    .map_or(0, Document::line_count);
+                vec![QuickItem::Hint(format!(
+                    "Type a line number between 1 and {lines} to go to"
+                ))]
+            }
+        }
+    }
+
+    /// Keys while the quick input box is open: typing filters, Up/Down
+    /// select, Enter runs the selected row, Escape closes.
+    fn quick_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let count = self.quick_items().len();
+        let Some(quick) = self.quick.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => self.quick = None,
+            KeyCode::Enter => self.run_quick(),
+            KeyCode::Up => quick.selected = quick.selected.saturating_sub(1),
+            KeyCode::Down => quick.selected = (quick.selected + 1).min(count.saturating_sub(1)),
+            KeyCode::Char('p') if ctrl => {
+                quick.selected = (quick.selected + 1).min(count.saturating_sub(1));
+            }
+            KeyCode::Backspace => {
+                quick.text.pop();
+                quick.selected = 0;
+            }
+            KeyCode::Char(c) if !ctrl => {
+                quick.text.push(c);
+                quick.selected = 0;
+            }
+            _ => {}
+        }
+    }
+
+    fn run_quick(&mut self) {
+        let selected = self.quick.as_ref().map_or(0, |q| q.selected);
+        let item = self.quick_items().into_iter().nth(selected);
+        self.quick = None;
+        match item {
+            Some(QuickItem::File(file)) => match self.workspace.open(&file.path) {
+                Ok(_) => self.focus = Focus::Editor,
+                Err(err) => self.message = Some(err.to_string()),
+            },
+            Some(QuickItem::Command(found)) => {
+                self.run_palette_command(found.command.id, found.command.scope);
+            }
+            Some(QuickItem::Line { line, column }) => {
+                self.focus = Focus::Editor;
+                self.report(|ws, id| ws.go_to_line(id, line, column));
+            }
+            Some(QuickItem::Hint(_)) | None => {}
+        }
+    }
+
+    /// Runs a command picked in the palette: workbench commands through the
+    /// TUI's own handling, editor commands through the workspace.
+    fn run_palette_command(&mut self, id: &str, scope: CommandScope) {
+        let command = match id {
+            "workbench.action.files.save" => Some(Command::Save),
+            "workbench.action.quit" => Some(Command::Quit),
+            "workbench.action.closeActiveEditor" => Some(Command::CloseTab),
+            "workbench.view.explorer" => Some(Command::FocusExplorer),
+            "workbench.action.focusNextPart" => Some(Command::FocusNextPart),
+            "workbench.action.quickOpen" => Some(Command::QuickOpen),
+            "workbench.action.showCommands" => Some(Command::ShowCommands),
+            "workbench.action.gotoLine" => Some(Command::GotoLine),
+            _ => None,
+        };
+        if let Some(command) = command {
+            self.run_command(command);
+        } else if scope == CommandScope::Editor
+            && let Err(err) = self.workspace.execute(id)
+        {
             self.message = Some(err.to_string());
         }
     }
