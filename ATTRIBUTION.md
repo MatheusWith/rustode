@@ -62,6 +62,25 @@ The other 90 built-in extensions come from the source tree (`fonte/arvore/extens
 | List of malicious/obsolete extensions | `raw.githubusercontent.com/EclipseFdn/publish-extensions/…/extensions.json` | at startup (`extensionsGallery.controlUrl`) |
 | Extension gallery and files | `open-vsx.org`, `openvsx.eclipsecontent.org` | when the extensions view opens |
 
+## Editor dependencies
+
+These are the direct third-party dependencies of the rustode workspace members (the crates in `crates/` and `xtask`). Their use is governed by [ADR 0010](docs/adr/0010-ecosystem-crates-allowed.md).
+
+- **Source of the table:** measured at `d6debfb` on 2026-11-17, from the project root, with `cargo metadata --format-version 1 --locked --offline`. Version and license are the resolved package's `version` and `license` fields.
+- **Whole graph:** it has 56 third-party packages for all targets (same command), each pinned by `Cargo.lock`. Each one's license is in its own manifest.
+- **License check:** `cargo deny --locked --offline check` accepts only the licenses listed in `deny.toml`. At `d6debfb` it reported `advisories ok, bans ok, licenses ok, sources ok`.
+
+| Crate | Version | License | Used by | What for |
+|---|---|---|---|---|
+| `encoding_rs` | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause | `rustode-fs` | decoding and encoding files that are not UTF-8 (`crates/fs/src/encoding.rs`) |
+| `notify` | 8.2.2 | CC0-1.0 | `rustode-fs` | watching open files for changes made by other programs (`crates/fs/src/watch.rs`) |
+| `ropey` | 1.6.1 | MIT | `rustode-core` | the rope that holds each document's text (`crates/core/src/buffer.rs`) |
+| `serde_json` | 1.0.154 | MIT OR Apache-2.0 | `xtask`; `rustode-cli` (tests only) | reading the JSON of `cargo metadata` and llvm-cov in xtask (`xtask/src/coverage.rs`, `xtask/tests/frontend_deps.rs`); reading the JSON trace lines in the CLI tests (`crates/cli/tests/version.rs`) |
+| `tracing` | 0.1.44 | MIT | `rustode-trace`, `rustode-fs`, `rustode-workspace`, `rustode-cli` | spans and events (`crates/trace/src/spans.rs`) |
+| `tracing-subscriber` | 0.3.23 (features `ansi`, `env-filter`, `fmt`, `json`, `std`; no default features) | MIT | `rustode-trace` | the subscriber: the `RUSTODE_LOG` filter and pretty or JSON output on stderr (`crates/trace/src/config.rs`) |
+
+The throwaway tools of finding [0002](09-analises/0002-entrada-virtual-wayland.md) (`09-analises/0002-anexos/tools/fakeinput/` and `standin/`) are separate Cargo projects. Each has its own `Cargo.lock` and an empty `[workspace]`, so they are outside the editor's workspace and not part of the editor.
+
 ## Behavior studied and reimplemented by the editor
 
 The rustode editor reimplements behavior studied in the source tree (`02-engenharia-reversa/fonte/arvore/`). No code is copied; the behavior is credited here, and in the doc comments of the files listed.
