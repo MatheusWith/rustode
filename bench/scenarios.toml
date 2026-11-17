@@ -1,0 +1,50 @@
+# rustode benchmark scenarios: the versioned list (spec, story 106).
+#
+# `rustode bench <id>` runs one scenario on rustode and on the App (the local
+# VSCodium 1.147.0 in 01-app/, the only comparison baseline) and writes a
+# labeled report; `rustode bench --dry-run <id>` prints the plan and launches
+# nothing. Run it from the project root.
+#
+# Rules for this file:
+# - bump `version` whenever the meaning of an existing scenario changes
+#   (fixture, repetitions, what is timed), so reports made with different
+#   versions are never read as the same measurement; every report records the
+#   version it used;
+# - add new scenarios under new ids instead of reusing an old id;
+# - fixtures are generated, never real user files;
+# - only operations that exist on both sides belong here (spec, "Performance
+#   contract"); scenarios that need the GUI arrive with M3.
+version = 1
+
+[[scenario]]
+id = "open-file-1mb"
+title = "Open a 1 MiB text file"
+# What the runner does on each side. "open-file" is the only kind so far.
+kind = "open-file"
+
+# Generated and deterministic: numbered ASCII lines of `line_bytes` bytes,
+# each ending in LF, with the last line cut so the file has exactly `bytes`
+# bytes. Same shape as the 1 MiB fixture of crates/workspace/tests/stress.rs.
+[scenario.fixture]
+bytes = 1_048_576
+line_bytes = 80
+
+# rustode side: `Workspace::open` in-process, on a fresh workspace each time.
+# Warm-up opens are not recorded.
+[scenario.rustode]
+warmup = 1
+repetitions = 20
+
+# App side: a cold launch of a verified copy of the App with the fixture on
+# its command line, on the QA harness's virtual display, with a fresh
+# isolated profile each time, until the editor shows the fixture's first
+# line. Warm-up launches are not recorded. `timeout_s` is per launch;
+# `poll_ms` is how often the editor is checked over CDP. `driver` and
+# `settings` are relative to this file.
+[scenario.app]
+warmup = 1
+repetitions = 3
+timeout_s = 60
+poll_ms = 10
+driver = "app/open_file.cjs"
+settings = "app/settings.json"

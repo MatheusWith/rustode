@@ -1,0 +1,24 @@
+// settings.json copied into each fresh App profile by `rustode bench`.
+// Same values as the QA harness's suite/fixtures/settings.visual.json with
+// @THEME@ = "Default Dark Modern", which is what its startup benchmark uses
+// (run_battery.sh), so App launch times stay comparable with the QA runs.
+// Versioned here so a rustode report never depends on a file that can change
+// outside this repository.
+{
+	"workbench.colorTheme": "Default Dark Modern",
+	"editor.fontFamily": "'DejaVu Sans Mono'",
+	"editor.fontSize": 14,
+	"editor.fontLigatures": false,
+	"editor.cursorBlinking": "solid",
+	"workbench.reduceMotion": "on",
+	"window.zoomLevel": 0,
+	"terminal.integrated.fontFamily": "'DejaVu Sans Mono'",
+	"terminal.integrated.profiles.linux": {
+		"bash-limpo": { "path": "/bin/bash", "args": ["--norc", "--noprofile"] }
+	},
+	"terminal.integrated.defaultProfile.linux": "bash-limpo",
+	"telemetry.telemetryLevel": "off",
+	"update.mode": "none",
+	"extensions.autoCheckUpdates": false,
+	"git.openRepositoryInParentFolders": "never"
+}
