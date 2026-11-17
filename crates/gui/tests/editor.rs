@@ -32,7 +32,10 @@ fn open(path: &Path) -> Harness<'static, EditorApp> {
     let app = EditorApp::open(path).expect("open");
     let mut harness = Harness::builder()
         .with_size([WIDTH, HEIGHT])
-        .build_eframe(move |_| app);
+        .build_eframe(move |cc| {
+            rustode_gui::fonts::install(&cc.egui_ctx);
+            app
+        });
     harness.run();
     harness
 }

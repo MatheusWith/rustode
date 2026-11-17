@@ -15,6 +15,7 @@
 
 mod app;
 mod editor;
+pub mod fonts;
 mod keys;
 pub mod latency;
 mod run;

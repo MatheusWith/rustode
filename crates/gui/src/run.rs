@@ -58,7 +58,10 @@ pub fn run_timed(
     let eframe = eframe::create_native(
         "rustode",
         options,
-        Box::new(move |_| Ok(Box::new(app))),
+        Box::new(move |cc| {
+            crate::fonts::install(&cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
         &event_loop,
     );
     let mut timed = Timed {

@@ -72,6 +72,8 @@ These are the direct third-party dependencies of the rustode workspace members (
 
 | Crate | Version | License | Used by | What for |
 |---|---|---|---|---|
+| `eframe` | 0.36.2 (features `accesskit`, `wayland`, `wgpu`, `x11`; no default features, so not egui's default fonts) | MIT OR Apache-2.0 | `rustode-gui` | the window, egui and wgpu rendering, and AccessKit for screen readers (`crates/gui/src/run.rs`, `crates/gui/src/app.rs`, `crates/gui/src/editor.rs`) |
+| `egui_kittest` | 0.36.2 (features `eframe`, `snapshot`, `wgpu`; dev only) | MIT OR Apache-2.0 | `rustode-gui` | input-to-frame tests: the AccessKit tree and image snapshots (`crates/gui/tests/editor.rs`) |
 | `encoding_rs` | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause | `rustode-fs` | decoding and encoding files that are not UTF-8 (`crates/fs/src/encoding.rs`) |
 | `ignore` | 0.4.34 | Unlicense OR MIT | `rustode-fs` | walking an opened folder for quick open, honoring `.gitignore` and `.ignore` (`crates/fs/src/files.rs`) |
 | `notify` | 8.2.2 | CC0-1.0 | `rustode-fs` | watching open files for changes made by other programs (`crates/fs/src/watch.rs`) |
@@ -83,6 +85,9 @@ These are the direct third-party dependencies of the rustode workspace members (
 | `tracing` | 0.1.44 | MIT | `rustode-trace`, `rustode-fs`, `rustode-workspace`, `rustode-cli`, `rustode-tui` | spans and events (`crates/trace/src/spans.rs`) |
 | `tracing-subscriber` | 0.3.23 (features `ansi`, `env-filter`, `fmt`, `json`, `std`; no default features) | MIT | `rustode-trace` | the subscriber: the `RUSTODE_LOG` filter and pretty or JSON output on stderr (`crates/trace/src/config.rs`) |
 | `unicode-width` | 0.2.3 | MIT OR Apache-2.0 | `rustode-tui` | the number of terminal columns each character takes, for wide characters in the editor and the status bar (`crates/tui/src/view.rs`) |
+| `winit` | 0.30.13 (features `rwh_06`, `wayland`, `wayland-csd-adwaita-notitle`, `wayland-dlopen`, `x11`; no default features) | Apache-2.0 | `rustode-gui` | the event loop eframe runs on, wrapped to time input to present (`crates/gui/src/run.rs`) |
+
+Bundled with the GUI, not a crate: the **Go fonts** (Go Mono for the text, Go Regular for the interface), made by Bigelow & Holmes for the Go project and published under Go's BSD-3-Clause license. They live in `crates/gui/assets/fonts/` with their `LICENSE` and `README`, taken on 2026-11-17 from `golang.org/x/image` (`font/gofont/ttfs/`, through the `golang/image` mirror on GitHub); SHA-256 `8bc66a01…1ed7` (`Go-Mono.ttf`) and `197d9f37…74be3` (`Go-Regular.ttf`). They replace egui's default fonts (`epaint_default_fonts`), whose OFL-1.1 and Ubuntu-font-1.0 licenses `deny.toml` does not allow (`crates/gui/src/fonts.rs`).
 
 The throwaway tools of finding [0002](09-analises/0002-entrada-virtual-wayland.md) (`09-analises/0002-anexos/tools/fakeinput/` and `standin/`) are separate Cargo projects. Each has its own `Cargo.lock` and an empty `[workspace]`, so they are outside the editor's workspace and not part of the editor.
 

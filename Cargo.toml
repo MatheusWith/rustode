@@ -17,7 +17,7 @@ rustode-trace = { path = "crates/trace" }
 rustode-workspace = { path = "crates/workspace" }
 # GUI: eframe on wgpu (no glow) with AccessKit. winit is the version eframe
 # uses; the GUI wraps eframe's event handler to time input-to-present.
-eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "wayland", "wgpu", "x11"] }
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 encoding_rs = "0.8"
 ignore = "0.4.34"
