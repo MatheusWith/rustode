@@ -313,11 +313,8 @@ impl Workspace {
     /// # Errors
     /// When there is no such document.
     pub fn tab(&mut self, id: DocumentId) -> Result<(), Error> {
+        let tab_size = self.tab_size(id)?;
         let language = self.document_mut(id)?.language_id();
-        let tab_size = match self.config.language_value(language, "editor.tabSize") {
-            Some(Value::Number(n)) => setting_count(*n).unwrap_or(4),
-            _ => 4,
-        };
         let insert_spaces = !matches!(
             self.config.language_value(language, "editor.insertSpaces"),
             Some(Value::Bool(false))
@@ -325,6 +322,44 @@ impl Workspace {
         self.edit(id, |editor| {
             editor.insert_tab(tab_size, insert_spaces);
             Ok(true)
+        })
+    }
+
+    /// The tab size for a document: `editor.tabSize` with its language's
+    /// override, 4 by default. Frontends use it to draw tabs.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn tab_size(&self, id: DocumentId) -> Result<usize, Error> {
+        let document = self.document(id).ok_or(Error::UnknownDocument(id))?;
+        Ok(
+            match self
+                .config
+                .language_value(document.language_id(), "editor.tabSize")
+            {
+                Some(Value::Number(n)) => setting_count(*n).unwrap_or(4),
+                _ => 4,
+            },
+        )
+    }
+
+    /// Escape: drops secondary cursors, or else collapses the selection.
+    /// Returns whether the selections changed.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn cancel_selections(&mut self, id: DocumentId) -> Result<bool, Error> {
+        self.select(id, Editor::cancel_selections)
+    }
+
+    /// Selects the whole text.
+    ///
+    /// # Errors
+    /// When there is no such document.
+    pub fn select_all(&mut self, id: DocumentId) -> Result<(), Error> {
+        self.edit(id, |editor| {
+            editor.select_all();
+            Ok(false)
         })
     }
 

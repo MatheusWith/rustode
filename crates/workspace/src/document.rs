@@ -290,6 +290,20 @@ impl Document {
             .offset_of(position.line, position.column)
     }
 
+    /// The encoding as VS Code's status bar shows it (`labelShort` in
+    /// `src/vs/workbench/services/textfile/common/encoding.ts:547-578`, shown
+    /// by `src/vs/workbench/browser/parts/editor/editorStatus.ts:903`).
+    #[must_use]
+    pub fn encoding_name(&self) -> &'static str {
+        match (self.encoding, self.bom) {
+            (Encoding::Utf8, false) => "UTF-8",
+            (Encoding::Utf8, true) => "UTF-8 with BOM",
+            (Encoding::Utf16Le, _) => "UTF-16 LE",
+            (Encoding::Utf16Be, _) => "UTF-16 BE",
+            (Encoding::Windows1252, _) => "Windows 1252",
+        }
+    }
+
     /// The language id used by settings overrides, e.g. `rust`.
     #[must_use]
     pub fn language_id(&self) -> &'static str {

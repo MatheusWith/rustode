@@ -242,3 +242,33 @@ fn a_reload_from_disk_takes_the_files_line_ending() {
     ws.undo(id).expect("undo");
     assert_eq!(ws.document(id).expect("doc").eol(), Eol::Lf);
 }
+
+#[test]
+fn the_status_bar_shows_encodings_as_vs_code_does() {
+    let (ws, id) = open("enc-utf8", "a");
+    assert_eq!(ws.document(id).expect("doc").encoding_name(), "UTF-8");
+    let path = dir("enc-bom").join("f.txt");
+    std::fs::write(&path, b"\xEF\xBB\xBFa").expect("fixture");
+    let mut ws = Workspace::new();
+    let id = ws.open(&path).expect("open");
+    assert_eq!(
+        ws.document(id).expect("doc").encoding_name(),
+        "UTF-8 with BOM"
+    );
+    assert_eq!(ws.tab_size(id).expect("tab size"), 4);
+}
+
+#[test]
+fn escape_and_select_all_go_through_the_workspace() {
+    let (mut ws, id) = open("escape", "abc");
+    ws.select_all(id).expect("select all");
+    assert_eq!(
+        ws.document(id).expect("doc").selections(),
+        [Selection::new(0, 3)]
+    );
+    assert!(ws.cancel_selections(id).expect("escape"));
+    assert_eq!(
+        ws.document(id).expect("doc").selections(),
+        [Selection::cursor(3)]
+    );
+}

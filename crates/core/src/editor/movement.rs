@@ -87,6 +87,29 @@ impl Editor {
         }
     }
 
+    /// Escape: with several selections, keeps only the primary one (VS Code's
+    /// `removeSecondaryCursors`); otherwise collapses the selection to its
+    /// cursor (`cancelSelection`), as in `src/vs/editor/browser/coreCommands.ts:1773-1824`.
+    /// Returns whether the selections changed.
+    pub fn cancel_selections(&mut self) -> bool {
+        let primary = self.primary();
+        let next = if self.selections().len() > 1 {
+            primary
+        } else if primary.is_empty() {
+            return false;
+        } else {
+            Selection::cursor(primary.head)
+        };
+        self.select(Selections::single(next));
+        true
+    }
+
+    /// Selects the whole text, anchored at the start.
+    pub fn select_all(&mut self) {
+        let end = self.buffer.len_chars();
+        self.select(Selections::single(Selection::new(0, end)));
+    }
+
     /// Enter: replaces each selection with `eol` plus the indentation of its
     /// line up to the cursor. Starts a new undo step; typing after it joins.
     pub fn insert_line_break(&mut self, eol: &str) {
@@ -259,6 +282,21 @@ mod tests {
         assert_eq!(editor.cursor(), 12);
         editor.move_cursors(Movement::Up, false);
         assert_eq!(editor.cursor(), 8);
+    }
+
+    #[test]
+    fn escape_drops_secondary_cursors_then_the_selection() {
+        let mut editor = Editor::new("abc abc");
+        editor
+            .set_selections(vec![Selection::new(0, 3), Selection::new(4, 7)], 1)
+            .expect("select");
+        assert!(editor.cancel_selections());
+        assert_eq!(editor.selections(), [Selection::new(4, 7)]);
+        assert!(editor.cancel_selections());
+        assert_eq!(editor.selections(), [Selection::cursor(7)]);
+        assert!(!editor.cancel_selections());
+        editor.select_all();
+        assert_eq!(editor.selections(), [Selection::new(0, 7)]);
     }
 
     #[test]
