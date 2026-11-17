@@ -1,14 +1,19 @@
 //! The `rustode` command-line interface.
 
+mod bench;
+
 use std::process::ExitCode;
 
-const USAGE: &str = "Usage: rustode [--version | --help]";
+const USAGE: &str = "\
+Usage: rustode [--version | --help]
+       rustode bench [OPTIONS] <SCENARIO>    (see rustode bench --help)";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Version,
     Help,
+    Bench(Vec<String>),
     Unknown(String),
 }
 
@@ -16,6 +21,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Command {
     match args.next().as_deref() {
         Some("--version" | "-V") => Command::Version,
         None | Some("--help" | "-h") => Command::Help,
+        Some("bench") => Command::Bench(args.collect()),
         Some(other) => Command::Unknown(other.to_owned()),
     }
 }
@@ -35,6 +41,7 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Command::Bench(args) => bench::run(&args),
         Command::Unknown(arg) => {
             eprintln!("error: unexpected argument '{arg}'\n\n{USAGE}");
             ExitCode::from(2)

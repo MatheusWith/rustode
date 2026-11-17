@@ -14,10 +14,10 @@ path = "src/main.rs"
 
 [dependencies]
 rustode-workspace.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
+serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true
