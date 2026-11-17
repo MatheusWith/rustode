@@ -36,6 +36,7 @@ project_name: "rustode"
 # The first language server is the default language and the respective language server will be used as a fallback.
 # Note that when using the JetBrains backend, language servers are not used and this list is correspondingly ignored.
 language_servers:
+- rust
 - typescript
 
 # the encoding used by text files in the project
@@ -68,13 +69,28 @@ line_ending:
 language_backend:
 
 # whether to use project's .gitignore files to ignore files
-ignore_all_files_in_gitignore: true
+ignore_all_files_in_gitignore: false
 
 # advanced configuration option allowing to configure language server-specific options.
 # Maps the language key to the options.
 # The settings are considered only if the project is trusted (see global configuration to define trusted projects).
 # See https://oraios.github.io/serena/02-usage/050_configuration.html#language-server-specific-settings
-ls_specific_settings: {}
+ls_specific_settings:
+  rust:
+    # Applied only when the project is trusted (trusted_project_path_patterns
+    # in ~/.serena/serena_config.yml). linkedProjects keeps rust-analyzer on
+    # the editor's workspace, never on the Cargo projects inside the source
+    # tree (cli/, copilot_shim/), whose dependencies are not vendored.
+    # cargo.targetDir keeps its checks in target/rust-analyzer, so they never
+    # hold the lock on target/ that cargo, clippy and the hooks use. The cargo
+    # table replaces Serena's whole default one, so its other keys are repeated.
+    initializationOptions:
+      linkedProjects: ["Cargo.toml"]
+      cargo:
+        autoreload: true
+        buildScripts:
+          enable: true
+        targetDir: true
 
 # list of workspace folder paths (LSP backend only).
 # These folders will be used to build up Serena's symbol index.
@@ -85,7 +101,7 @@ ls_specific_settings: {}
 #   ls_workspace_folders:
 #     - "./subproject1"
 #     - "./subproject2"
-ls_workspace_folders: ["02-engenharia-reversa/fonte/arvore"]
+ls_workspace_folders: ["."]
 
 # list of additional workspace folder paths for cross-package reference support.
 # Paths can be absolute or relative to the project root.
@@ -108,7 +124,30 @@ ls_additional_workspace_folders: []
 #     - "**/bin/**"
 #     - "**/obj/**"
 # Note: global ignored_paths from serena_config.yml are also applied additively.
-ignored_paths: []
+# The evidence folders are gitignored (AGENTS.md §0.1), so honoring .gitignore
+# would also hide the VS Code source tree. Instead, everything except the
+# source tree 02-engenharia-reversa/fonte/arvore is ignored here.
+ignored_paths:
+- "01-app/**"
+- "02-engenharia-reversa/asar/**"
+- "02-engenharia-reversa/out-formatado/**"
+- "02-engenharia-reversa/*.txt"
+- "02-engenharia-reversa/*.json"
+- "02-engenharia-reversa/fonte/*.diff"
+- "02-engenharia-reversa/fonte/*.txt"
+- "03-documentos/**"
+- "04-fotos/**"
+- "05-qa/**"
+- "06-port/**"
+- "07-vscodium-origem/**"
+- "08-testes-do-build/**"
+- "09-analises/*-anexos/**"
+- "target/**"
+- "*.vscdb"
+- ".codegraph/**"
+- ".opencode/**"
+- ".scratch/**"
+- ".claude/settings.local.json"
 
 # whether the project is in read-only mode
 # If set to true, all editing tools will be disabled and attempts to use them will result in an error
@@ -118,7 +157,14 @@ read_only: true
 # list of tool names to exclude.
 # This extends the existing exclusions (e.g. from the global configuration)
 # Find the list of tools here: https://oraios.github.io/serena/01-about/035_tools.html
-excluded_tools: []
+# AGENTS.md and ROADMAP.md hold the project knowledge (AGENTS.md §9), so
+# Serena's onboarding and its own memory store stay off.
+excluded_tools:
+- onboarding
+- write_memory
+- edit_memory
+- delete_memory
+- rename_memory
 
 # list of tools to include that would otherwise be disabled (particularly optional tools that are disabled by default).
 # This extends the existing inclusions (e.g. from the global configuration).
@@ -147,7 +193,7 @@ added_modes:
 
 # initial prompt for the project. It will always be given to the LLM upon activating the project
 # (contrary to the memories, which are loaded on demand).
-initial_prompt: "Projeto de engenharia reversa do VSCodium 1.147.0. Leia AGENTS.md antes de tudo: as pastas 01 a 08 são evidência somente leitura e a árvore-fonte fica em 02-engenharia-reversa/fonte/arvore (sem node_modules; tipos externos não resolvem)."
+initial_prompt: "rustode holds two things: the reverse-engineering study of VSCodium 1.147.0, and the rustode editor, written in Rust in crates/ and xtask/. Read AGENTS.md first; it is the only rulebook. Folders 01 to 08 are read-only evidence. The VS Code source tree is 02-engenharia-reversa/fonte/arvore (TypeScript, without node_modules, so external types do not resolve). Serena is read-only here: edit with your own tools."
 
 # time budget (seconds) per tool call for the retrieval of additional symbol information
 # such as docstrings or parameter information.
