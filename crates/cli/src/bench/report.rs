@@ -287,8 +287,7 @@ impl Report<'_> {
             let dir = app
                 .copy_dir
                 .as_deref()
-                .map(display::path)
-                .unwrap_or_default();
+                .map_or_else(Default::default, display::path);
             let _ = writeln!(out, "  copy        {} ({dir})", copy.summary());
         }
         if let Some(after) = &app.after {

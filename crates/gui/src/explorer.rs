@@ -132,8 +132,7 @@ fn count(value: f32) -> usize {
 fn rows(workspace: &Workspace) -> Vec<ExplorerRow> {
     workspace
         .explorer()
-        .map(rustode_workspace::Explorer::rows)
-        .unwrap_or_default()
+        .map_or_else(Default::default, rustode_workspace::Explorer::rows)
 }
 
 /// Draws the sidebar over the whole of `ui`, running what its input asks.
@@ -173,10 +172,9 @@ pub(crate) fn show(ui: &mut Ui, workspace: &mut Workspace, view: &mut View) -> O
         pos2(rect.left() + 10.0, header.center().y),
         true,
     );
-    let name = root
-        .file_name()
-        .map(|name| name.to_string_lossy().to_uppercase())
-        .unwrap_or_default();
+    let name = root.file_name().map_or_else(Default::default, |name| {
+        name.to_string_lossy().to_uppercase()
+    });
     text(ui, header, &name, TITLE_SIZE, 20.0);
     let list = Rect::from_min_max(
         pos2(rect.left(), header.bottom()),

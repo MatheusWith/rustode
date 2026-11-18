@@ -1,0 +1,16 @@
+ main.rs │
+   1 fn main() {
+E  2     let x = ERROR;
+W  3     WARN
+   4 }
+   5
+
+
+
+
+ PROBLEMS ──────────────────────────────────────────────────────────────────────────────────────────
+ main.rs    2
+   E ERROR found  test-lsp  [Ln 2, Col 13]
+   W WARN found  test-lsp  [Ln 3, Col 5]
+
+ E 1 W 1  main.rs                                    Ln 1, Col 1  UTF-8  LF  rustode-test-lsp  Rust

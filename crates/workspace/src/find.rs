@@ -370,7 +370,7 @@ fn track(buffer: &Buffer, selection: Selection, edits: &[(Range, String)]) -> Se
 /// char stays; one at the edge of that part stays if it sticks to the char
 /// before it (or always, when text was removed there); the rest of the
 /// edit's ends go to the end of the new text; ends after it shift.
-fn follow(offset: usize, sticks_left: bool, edit: Range, inserted: usize) -> usize {
+pub(crate) fn follow(offset: usize, sticks_left: bool, edit: Range, inserted: usize) -> usize {
     let removed = edit.len();
     if offset < edit.start || (offset == edit.start && (removed > 0 || sticks_left)) {
         return offset;

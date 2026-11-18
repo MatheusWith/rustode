@@ -7,6 +7,10 @@
 //! and bidirectional formatting characters as `[U+XXXX]`. Unicode line and
 //! paragraph separators and NEL, which do not end lines, are shown the same
 //! way so they cannot hide in a terminal.
+//!
+//! Diagnostics are underlined over the range the workspace gives (an empty
+//! one at a line's end takes one cell), and the gutter shows the line's most
+//! severe problem as E, W or I in its first column.
 
 use crate::app::{App, EditorHit, Focus, Hits, QUICK_ROWS, QuickItem, Viewport};
 use crate::theme::Theme;
@@ -16,7 +20,10 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use rustode_workspace::{Document, DocumentId, Eol, Position, Selection};
+use rustode_workspace::{
+    Document, DocumentId, Eol, Marker, MarkerSeverity, Position, Selection, ServerState,
+};
+use std::collections::HashMap;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Width of the sidebar.
@@ -91,6 +98,15 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
         }
     }
     if let Some(editor) = areas.editor {
+        let editor = if app.problems.visible {
+            let panel = crate::problems::height(editor.height);
+            let [editor, problems] =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(panel)]).areas(editor);
+            crate::problems::draw(app, frame, problems);
+            editor
+        } else {
+            editor
+        };
         draw_editor_group(app, frame, editor);
         if app.find_visible {
             draw_find(app, frame, editor);
@@ -295,8 +311,7 @@ fn file_name(document: &Document) -> String {
     document
         .path()
         .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_else(Default::default, |name| name.to_string_lossy().into_owned())
 }
 
 fn to_u16(value: usize) -> u16 {
@@ -326,8 +341,7 @@ fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
     let root = explorer
         .root()
         .file_name()
-        .map(|n| n.to_string_lossy().to_uppercase())
-        .unwrap_or_default();
+        .map_or_else(Default::default, |n| n.to_string_lossy().to_uppercase());
     buffer.set_line(
         inner.x,
         inner.y + 1,
@@ -374,8 +388,15 @@ fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
     }
 }
 
-fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
+fn draw_status(app: &mut App, frame: &mut Frame, area: Rect) {
     let document = app.document().and_then(|id| app.workspace.document(id));
+    let server = app
+        .document()
+        .and_then(|id| app.workspace.language_server(id))
+        .map_or_else(String::new, |status| match status.state {
+            ServerState::Running => format!("{}  ", status.name),
+            state => format!("{} ({})  ", status.name, state.label()),
+        });
     let right = document.map_or_else(String::new, |document| {
         let (line, column) = app
             .document()
@@ -386,15 +407,25 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
             Eol::Crlf => "CRLF",
         };
         format!(
-            "Ln {line}, Col {column}  {}  {eol}  {} ",
+            "Ln {line}, Col {column}  {}  {eol}  {server}{} ",
             document.encoding_name(),
             document.language_name()
         )
     });
-    let mut left = document.map_or_else(String::new, |document| {
+    // The counts show once a language server is configured: until then
+    // nothing can report a problem.
+    let counts =
+        (!app.workspace.language_servers().is_empty()).then(|| crate::problems::counts_label(app));
+    let mut left = counts
+        .as_ref()
+        .map_or_else(String::new, |c| format!(" {c} "));
+    app.hits.problems_status = counts
+        .as_ref()
+        .map(|c| (area.y, area.x, area.x.saturating_add(to_u16(c.width() + 2))));
+    left.push_str(&document.map_or_else(String::new, |document| {
         let dirty = if document.is_dirty() { " ●" } else { "" };
         format!(" {}{dirty}", file_name(document))
-    });
+    }));
     if let Some(message) = &app.message {
         left = format!("{left}  {message}");
     }
@@ -513,6 +544,78 @@ struct RowContext<'a> {
     width: usize,
     selection: Style,
     secondary_cursor: Style,
+    /// The diagnostics touching the visible lines, with their underline.
+    markers: Vec<(Marker, Style)>,
+}
+
+/// The diagnostics of document `id` on lines `top..top + height`.
+fn visible_markers(
+    workspace: &rustode_workspace::Workspace,
+    theme: &Theme,
+    id: DocumentId,
+    top: usize,
+    height: usize,
+) -> Vec<(Marker, Style)> {
+    let Some(document) = workspace.document(id) else {
+        return Vec::new();
+    };
+    let first = document.offset_of(Position::new(top, 0));
+    let last = document.offset_of(Position::new(top + height, 0));
+    workspace
+        .markers(id)
+        .into_iter()
+        .filter(|m| m.range.end >= first && m.range.start <= last)
+        .map(|m| {
+            let style = theme.marker(m.severity);
+            (m, style)
+        })
+        .collect()
+}
+
+/// The line number, with the severity letter of the line's most severe
+/// problem in the first column.
+fn gutter_spans(
+    theme: &Theme,
+    letter: Option<MarkerSeverity>,
+    line: usize,
+    gutter: usize,
+    active: bool,
+) -> Vec<Span<'static>> {
+    let style = if active {
+        theme.gutter_active
+    } else {
+        theme.gutter
+    };
+    match letter {
+        Some(severity) if gutter >= 3 => {
+            let (letter, letter_style) = theme.letter(severity);
+            vec![
+                Span::styled(letter, letter_style),
+                Span::styled(format!("{:>w$} ", line + 1, w = gutter - 2), style),
+            ]
+        }
+        _ => vec![Span::styled(
+            format!("{:>w$} ", line + 1, w = gutter - 1),
+            style,
+        )],
+    }
+}
+
+/// The most severe problem starting on each line, hints left out.
+fn gutter_letters(
+    document: &Document,
+    markers: &[(Marker, Style)],
+) -> HashMap<usize, MarkerSeverity> {
+    let mut letters = HashMap::new();
+    for (marker, _) in markers {
+        if marker.severity == MarkerSeverity::Hint {
+            continue;
+        }
+        let line = document.position_of(marker.range.start).line;
+        let worst = letters.entry(line).or_insert(marker.severity);
+        *worst = (*worst).max(marker.severity);
+    }
+    letters
 }
 
 fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
@@ -544,6 +647,8 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
             revealed: Some(cursor),
         }
     };
+    let markers = visible_markers(&app.workspace, &app.theme, id, view.top, height);
+    let letters = gutter_letters(document, &markers);
     let context = RowContext {
         document,
         selections: document.selections(),
@@ -553,16 +658,12 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         width,
         selection: app.theme.selection,
         secondary_cursor: app.theme.secondary_cursor,
+        markers,
     };
     let buffer = frame.buffer_mut();
     for (row, line) in (view.top..lines).take(height).enumerate() {
-        let number_style = if line == cursor.line {
-            app.theme.gutter_active
-        } else {
-            app.theme.gutter
-        };
-        let number = Span::styled(format!("{:>w$} ", line + 1, w = gutter - 1), number_style);
-        let mut spans = vec![number];
+        let letter = letters.get(&line).copied();
+        let mut spans = gutter_spans(&app.theme, letter, line, gutter, line == cursor.line);
         spans.extend(row_spans(&context, line));
         buffer.set_line(area.x, area.y + to_u16(row), &Line::from(spans), area.width);
     }
@@ -604,14 +705,39 @@ fn row_spans(context: &RowContext<'_>, line: usize) -> Vec<Span<'static>> {
     let mut cells = Cells::new(context.left, context.width);
     let mut end = start;
     for (offset, c) in (start..).zip(text.chars()) {
-        cells.push(c, style_at(context, offset), context.tab_size);
+        let style = style_at(context, offset);
+        let style = marker_style(context, offset).map_or(style, |marker| style.patch(marker));
+        cells.push(c, style, context.tab_size);
         end = offset + 1;
     }
     let breaks = line + 1 < document.line_count();
-    if let Some(style) = end_style(context, end, breaks) {
-        cells.push(' ', style, context.tab_size);
+    let marker = marker_style(context, end);
+    match (end_style(context, end, breaks), marker) {
+        (Some(style), marker) => {
+            cells.push(
+                ' ',
+                style.patch(marker.unwrap_or_default()),
+                context.tab_size,
+            );
+        }
+        (None, Some(marker)) => cells.push(' ', marker, context.tab_size),
+        (None, None) => {}
     }
     cells.spans
+}
+
+/// The underline of the most severe diagnostic at `offset`: one covering
+/// it, or an empty one there.
+fn marker_style(context: &RowContext<'_>, offset: usize) -> Option<Style> {
+    context
+        .markers
+        .iter()
+        .filter(|(m, _)| {
+            (m.range.start <= offset && offset < m.range.end)
+                || (m.range.is_empty() && m.range.start == offset)
+        })
+        .max_by_key(|(m, _)| m.severity)
+        .map(|(_, style)| *style)
 }
 
 /// Selected text and secondary cursors get the theme's styles; the primary

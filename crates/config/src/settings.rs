@@ -77,7 +77,9 @@ impl Schema {
     ///   `files.insertFinalNewline`, `files.autoSave`, `files.autoSaveDelay`:
     ///   `src/vs/workbench/contrib/files/browser/files.contribution.ts:197`, `:223`, `:244`,
     ///   `:256`, `:268`, `:282`. `files.encoding` accepts any string here; VS Code restricts it
-    ///   to its list of encodings.
+    ///   to its list of encodings;
+    /// - `rustode.languageServers`, rustode's own (VS Code has no built-in setting for language
+    ///   servers): an object of server entries by language id, which the workspace checks.
     #[must_use]
     pub fn builtin() -> Self {
         let mut schema = Self::empty();
@@ -126,6 +128,11 @@ impl Schema {
                 "files.autoSaveDelay",
                 number(Some(0.0), None),
                 Value::Number(1000.0),
+            ),
+            (
+                "rustode.languageServers",
+                SettingType::Object,
+                Value::Object(BTreeMap::new()),
             ),
         ] {
             schema.register(SettingSchema {

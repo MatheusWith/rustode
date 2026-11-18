@@ -13,6 +13,9 @@
 //! (`src/vs/platform/theme/common/colors/editorColors.ts:121-123`,
 //! `src/vs/editor/common/core/editorColorRegistry.ts:22`).
 //!
+//! Diagnostics are squiggled under their range, an empty one one char
+//! wide, in their severity's color (see `crate::problems`).
+//!
 //! The caret does not blink, so an idle window draws no frames, and as in
 //! VS Code it is hidden while the editor does not have focus.
 
@@ -24,7 +27,7 @@ use eframe::egui::{
     emath::TSTransform,
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
-use rustode_workspace::{Document, DocumentId, Position, Selection, Workspace};
+use rustode_workspace::{Document, DocumentId, Marker, Position, Selection, Workspace};
 use std::sync::Arc;
 
 /// Font size of the text, in points.
@@ -61,6 +64,9 @@ pub(crate) struct View {
     left: f32,
     /// The selection anchor while the primary button drags.
     drag_anchor: Option<usize>,
+    /// Set to bring the caret into view on the next frame, e.g. after going
+    /// to a problem.
+    pub(crate) reveal: bool,
 }
 
 /// What a frame's input did.
@@ -152,6 +158,8 @@ struct Screen<'a> {
     layout: &'a Layout,
     view: &'a View,
     rows: Vec<Row>,
+    /// The document's diagnostics, the most severe last.
+    markers: Vec<Marker>,
 }
 
 impl Row {
@@ -189,14 +197,17 @@ pub(crate) fn show(
     if response.contains_pointer() {
         wheel(ui, view, doc.line_count());
     }
-    if outcome.changed {
+    if outcome.changed || std::mem::take(&mut view.reveal) {
         reveal(ui, doc, &layout, view);
     }
+    let mut markers = workspace.markers(document);
+    markers.sort_by_key(|m| m.severity);
     let screen = Screen {
         doc,
         layout: &layout,
         view,
         rows: rows(ui, doc, &layout, view),
+        markers,
     };
     paint(ui, &screen);
     expose(ui, &response, &screen, label);
@@ -430,6 +441,7 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
         layout,
         view,
         rows,
+        ..
     } = screen;
     let text_painter = ui.painter_at(layout.text);
     let gutter_painter = ui.painter_at(layout.gutter);
@@ -441,6 +453,7 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
         let pos = Pos2::new(layout.text.left() - view.left, y);
         text_painter.galley(pos, Arc::clone(&row.galley), FOREGROUND);
     }
+    squiggles(&text_painter, screen);
     // VS Code hides the cursors of an editor without focus
     // (`src/vs/editor/browser/viewParts/viewCursors/viewCursors.ts:233-235`).
     if ui.memory(|memory| memory.has_focus(id())) {
@@ -469,6 +482,46 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
     }
 }
 
+/// Paints the squiggles of the diagnostics on the visible lines, the most
+/// severe on top.
+fn squiggles(painter: &egui::Painter, screen: &Screen<'_>) {
+    let Screen {
+        doc,
+        layout,
+        view,
+        rows,
+        markers,
+    } = screen;
+    for marker in markers {
+        let from = doc.position_of(marker.range.start);
+        let to = doc.position_of(marker.range.end);
+        for row in rows
+            .iter()
+            .filter(|row| (from.line..=to.line).contains(&row.line))
+        {
+            let first = if row.line == from.line {
+                from.column
+            } else {
+                0
+            };
+            let last = if row.line == to.line {
+                to.column
+            } else {
+                row.display.columns()
+            };
+            let x0 = row.x(layout, view, first);
+            let x1 = row.x(layout, view, last).max(x0 + layout.char_width);
+            crate::problems::paint_squiggle(
+                painter,
+                marker.severity,
+                x0,
+                x1,
+                row.top + LINE_HEIGHT,
+            );
+        }
+    }
+}
+
 /// Paints the selections that touch the visible lines; returns their carets.
 fn selections(painter: &egui::Painter, screen: &Screen<'_>) -> Vec<Rect> {
     let Screen {
@@ -476,6 +529,7 @@ fn selections(painter: &egui::Painter, screen: &Screen<'_>) -> Vec<Rect> {
         layout,
         view,
         rows,
+        ..
     } = screen;
     let lines = rows
         .first()
@@ -530,6 +584,7 @@ fn expose(ui: &Ui, response: &Response, screen: &Screen<'_>, label: &str) {
         layout,
         view,
         rows,
+        ..
     } = screen;
     let ctx = ui.ctx();
     if ctx.accesskit_node_builder(id(), |_| ()).is_none() {

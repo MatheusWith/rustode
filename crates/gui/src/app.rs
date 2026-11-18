@@ -19,17 +19,24 @@
 //!
 //! As in the TUI, closing a tab with unsaved changes asks first: a second
 //! Ctrl+W, or a second click on its close button, discards them.
+//!
+//! Language servers: the window gives the workspace one waker, which
+//! requests a repaint, so diagnostics (and extension results) show while
+//! the window is idle without a timer, and it polls the servers each frame.
+//! Ctrl+Shift+M or a click on the status bar's counts toggles the problems
+//! panel below the editor ([`crate::problems`]); going to a problem opens or
+//! activates its file's tab.
 
 use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::status::STATUS_BAR_HEIGHT;
 use crate::tabs::{self, TAB_HEIGHT};
-use crate::{editor, explorer, extensions, status};
+use crate::{editor, explorer, extensions, problems, status};
 use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, UiBuilder, Vec2, ViewportCommand,
 };
 use rustode_workspace::{
-    Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Workspace,
+    Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Problem, ServerState, Workspace,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -67,8 +74,14 @@ pub struct EditorApp {
     latency: Option<Rc<RefCell<PresentLatency>>>,
     /// The Extensions view, shown in the sidebar instead of the explorer.
     extensions: extensions::Panel,
-    /// Whether the workspace wakes this window when extension results arrive.
+    /// Whether the workspace wakes this window when language server
+    /// messages or extension results arrive.
     waker_set: bool,
+    /// The problems panel below the editor.
+    problems: problems::Panel,
+    /// Whether the editor takes focus on the next frame: after going to a
+    /// problem with Enter, so the key does not reach the editor too.
+    focus_editor_next: bool,
 }
 
 /// Where each part goes this frame.
@@ -107,8 +120,7 @@ fn file_name(document: &Document) -> String {
     document
         .path()
         .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_else(Default::default, |name| name.to_string_lossy().into_owned())
 }
 
 /// Whether the explorer or the Extensions view's search box has focus.
@@ -179,6 +191,24 @@ impl EditorApp {
             latency: None,
             extensions: extensions::Panel::default(),
             waker_set: false,
+            problems: problems::Panel::default(),
+            focus_editor_next: false,
+        }
+    }
+
+    /// Reads `settings.json` and `keybindings.json` from `dir` (VS Code's
+    /// `User` folder layout), which starts the language servers they
+    /// configure; problems in them show in the status bar.
+    pub fn load_user_config(&mut self, dir: &Path) {
+        let _ = self
+            .workspace
+            .load_config(&dir.join("settings.json"), &dir.join("keybindings.json"));
+        let problems = self.workspace.config().diagnostics().count()
+            + self.workspace.language_server_problems().len();
+        if problems > 0 {
+            self.notice = Some(format!(
+                "{problems} problem(s) in settings.json or keybindings.json"
+            ));
         }
     }
 
@@ -236,20 +266,83 @@ impl EditorApp {
                     Some(notice) => Some(notice),
                     None => continue,
                 },
+                Event::LanguageServerChanged {
+                    language,
+                    state: ServerState::Crashed,
+                } => Some(self.server_notice(&language)),
                 _ => continue,
             };
         }
     }
 
-    /// Asks the workspace to repaint the window when extension results
-    /// arrive from its background threads.
+    /// What the crashed server of `language` says about itself.
+    fn server_notice(&self, language: &str) -> String {
+        let why = self
+            .workspace
+            .language_servers()
+            .into_iter()
+            .find_map(|s| s.message.filter(|_| s.language == language))
+            .unwrap_or_else(|| "crashed".to_owned());
+        format!("Language server for {language}: {why}")
+    }
+
+    /// Asks the workspace to repaint the window when language server
+    /// messages or extension results arrive from its background threads.
     fn wake_on_results(&mut self, ctx: &Context) {
         if !self.waker_set {
             let ctx = ctx.clone();
-            self.workspace
-                .set_extensions_waker(move || ctx.request_repaint());
+            self.workspace.set_waker(move || ctx.request_repaint());
             self.waker_set = true;
         }
+    }
+
+    /// Ctrl+Shift+M: shows the panel and focuses its first row, or hides it
+    /// when one of its rows has focus.
+    fn toggle_problems(&mut self, ctx: &Context) {
+        let count = self.workspace.problems().len();
+        if self.problems.visible && problems::has_focus(ctx, count) {
+            self.problems.visible = false;
+            self.focus_editor(ctx);
+        } else {
+            self.problems.visible = true;
+            self.problems.focus_first = true;
+            ctx.request_repaint();
+        }
+    }
+
+    /// Opens or activates the problem's tab and selects the problem; the
+    /// editor takes focus on the next frame.
+    fn go_to_problem(&mut self, ctx: &Context, problem: &Problem) {
+        match self.workspace.go_to_problem(problem) {
+            Ok(id) => {
+                self.views.entry(id).or_default().reveal = true;
+                self.focus_editor_next = true;
+                ctx.request_repaint();
+            }
+            Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    /// The panel below the editor, if shown; returns the editor's rect.
+    fn show_problems(&mut self, ui: &mut egui::Ui, rect: Rect) -> Rect {
+        if !self.problems.visible {
+            return rect;
+        }
+        let height = problems::PANEL_HEIGHT.min(rect.height() / 2.0);
+        let (editor, panel) = rect.split_top_bottom_at_y(rect.bottom() - height);
+        let chosen = ui
+            .scope_builder(
+                UiBuilder::new().max_rect(panel).id_salt("rustode-problems"),
+                |ui| problems::show(ui, &self.workspace),
+            )
+            .inner;
+        if std::mem::take(&mut self.problems.focus_first) {
+            focus(ui.ctx(), problems::first_row_id());
+        }
+        if let Some(problem) = chosen {
+            self.go_to_problem(ui.ctx(), &problem);
+        }
+        editor
     }
 
     fn update_title(&mut self, ctx: &Context) {
@@ -312,6 +405,7 @@ impl EditorApp {
             Workbench::FocusExplorer => self.focus_explorer(ctx),
             Workbench::FocusNextPart => self.focus_next_part(ctx),
             Workbench::ShowExtensions => self.show_extensions(ctx),
+            Workbench::ToggleProblems => self.toggle_problems(ctx),
         }
     }
 
@@ -477,8 +571,7 @@ impl EditorApp {
         let name = self
             .workspace
             .document(id)
-            .map(file_name)
-            .unwrap_or_default();
+            .map_or_else(Default::default, file_name);
         let view = self.views.entry(id).or_default();
         let workspace = &mut self.workspace;
         let outcome = ui
@@ -517,8 +610,12 @@ impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.wake_on_results(&ctx);
+        if std::mem::take(&mut self.focus_editor_next) {
+            self.focus_editor(&ctx);
+        }
         self.workspace.poll_external_changes();
         self.workspace.poll_extensions();
+        self.workspace.poll_language_servers();
         self.note();
         let mut changed = self.workbench_keys(&ctx);
         self.default_focus(&ctx);
@@ -531,7 +628,8 @@ impl eframe::App for EditorApp {
             changed |= self.show_sidebar(ui, sidebar);
         }
         changed |= self.show_tabs(ui, areas.tabs);
-        changed |= self.show_editor(ui, areas.editor);
+        let editor = self.show_problems(ui, areas.editor);
+        changed |= self.show_editor(ui, editor);
         self.note();
         let message = self
             .message
@@ -539,12 +637,17 @@ impl eframe::App for EditorApp {
             .or(self.error.as_deref())
             .or(self.notice.as_deref());
         let active = self.workspace.active_document();
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(areas.status)
-                .id_salt("rustode-status"),
-            |ui| status::show(ui, &self.workspace, active, message),
-        );
+        let counts_clicked = ui
+            .scope_builder(
+                UiBuilder::new()
+                    .max_rect(areas.status)
+                    .id_salt("rustode-status"),
+                |ui| status::show(ui, &self.workspace, active, message),
+            )
+            .inner;
+        if counts_clicked {
+            self.toggle_problems(&ctx);
+        }
         self.update_title(&ctx);
         if let Some(latency) = &self.latency {
             latency.borrow_mut().frame(changed);

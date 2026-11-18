@@ -12,13 +12,19 @@
 //! 22-point height (`:125`), and Dark Modern's colors
 //! (`extensions/theme-defaults/themes/dark_modern.json:90-99`), with the
 //! no-folder background while no folder is open (`statusbarPart.ts:770`).
+//!
+//! Once a language server is configured, the problem counts come first on
+//! the left, a button that toggles the problems panel as VS Code's does
+//! (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:583`,
+//! `:615-624`), and the document's server shows before the language, with
+//! its state unless it runs.
 
 use crate::text::status_column;
 use eframe::egui::{
     Align, Color32, FontId, Label, Layout, Rect, RichText, Stroke, Ui, UiBuilder, Vec2, accesskit,
     pos2,
 };
-use rustode_workspace::{Document, DocumentId, Eol, Workspace};
+use rustode_workspace::{Document, DocumentId, Eol, ServerState, Workspace};
 
 /// Height of the status bar, in points.
 pub const STATUS_BAR_HEIGHT: f32 = 22.0;
@@ -32,13 +38,13 @@ const FONT_SIZE: f32 = 12.0;
 const PADDING: f32 = 10.0;
 
 /// Draws the status bar over the whole of `ui`, for the active document if
-/// there is one.
+/// there is one; returns whether the problem counts were clicked.
 pub(crate) fn show(
     ui: &mut Ui,
     workspace: &Workspace,
     document: Option<DocumentId>,
     message: Option<&str>,
-) {
+) -> bool {
     let rect = ui.max_rect();
     let background = if workspace.explorer().is_some() {
         BACKGROUND
@@ -52,16 +58,20 @@ pub(crate) fn show(
         node.set_role(accesskit::Role::Status);
         node.set_bounds(crate::a11y::bounds(rect));
     });
+    let mut left = rect.left() + PADDING;
+    let mut clicked = false;
+    if !workspace.language_servers().is_empty() {
+        let (response, width) = crate::problems::counts_item(
+            ui,
+            pos2(rect.left() + PADDING / 2.0, rect.top()),
+            rect.height(),
+            workspace.problem_counts(),
+        );
+        clicked = response.clicked();
+        left += width;
+    }
     let items = match document.and_then(|id| workspace.document(id).map(|doc| (id, doc))) {
-        Some((id, doc)) => {
-            let tab_size = workspace.tab_size(id).unwrap_or(4);
-            vec![
-                selection_label(doc, tab_size),
-                doc.encoding_name().to_owned(),
-                eol_label(doc.eol()).to_owned(),
-                doc.language_name().to_owned(),
-            ]
-        }
+        Some((id, doc)) => document_items(workspace, id, doc),
         None => Vec::new(),
     };
     let font = FontId::proportional(FONT_SIZE);
@@ -77,7 +87,7 @@ pub(crate) fn show(
         .collect();
     let mut x = rect.right() - widths.iter().sum::<f32>() - PADDING / 2.0;
     if let Some(message) = message {
-        let left = Rect::from_min_max(rect.min + Vec2::new(PADDING, 0.0), pos2(x, rect.bottom()));
+        let left = Rect::from_min_max(pos2(left, rect.top()), pos2(x, rect.bottom()));
         item(ui, left, message, &font, true);
     }
     for (text, width) in items.iter().zip(widths) {
@@ -85,6 +95,26 @@ pub(crate) fn show(
         item(ui, place, text, &font, false);
         x += width;
     }
+    clicked
+}
+
+/// The active document's items: selection, encoding, line ending, its
+/// language server when it has one, and language.
+fn document_items(workspace: &Workspace, id: DocumentId, doc: &Document) -> Vec<String> {
+    let tab_size = workspace.tab_size(id).unwrap_or(4);
+    let mut items = vec![
+        selection_label(doc, tab_size),
+        doc.encoding_name().to_owned(),
+        eol_label(doc.eol()).to_owned(),
+    ];
+    if let Some(server) = workspace.language_server(id) {
+        items.push(match server.state {
+            ServerState::Running => server.name,
+            state => format!("{} ({})", server.name, state.label()),
+        });
+    }
+    items.push(doc.language_name().to_owned());
+    items
 }
 
 /// One item as a label, centered in `rect`, or from its left edge.

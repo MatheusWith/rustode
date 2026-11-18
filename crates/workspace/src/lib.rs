@@ -9,6 +9,7 @@ mod external;
 mod find;
 mod fuzzy;
 mod language;
+mod lsp;
 mod quick_open;
 mod tabs;
 
@@ -27,6 +28,7 @@ pub use extensions::{
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
+pub use lsp::{Marker, MarkerSeverity, Problem, ProblemCounts, ServerState, ServerStatus};
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
@@ -110,6 +112,16 @@ pub enum Event {
     /// Extension search, install, uninstall or listing results arrived
     /// ([`Workspace::poll_extensions`]).
     Extension(ExtensionEvent),
+    /// Diagnostics were published or cleared: markers, the problems list
+    /// and the counts may have changed.
+    ProblemsChanged,
+    /// A language server started, became ready, crashed or stopped.
+    LanguageServerChanged {
+        /// The language id it serves.
+        language: String,
+        /// What it does now.
+        state: ServerState,
+    },
 }
 
 impl fmt::Display for Error {
@@ -149,6 +161,8 @@ pub struct Workspace {
     files: Option<Vec<PathBuf>>,
     /// Extension management: folder, registry, background work, results.
     extensions: extensions::Extensions,
+    /// The language servers and their diagnostics.
+    lsp: lsp::LanguageServers,
 }
 
 impl Workspace {
@@ -177,6 +191,7 @@ impl Workspace {
         self.watch(path);
         let id = DocumentId(self.documents.len() - 1);
         self.group.open(id);
+        self.lsp_opened(id);
         Ok(id)
     }
 
@@ -259,6 +274,7 @@ impl Workspace {
         {
             tracing::debug!(path = %path.display(), %err, "cannot unwatch");
         }
+        self.lsp_closing(id);
         self.documents[id.0] = None;
         self.group.close(id);
         Ok(())
@@ -355,6 +371,7 @@ impl Workspace {
         let path = document.path().to_owned();
         rustode_fs::write_file(&path, &bytes).map_err(|source| Error::Io { path, source })?;
         document.mark_saved(&bytes);
+        self.lsp_saved(id);
         Ok(())
     }
 
@@ -669,6 +686,7 @@ impl Workspace {
     fn changed(&mut self, id: DocumentId, changed: bool) {
         if changed {
             self.events.push(Event::DocumentChanged { id });
+            self.lsp_changed(id);
         }
     }
 }

@@ -161,8 +161,7 @@ impl App {
         let replacement = self
             .find
             .as_ref()
-            .map(|f| f.replacement.clone())
-            .unwrap_or_default();
+            .map_or_else(Default::default, |f| f.replacement.clone());
         if let Err(err) = self.workspace.replace_one(id, &query, &replacement) {
             self.message = Some(err.to_string());
         }
@@ -175,8 +174,7 @@ impl App {
         let replacement = self
             .find
             .as_ref()
-            .map(|f| f.replacement.clone())
-            .unwrap_or_default();
+            .map_or_else(Default::default, |f| f.replacement.clone());
         match self.workspace.replace_all(id, &query, &replacement) {
             Ok(count) => self.message = Some(format!("Replaced {count} occurrence(s)")),
             Err(err) => self.message = Some(err.to_string()),

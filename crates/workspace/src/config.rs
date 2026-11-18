@@ -15,6 +15,7 @@ impl Workspace {
     pub fn load_config(&mut self, settings: &Path, keybindings: &Path) -> ConfigChange {
         let change = self.config.load(settings, keybindings);
         log_change(&self.config, &change);
+        self.lsp_config_changed();
         change
     }
 
@@ -23,6 +24,9 @@ impl Workspace {
     pub fn reload_config(&mut self) -> ConfigChange {
         let change = self.config.reload();
         log_change(&self.config, &change);
+        if !change.settings.is_empty() {
+            self.lsp_config_changed();
+        }
         change
     }
 

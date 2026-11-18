@@ -61,14 +61,15 @@ fn index(dir: &Path) -> Vec<Value> {
 
 /// Folder names in `dir`, sorted.
 fn children(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .map(|entries| {
+    let mut names: Vec<String> = std::fs::read_dir(dir).map_or_else(
+        |_| Vec::new(),
+        |entries| {
             entries
                 .flatten()
                 .map(|e| e.file_name().to_string_lossy().into_owned())
                 .collect()
-        })
-        .unwrap_or_default();
+        },
+    );
     names.sort();
     names
 }

@@ -3517,6 +3517,13 @@ name = "rustode-syntax"
 version = "0.1.0"
 
 [[package]]
+name = "rustode-test-lsp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "rustode-trace"
 version = "0.1.0"
 dependencies = [

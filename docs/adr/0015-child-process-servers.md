@@ -1,6 +1,6 @@
 # ADR 0015: Language servers and debug adapters run as child processes over stdio, supervised by the workspace
 
-- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session); not implemented yet (M5 for LSP, M7 for DAP)
+- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session); the LSP supervisor and diagnostics are implemented in `crates/workspace/src/lsp/` (ticket 29); hover, completion, navigation and the real servers follow (tickets 30 to 32); DAP is M7
 - **Build:** rustode at `d6debfb`; studied: the source tree of the App (local VSCodium 1.147.0)
 
 ## Context
@@ -28,6 +28,15 @@ Containment rules:
 ## The guarantee
 
 A crashed language server or debug adapter is reported and can be restarted without restarting the editor.
+
+## Implementation (LSP, ticket 29)
+
+- **Settings.** VS Code has no built-in setting for language servers, so the key is rustode's own, registered in the settings schema as an object (`crates/config/src/settings.rs`): `"rustode.languageServers": { "rust": { "command": "rust-analyzer", "args": [], "initializationOptions": {} } }`, keyed by the workspace's language ids. Each entry is checked on its own (`crates/workspace/src/lsp/settings.rs`); a problem is reported through `Workspace::language_server_problems` and never stops the other entries.
+- **Lifecycle.** One server per workspace root and language, started when the first document of that language opens; the root is the opened folder when the file is in it, else the file's folder. The client sends `initialize` (offering the `utf-32`, `utf-8` and `utf-16` position encodings), `initialized`, `didOpen`, `didChange` (the changed range or the whole text, as the server asks), `didSave`, `didClose`, and `shutdown` then `exit` when the workspace is dropped (`crates/workspace/src/lsp/mod.rs`, `server.rs`).
+- **Threads.** Each server has a writer thread, a reader thread feeding a channel, and a thread logging its stderr (`crates/workspace/src/lsp/process.rs`). Frontends call `Workspace::poll_language_servers`; the waker set with `Workspace::set_waker` is called by the reader threads (the same waker serves the extensions' background work), so the GUI repaints when diagnostics arrive while it is idle, without polling on a timer. The TUI picks them up on its existing 250 ms idle tick.
+- **Supervision.** A crash (the server's output ends without a `shutdown`) is reported in the server's status (starting, running, crashed, stopped) and as an event, its diagnostics are dropped, and the server is restarted at once, up to four times within three minutes; the fifth crash in that window leaves it crashed until "Language Server: Restart" (`rustode.restartLanguageServer`). These numbers are a design choice modeled on `vscode-languageclient`, which is not in the source tree, so they are not a verified VS Code fact (`crates/workspace/src/lsp/server.rs`).
+- **Test server.** `rustode-test-lsp` (`crates/test-lsp/`, `publish = false`) is a stdio server for tests only, driven from `crates/workspace/tests/lsp.rs` and the frontend snapshot tests. It reports every `ERROR`, `WARN`, `INFO` and `HINT`, exits on `CRASH`, and logs what it receives.
+- **Behavior studied in VS Code** (markers, the problems list and panel, the status bar counts, squiggle colors) is credited in [`ATTRIBUTION.md`](../../ATTRIBUTION.md) and in the doc comments of `crates/workspace/src/lsp/markers.rs`, `crates/tui/src/problems.rs` and `crates/gui/src/problems.rs`.
 
 ## Consequences
 

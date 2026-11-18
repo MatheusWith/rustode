@@ -16,6 +16,11 @@
 //! `src/vs/workbench/services/views/browser/viewsService.ts:404-421`).
 //! Commands that take an argument ([`Workspace::execute_with`]) are not
 //! listed in the palette, as in VS Code.
+//! "View: Toggle Problems" on Ctrl+Shift+M
+//! (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`,
+//! titled by `src/vs/workbench/services/views/browser/viewsService.ts:481-489`).
+//! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
+//! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
 //! recently used ones first and matches word starts
 //! (`AbstractCommandsQuickAccessProvider`), which is not done yet.
@@ -165,6 +170,18 @@ pub const COMMANDS: &[CommandInfo] = &[
         "Go to End of File",
         Editor,
         Some("Ctrl+End"),
+    ),
+    command(
+        "workbench.actions.view.problems",
+        "View: Toggle Problems",
+        Workbench,
+        Some("Ctrl+Shift+M"),
+    ),
+    command(
+        "rustode.restartLanguageServer",
+        "Language Server: Restart",
+        Editor,
+        None,
     ),
 ];
 
@@ -321,6 +338,7 @@ impl Workspace {
             "editor.action.insertCursorBelow" => drop(self.add_cursor_below(id)?),
             "cursorTop" => self.move_cursor(id, Movement::DocumentStart, false)?,
             "cursorBottom" => self.move_cursor(id, Movement::DocumentEnd, false)?,
+            "rustode.restartLanguageServer" => return self.restart_language_server(id),
             _ => return Ok(false),
         }
         Ok(true)

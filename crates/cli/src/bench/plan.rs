@@ -86,9 +86,7 @@ impl<'a> Plan<'a> {
                 )));
             }
         }
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default();
+        let home = std::env::var_os("HOME").map_or_else(Default::default, PathBuf::from);
         let env_path =
             |name: &str, default: PathBuf| std::env::var_os(name).map_or(default, PathBuf::from);
         let runtime =

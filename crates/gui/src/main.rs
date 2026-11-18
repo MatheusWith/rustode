@@ -1,5 +1,6 @@
 //! The `rustode-gui` binary: opens files in tabs and the first folder in
-//! the explorer, as `rustode-tui` does.
+//! the explorer, as `rustode-tui` does, with the user's settings
+//! (`RUSTODE_USER_DIR`, else `$XDG_CONFIG_HOME/rustode/User`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -56,13 +57,14 @@ fn open(paths: &[PathBuf]) -> ExitCode {
     if let Some(dir) = rustode_workspace::default_extensions_dir(|key| std::env::var_os(key)) {
         workspace.set_extensions_location(&dir);
     }
-    let app = match rustode_gui::EditorApp::open_paths_in(workspace, paths) {
+    let mut app = match rustode_gui::EditorApp::open_paths_in(workspace, paths) {
         Ok(app) => app,
         Err(err) => {
             eprintln!("error: {err}");
             return ExitCode::FAILURE;
         }
     };
+    app.load_user_config(&user_dir());
     match rustode_gui::run(app) {
         Ok(latency) => {
             if let Some(report) = latency {
@@ -75,4 +77,18 @@ fn open(paths: &[PathBuf]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Where `settings.json` and `keybindings.json` live: `RUSTODE_USER_DIR`, or
+/// `rustode/User` under the XDG config folder (VS Code's `User` layout), as
+/// for the terminal editor.
+fn user_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("RUSTODE_USER_DIR") {
+        return PathBuf::from(dir);
+    }
+    let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(
+        || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"),
+        PathBuf::from,
+    );
+    config.join("rustode").join("User")
 }

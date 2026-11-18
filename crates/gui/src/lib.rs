@@ -17,6 +17,9 @@
 //! - **Extensions view** in the sidebar on Ctrl+Shift+X: Open VSX search, install,
 //!   uninstall and the installed list, all in the background; nothing is
 //!   loaded (`extensions.rs`).
+//! - **Diagnostics** from language servers are squiggled in the editor,
+//!   counted in the status bar and listed in the problems panel
+//!   (Ctrl+Shift+M); see `problems.rs`.
 //!
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
@@ -29,6 +32,7 @@ mod extensions;
 pub mod fonts;
 mod keys;
 pub mod latency;
+mod problems;
 mod run;
 mod status;
 mod tabs;
@@ -37,6 +41,7 @@ mod text;
 pub use app::EditorApp;
 pub use editor::{FONT_SIZE, LINE_HEIGHT};
 pub use explorer::{HEADER_HEIGHT, ROW_HEIGHT, TITLE_HEIGHT};
+pub use problems::PANEL_HEIGHT;
 pub use run::{native_options, run, run_timed};
 pub use status::STATUS_BAR_HEIGHT;
 pub use tabs::TAB_HEIGHT;

@@ -10,6 +10,7 @@ mod app;
 mod extensions;
 mod find;
 mod keys;
+mod problems;
 mod theme;
 mod view;
 

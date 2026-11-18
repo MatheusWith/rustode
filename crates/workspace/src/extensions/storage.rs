@@ -56,8 +56,7 @@ fn io_error(path: &Path, err: &io::Error) -> String {
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let name = path
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
     let temp = path.with_file_name(format!(".{name}.{}.tmp", random_hex()));
     fs::write(&temp, bytes).map_err(|err| io_error(&temp, &err))?;
     fs::rename(&temp, path).map_err(|err| {

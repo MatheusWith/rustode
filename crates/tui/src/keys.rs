@@ -10,8 +10,11 @@
 //! and Ctrl+W closes one (`src/vs/workbench/browser/parts/editor/editorCommands.ts:841`).
 //! Ctrl+Shift+X shows the Extensions view
 //! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:121`).
-//! Ctrl+P opens quick open, Ctrl+Shift+P or F1 the command palette and
-//! Ctrl+G go to line (see `rustode_workspace`'s command registry).
+//! Ctrl+P opens quick open, Ctrl+Shift+P or F1 the command palette,
+//! Ctrl+G go to line and Ctrl+Shift+M toggles the problems panel (see
+//! `rustode_workspace`'s command registry). Terminals without an extended
+//! keyboard protocol send Ctrl+Shift+M as Enter; the palette and a click on
+//! the status bar's counts toggle the panel too.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rustode_workspace::{Chord, Movement};
@@ -51,6 +54,7 @@ pub(crate) enum Command {
     Replace,
     FindNext,
     FindPrevious,
+    ToggleProblems,
 }
 
 /// What a key does while the explorer has focus.
@@ -87,6 +91,7 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
         (KeyCode::Char(c), true, _, false) => match (c.to_ascii_lowercase(), shift) {
             ('e', true) => Some(Command::FocusExplorer),
             ('x', true) => Some(Command::ShowExtensions),
+            ('m', true) => Some(Command::ToggleProblems),
             ('p', false) => Some(Command::QuickOpen),
             ('p', true) => Some(Command::ShowCommands),
             ('g', false) => Some(Command::GotoLine),
@@ -144,6 +149,7 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::Replace => "editor.action.startFindReplaceAction",
         Command::FindNext => "editor.action.nextMatchFindAction",
         Command::FindPrevious => "editor.action.previousMatchFindAction",
+        Command::ToggleProblems => "workbench.actions.view.problems",
         Command::Undo => "undo",
         Command::Redo => "redo",
         Command::SelectAll => "editor.action.selectAll",
@@ -215,6 +221,7 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::Replace,
         Command::FindNext,
         Command::FindPrevious,
+        Command::ToggleProblems,
         Command::Undo,
         Command::Redo,
         Command::SelectAll,

@@ -9,6 +9,7 @@
 
 mod editor;
 mod extensions;
+mod lsp;
 mod workbench;
 
 use eframe::egui::{Key, Modifiers, Vec2, accesskit::Role};
