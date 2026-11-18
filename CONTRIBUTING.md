@@ -1,6 +1,6 @@
 # Contributing to rustode
 
-Thanks for helping. rustode holds two kinds of work: the study of the App (the reverse engineering of VSCodium 1.147.0, in `09-analises/` and `docs/`) and the rustode editor (Rust, in `crates/` and `xtask/`). Before you start:
+Thanks for helping. rustode holds two kinds of work: the study of the App (VSCodium 1.147.0, in `09-analises/` and `docs/`) and the rustode editor (Rust, in `crates/` and `xtask/`). Before you start:
 
 1. **Read [`AGENTS.md`](AGENTS.md).** Two rules outweigh all the others:
    - the folders `01-app/` to `08-testes-do-build/` are read-only evidence (§0.1);

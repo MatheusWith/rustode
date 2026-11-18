@@ -50,7 +50,7 @@ mkdir -p "$DEST/04-fotos"
 (cd "$DEST/05-qa/results" && find . -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print0 |
   xargs -0 -r cp -a --parents -t "$DEST/04-fotos")
 
-step "02 engenharia reversa: metadados, manifesto, binários"
+step "02: metadados, manifesto, binários"
 mkdir -p "$RE/asar" "$RE/fonte"
 cp "$APP/resources/app/product.json" "$APP/resources/app/package.json" "$RE/"
 (cd "$DEST/01-app/VSCode-linux-x64" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"$RE/manifesto-sha256.txt"

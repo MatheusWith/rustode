@@ -2,7 +2,7 @@
 
 This is the single source of instructions for agents and contributors. [`CLAUDE.md`](CLAUDE.md) only imports this file, and the other tools (OpenCode, Codex) read it directly. **The rules in §0 to §4 must never be broken.** They take precedence over the working instructions from §5 onward. §0 takes priority over any analysis or task, because a conclusion drawn from altered evidence is worth less than no conclusion.
 
-rustode is the reverse-engineering project for VSCodium 1.147.0, built locally:
+rustode studies VSCodium 1.147.0, built locally:
 - VS Code at commit `22d8dccf0f29`, with the VSCodium patches ported;
 - Electron 43.8.6 (Chromium 150, Node 24.22.1);
 - a bundle without source maps.
@@ -15,7 +15,7 @@ The live sources are:
 
 [`montar.sh`](montar.sh) copies them here.
 
-The same repository is the home of the **rustode editor**, written in Rust in `crates/` and `xtask/`, which reimplements behavior studied in the App (Phase 1; [`ROADMAP.md`](ROADMAP.md)). This file has two parts: the **Study** rules (§0–§10), for the reverse engineering of the App, and the **Editor** rules (§11), for the editor. §0–§4 bind both parts.
+The same repository is the home of the **rustode editor**, written in Rust in `crates/` and `xtask/`, which reimplements behavior studied in the App (Phase 1; [`ROADMAP.md`](ROADMAP.md)). This file has two parts: the **Study** rules (§0–§10), for the study of the App, and the **Editor** rules (§11), for the editor. §0–§4 bind both parts.
 
 **Language.** Every document in this project is written in English: this file, `README.md`, `ROADMAP.md`, `docs/`, ADRs, templates, skills and analyses in `09-analises/`. Folder and file names keep their original (Portuguese) spelling, because `montar.sh` and the links depend on them. Quotes from evidence stay verbatim.
 
@@ -37,8 +37,8 @@ The same repository is the home of the **rustode editor**, written in Rust in `c
 
 ## 1. Licenses, trademarks and scope
 
-1. **What is analyzed here is free software.** That means Code - OSS (MIT, Microsoft), the VSCodium patches (MIT), Electron (MIT) and the components listed in [`ATTRIBUTION.md`](ATTRIBUTION.md). Their licenses allow studying, modifying and reverse engineering this material.
-2. **Microsoft's proprietary extensions and services are out of scope.** Do not download, extract or analyze extensions such as C/C++, Python/Pylance, Live Share, Remote SSH/Containers/WSL or Copilot, nor the Microsoft Marketplace. Their licenses restrict use to Microsoft products and generally forbid reverse engineering.
+1. **What is analyzed here is free software.** That means Code - OSS (MIT, Microsoft), the VSCodium patches (MIT), Electron (MIT) and the components listed in [`ATTRIBUTION.md`](ATTRIBUTION.md). Their licenses allow studying and modifying this material.
+2. **Microsoft's proprietary extensions and services are out of scope.** Do not download, extract or analyze extensions such as C/C++, Python/Pylance, Live Share, Remote SSH/Containers/WSL or Copilot, nor the Microsoft Marketplace. Their licenses restrict use to Microsoft products and generally forbid analyzing them.
 3. **Trademarks are not covered by the license.** "Visual Studio Code", "VS Code" and the Microsoft logos are Microsoft trademarks; "VSCodium" and its logo belong to the VSCodium project. Refer to them by name, and do not present this project as their product.
 4. **When in doubt about license or scope, don't: ask the project owner.**
 
@@ -82,7 +82,7 @@ If the owner asked for a task, it comes first; the four steps are for orientatio
 | Open the app without it showing on the desktop | `~/Projects/vscode/qa/suite/tools/run_virtual.sh <command>` (use the originals in `~/Projects/vscode/qa/`; the copy in `05-qa/` is evidence) |
 | Refresh the copies after new tests | `./montar.sh` (recreates 01 to 08 and the skills copy; `SEM_FORMATADO=1` skips JS formatting) |
 | Copy the skills for OpenCode | `./sincronizar-skills.sh` |
-| Reverse engineering of the packaged app (JavaScript/Electron, asar, fuses, binaries) | REA: the `/usr/bin/rea` CLI and the `rea` MCP server, registered in [`.mcp.json`](.mcp.json) (Claude Code) and [`opencode.json`](opencode.json) (OpenCode), with the `reverse-engineer-anything` skill. Rules below |
+| Static and runtime analysis of the packaged app (JavaScript/Electron, asar, fuses, binaries) | REA: the `/usr/bin/rea` CLI and the `rea` MCP server, registered in [`.mcp.json`](.mcp.json) (Claude Code) and [`opencode.json`](opencode.json) (OpenCode), with the `reverse-engineer-anything` skill. Rules below |
 
 The project's skills are described in §7.
 
