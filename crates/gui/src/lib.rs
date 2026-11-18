@@ -22,6 +22,16 @@
 //!   (Ctrl+Shift+M); see `problems.rs`.
 //! - **Search view** in the sidebar on Ctrl+Shift+F: a search across the
 //!   folder whose results stream into a list (`search.rs`).
+//! - **Width and height breakpoints.** The sidebar follows the window's
+//!   width as VS Code's grid does and collapses below 390 points; the
+//!   status bar drops items that no longer fit, and goes when the window is
+//!   too short (`layout.rs`, `status.rs`).
+//! - **Any scale factor.** Sizes are in points at the platform's scale
+//!   factor, and the editor's lines, selections and caret sit on whole
+//!   pixels (`editor.rs`).
+//! - **Keyboard only.** F6 and Shift+F6 cycle the parts, Tab and Shift+Tab
+//!   move through them, each focused element is outlined, and the AccessKit
+//!   focus follows (`focus.rs`).
 //!
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
@@ -31,9 +41,11 @@ mod app;
 mod editor;
 mod explorer;
 mod extensions;
+mod focus;
 pub mod fonts;
 mod keys;
 pub mod latency;
+pub mod layout;
 mod problems;
 mod run;
 mod search;
@@ -42,7 +54,7 @@ mod tabs;
 mod text;
 
 pub use app::EditorApp;
-pub use editor::{FONT_SIZE, LINE_HEIGHT};
+pub use editor::{FONT_SIZE, LINE_HEIGHT, line_height};
 pub use explorer::{HEADER_HEIGHT, ROW_HEIGHT, TITLE_HEIGHT};
 pub use problems::PANEL_HEIGHT;
 pub use run::{native_options, run, run_timed};

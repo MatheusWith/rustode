@@ -22,13 +22,24 @@
 //!
 //! The caret does not blink, so an idle window draws no frames, and as in
 //! VS Code it is hidden while the editor does not have focus.
+//!
+//! **Sharp at any scale.** Every line is a whole number of physical pixels
+//! tall (19 points rounded to pixels: 24 pixels at 1.25, 29 at 1.5) and
+//! starts on a pixel boundary, as does the text area, so lines, selections
+//! and carets tile with no seams and every line's glyphs sit the same way;
+//! egui snaps the glyphs themselves to pixels. VS Code keeps 19 CSS pixels
+//! and leaves the snapping to Chromium's layout. The caret is VS Code's: 2
+//! points rounded down to whole pixels, at least one, and 1 point left of
+//! the character boundary when it is at least 2 points wide and not at the
+//! line's start (`computeScreenAwareSize`, `src/vs/base/browser/dom.ts:1609-1612`;
+//! `src/vs/editor/browser/viewParts/viewCursors/viewCursor.ts:182-199`).
 
 use crate::keys::{self, Command};
 use crate::text::DisplayLine;
 use eframe::egui::{
-    self, Align2, Color32, EventFilter, FontId, Id, Pos2, Rect, Response, Sense, Ui, Vec2,
+    self, Align2, Color32, EventFilter, FontId, Id, Key, Pos2, Rect, Response, Sense, Ui, Vec2,
     WidgetInfo, WidgetType, accesskit,
-    emath::TSTransform,
+    emath::{GuiRounding as _, TSTransform},
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
 use rustode_workspace::{
@@ -38,7 +49,8 @@ use std::sync::Arc;
 
 /// Font size of the text, in points.
 pub const FONT_SIZE: f32 = 14.0;
-/// Height of one line of text, in points.
+/// Height of one line of text at a scale factor of 1, in points; see
+/// [`line_height`] for other scales.
 pub const LINE_HEIGHT: f32 = 19.0;
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
@@ -47,6 +59,7 @@ const LINE_NUMBER: Color32 = Color32::from_rgb(0x6e, 0x76, 0x81);
 const ACTIVE_LINE_NUMBER: Color32 = Color32::from_rgb(0xcc, 0xcc, 0xcc);
 const SELECTION: Color32 = Color32::from_rgb(0x26, 0x4f, 0x78);
 const CARET: Color32 = Color32::from_rgb(0xae, 0xaf, 0xad);
+/// The caret's width before it is rounded to pixels, in points.
 const CARET_WIDTH: f32 = 2.0;
 /// Margin kept between the caret and the right edge when it is revealed.
 const REVEAL_MARGIN: f32 = 30.0;
@@ -54,6 +67,19 @@ const REVEAL_MARGIN: f32 = 30.0;
 /// The id of the editor widget: one widget shows the active tab's document.
 pub(crate) fn id() -> Id {
     Id::new("rustode-editor")
+}
+
+/// The height of one line at `pixels_per_point` physical pixels per point:
+/// [`LINE_HEIGHT`] rounded to whole pixels, in points.
+#[must_use]
+pub fn line_height(pixels_per_point: f32) -> f32 {
+    (LINE_HEIGHT * pixels_per_point).round().max(1.0) / pixels_per_point
+}
+
+/// VS Code's caret width at `pixels_per_point`: [`CARET_WIDTH`] rounded
+/// down to whole pixels, at least one, in points.
+fn caret_width(pixels_per_point: f32) -> f32 {
+    (CARET_WIDTH * pixels_per_point).floor().max(1.0) / pixels_per_point
 }
 
 /// What the editor keeps between frames: where it is scrolled to.
@@ -91,6 +117,9 @@ struct Layout {
     font: FontId,
     char_width: f32,
     tab_size: usize,
+    /// One line's height, a whole number of pixels.
+    line_height: f32,
+    pixels_per_point: f32,
 }
 
 impl Layout {
@@ -99,19 +128,31 @@ impl Layout {
         let char_width = ui.fonts_mut(|fonts| fonts.glyph_width(&font, ' '));
         let digits = u8::try_from(line_count.max(1).ilog10() + 1).unwrap_or(u8::MAX);
         let gutter_width = char_width * (f32::from(digits.max(3)) + 2.0);
-        let (gutter, text) = rect.split_left_right_at_x(rect.left() + gutter_width);
+        let pixels_per_point = ui.pixels_per_point();
+        let split = (rect.left() + gutter_width).round_to_pixels(pixels_per_point);
+        let (gutter, text) = rect.split_left_right_at_x(split);
         Self {
             gutter,
             text,
             font,
             char_width,
             tab_size,
+            line_height: line_height(pixels_per_point),
+            pixels_per_point,
         }
     }
 
     /// Lines Page Up and Page Down move by.
     fn page(&self) -> usize {
-        whole_lines(self.text.height()).saturating_sub(2).max(1)
+        whole_lines(self.text.height(), self.line_height)
+            .saturating_sub(2)
+            .max(1)
+    }
+
+    /// Where the view's top line and left edge are drawn: on a pixel.
+    fn origin(&self, view: &View) -> Pos2 {
+        Pos2::new(self.text.left() - view.left, self.text.top() - view.offset)
+            .round_to_pixels(self.pixels_per_point)
     }
 }
 
@@ -127,14 +168,15 @@ fn float(count: usize) -> f32 {
     count as f32
 }
 
-/// Whole lines in `points`.
-fn whole_lines(points: f32) -> usize {
-    count((points / LINE_HEIGHT).floor())
+/// Whole lines of `line_height` in `points`.
+fn whole_lines(points: f32, line_height: f32) -> usize {
+    count((points / line_height + 1e-4).floor())
 }
 
-/// Lines needed to cover `points`, the last one perhaps in part.
-fn lines_covering(points: f32) -> usize {
-    count((points / LINE_HEIGHT - 1e-3).ceil())
+/// Lines of `line_height` needed to cover `points`, the last one perhaps in
+/// part.
+fn lines_covering(points: f32, line_height: f32) -> usize {
+    count((points / line_height - 1e-3).ceil())
 }
 
 /// One visible line, as drawn.
@@ -154,7 +196,7 @@ impl Row {
         let drawn = column.min(self.display.columns());
         let cursor = CCursor::new(self.display.display_index(drawn));
         let past_cut = float(column - drawn) * layout.char_width;
-        layout.text.left() - view.left + self.galley.pos_from_cursor(cursor).min.x + past_cut
+        layout.origin(view).x + self.galley.pos_from_cursor(cursor).min.x + past_cut
     }
 }
 
@@ -170,7 +212,7 @@ struct Screen<'a> {
 
 impl Row {
     fn top_of(layout: &Layout, view: &View, line: usize) -> f32 {
-        layout.text.top() - view.offset + float(line - view.top) * LINE_HEIGHT
+        layout.origin(view).y + float(line - view.top) * layout.line_height
     }
 }
 
@@ -194,14 +236,22 @@ pub(crate) fn show(
         response.request_focus();
     }
     if ui.memory(|memory| memory.has_focus(id())) {
-        keyboard(ui, workspace, document, layout.page(), &mut outcome);
+        let arrived = response.gained_focus();
+        keyboard(
+            ui,
+            workspace,
+            document,
+            layout.page(),
+            arrived,
+            &mut outcome,
+        );
     }
     pointer(ui, &response, workspace, document, &layout, view);
     let Some(doc) = workspace.document(document) else {
         return outcome;
     };
     if response.contains_pointer() {
-        wheel(ui, view, doc.line_count());
+        wheel(ui, view, doc.line_count(), layout.line_height);
     }
     if outcome.changed || std::mem::take(&mut view.reveal) {
         reveal(ui, doc, &layout, view);
@@ -225,13 +275,17 @@ fn keyboard(
     workspace: &mut Workspace,
     document: DocumentId,
     page: usize,
+    arrived: bool,
     outcome: &mut Outcome,
 ) {
+    // With Tab moving focus (Ctrl+M), Tab and Shift+Tab leave the editor;
+    // a Tab that just brought the focus here is not typed either.
+    let tab_moves_focus = crate::focus::tab_moves_focus(ui.ctx());
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
             id(),
             EventFilter {
-                tab: true,
+                tab: !tab_moves_focus,
                 horizontal_arrows: true,
                 vertical_arrows: true,
                 escape: true,
@@ -239,7 +293,10 @@ fn keyboard(
         );
     });
     let events = ui.input(|input| input.events.clone());
-    for command in events.iter().filter_map(|event| keys::command(event, page)) {
+    let typed = events.iter().filter(|event| {
+        !((tab_moves_focus || arrived) && matches!(event, egui::Event::Key { key: Key::Tab, .. }))
+    });
+    for command in typed.filter_map(|event| keys::command(event, page)) {
         run(workspace, document, command, outcome);
     }
 }
@@ -314,16 +371,16 @@ fn pointer(
 
 /// The char offset under a screen position.
 fn offset_at(ui: &Ui, doc: &Document, layout: &Layout, view: &View, pos: Pos2) -> usize {
-    let below_top = pos.y - layout.text.top() + view.offset;
+    let below_top = pos.y - layout.origin(view).y;
     let line = if below_top < 0.0 {
         view.top.saturating_sub(1)
     } else {
-        view.top + whole_lines(below_top)
+        view.top + whole_lines(below_top, layout.line_height)
     };
     let line = line.min(doc.line_count() - 1);
     let display = DisplayLine::new(&doc.line(line), layout.tab_size);
     let galley = layout_line(ui, &display, layout);
-    let x = pos.x - layout.text.left() + view.left;
+    let x = pos.x - layout.origin(view).x;
     let index = galley.cursor_from_pos(Vec2::new(x, 0.0)).index.0;
     doc.offset_of(Position::new(line, display.column_at(index)))
 }
@@ -337,8 +394,8 @@ fn layout_line(ui: &Ui, display: &DisplayLine, layout: &Layout) -> Arc<Galley> {
         .layout_no_wrap(text, layout.font.clone(), FOREGROUND)
 }
 
-/// Scrolls by the mouse wheel; Shift scrolls sideways.
-fn wheel(ui: &Ui, view: &mut View, line_count: usize) {
+/// Scrolls by the mouse wheel, three lines a notch; Shift scrolls sideways.
+fn wheel(ui: &Ui, view: &mut View, line_count: usize, line_height: f32) {
     let page = ui.available_rect_before_wrap().height();
     let delta = ui.input(|input| {
         input
@@ -353,7 +410,7 @@ fn wheel(ui: &Ui, view: &mut View, line_count: usize) {
                 } if !modifiers.command && !modifiers.ctrl => {
                     let scale = match unit {
                         egui::MouseWheelUnit::Point => 1.0,
-                        egui::MouseWheelUnit::Line => 3.0 * LINE_HEIGHT,
+                        egui::MouseWheelUnit::Line => 3.0 * line_height,
                         egui::MouseWheelUnit::Page => page,
                     };
                     let delta = *delta * scale;
@@ -366,17 +423,17 @@ fn wheel(ui: &Ui, view: &mut View, line_count: usize) {
                 _ => sum,
             })
     });
-    scroll_down(view, -delta.y, line_count);
+    scroll_down(view, -delta.y, line_count, line_height);
     view.left = (view.left - delta.x).max(0.0);
 }
 
 /// Moves the view down by `by` points (up if negative). The last line can
 /// be scrolled to the top, as with VS Code's `editor.scrollBeyondLastLine`,
 /// on by default (`src/vs/editor/common/config/editorOptions.ts:6791-6794`).
-fn scroll_down(view: &mut View, by: f32, line_count: usize) {
+fn scroll_down(view: &mut View, by: f32, line_count: usize, line_height: f32) {
     let target = view.offset + by;
-    let lines = (target / LINE_HEIGHT).floor();
-    view.offset = target - lines * LINE_HEIGHT;
+    let lines = (target / line_height).floor();
+    view.offset = target - lines * line_height;
     if lines >= 0.0 {
         view.top = view.top.saturating_add(count(lines));
     } else if count(-lines) <= view.top {
@@ -401,10 +458,10 @@ fn reveal(ui: &Ui, doc: &Document, layout: &Layout, view: &mut View) {
     if head.line < view.top || (head.line == view.top && view.offset > 0.0) {
         view.top = head.line;
         view.offset = 0.0;
-    } else if head.line - view.top >= whole_lines(height + view.offset) {
-        let rows = lines_covering(height).max(1);
+    } else if head.line - view.top >= whole_lines(height + view.offset, layout.line_height) {
+        let rows = lines_covering(height, layout.line_height).max(1);
         view.top = (head.line + 1).saturating_sub(rows);
-        view.offset = (float(rows) * LINE_HEIGHT - height).max(0.0);
+        view.offset = (float(rows) * layout.line_height - height).max(0.0);
     }
     let display = DisplayLine::new(&doc.line(head.line), layout.tab_size);
     let galley = layout_line(ui, &display, layout);
@@ -467,7 +524,7 @@ fn layout_row(
 /// The lines in view, read from the workspace one by one, with their
 /// highlights.
 fn rows(ui: &Ui, doc: &Document, layout: &Layout, view: &View) -> Vec<Row> {
-    let visible = lines_covering(layout.text.height() + view.offset);
+    let visible = lines_covering(layout.text.height() + view.offset, layout.line_height);
     let end = (view.top + visible).min(doc.line_count());
     let highlights = doc.highlights(view.top..end);
     (view.top..end)
@@ -500,10 +557,10 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
     gutter_painter.rect_filled(layout.gutter, 0.0, BACKGROUND);
     text_painter.rect_filled(layout.text, 0.0, BACKGROUND);
     let carets = selections(&text_painter, screen);
+    let left = layout.origin(view).x;
     for row in rows {
-        let y = row.top + (LINE_HEIGHT - row.galley.size().y) / 2.0;
-        let pos = Pos2::new(layout.text.left() - view.left, y);
-        text_painter.galley(pos, Arc::clone(&row.galley), FOREGROUND);
+        let y = row.top + (layout.line_height - row.galley.size().y) / 2.0;
+        text_painter.galley(Pos2::new(left, y), Arc::clone(&row.galley), FOREGROUND);
     }
     squiggles(&text_painter, screen);
     // VS Code hides the cursors of an editor without focus
@@ -522,7 +579,7 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
         };
         let pos = Pos2::new(
             layout.gutter.right() - layout.char_width,
-            row.top + LINE_HEIGHT / 2.0,
+            row.top + layout.line_height / 2.0,
         );
         gutter_painter.text(
             pos,
@@ -611,19 +668,31 @@ fn selections(painter: &egui::Painter, screen: &Screen<'_>) -> Vec<Rect> {
             } else {
                 row.x(layout, view, row.display.columns()) + layout.char_width / 2.0
             };
-            let rect = Rect::from_x_y_ranges(x0..=x1, row.top..=row.top + LINE_HEIGHT);
+            let rect = Rect::from_x_y_ranges(x0..=x1, row.top..=row.top + layout.line_height);
             painter.rect_filled(rect, 0.0, SELECTION);
         }
         let head = doc.position_of(selection.head);
         if let Some(row) = rows.iter().find(|row| row.line == head.line) {
-            let x = row.x(layout, view, head.column);
-            carets.push(Rect::from_min_size(
-                Pos2::new(x - CARET_WIDTH / 2.0, row.top),
-                Vec2::new(CARET_WIDTH, LINE_HEIGHT),
-            ));
+            carets.push(caret(layout, view, row, head.column));
         }
     }
     carets
+}
+
+/// The caret before `column` of `row`, on whole pixels.
+fn caret(layout: &Layout, view: &View, row: &Row, column: usize) -> Rect {
+    let x = row.x(layout, view, column);
+    let width = caret_width(layout.pixels_per_point);
+    let shift = if width >= 2.0 && x - layout.text.left() >= 1.0 {
+        1.0
+    } else {
+        0.0
+    };
+    let left = (x - shift).round_to_pixels(layout.pixels_per_point);
+    Rect::from_min_size(
+        Pos2::new(left, row.top),
+        Vec2::new(width, layout.line_height),
+    )
 }
 
 /// Exposes the editor to screen readers through AccessKit: a multi-line
@@ -650,15 +719,12 @@ fn expose(ui: &Ui, response: &Response, screen: &Screen<'_>, label: &str) {
         .join("\n");
     let format = TextFormat {
         font_id: layout.font.clone(),
-        line_height: Some(LINE_HEIGHT),
+        line_height: Some(layout.line_height),
         color: FOREGROUND,
         ..TextFormat::default()
     };
     let galley = ctx.fonts_mut(|fonts| fonts.layout_job(LayoutJob::single_section(text, format)));
-    let origin = Vec2::new(
-        layout.text.left() - view.left,
-        layout.text.top() - view.offset,
-    );
+    let origin = layout.origin(view).to_vec2();
     egui::text_selection::accesskit_text::update_accesskit_for_text_widget(
         ctx,
         id(),

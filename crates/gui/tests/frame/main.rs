@@ -9,7 +9,10 @@
 
 mod editor;
 mod extensions;
+mod keyboard;
+mod layout;
 mod lsp;
+mod scale;
 mod search;
 mod workbench;
 
@@ -38,11 +41,19 @@ fn fixture(name: &str, file: &str, text: &str) -> PathBuf {
 
 /// A window of `size` on `paths`, after its first frames.
 fn open_paths(paths: &[PathBuf], size: Vec2) -> Harness<'static, EditorApp> {
-    let app = EditorApp::open_paths(paths).expect("open");
-    let mut harness = Harness::builder().with_size(size).build_eframe(move |cc| {
-        rustode_gui::fonts::install(&cc.egui_ctx);
-        app
-    });
+    window(EditorApp::open_paths(paths).expect("open"), size, 1.0)
+}
+
+/// A window of `size` points on `app`, at `pixels_per_point` physical
+/// pixels per point (the platform's scale factor), after its first frames.
+fn window(app: EditorApp, size: Vec2, pixels_per_point: f32) -> Harness<'static, EditorApp> {
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .with_pixels_per_point(pixels_per_point)
+        .build_eframe(move |cc| {
+            rustode_gui::fonts::install(&cc.egui_ctx);
+            app
+        });
     harness.run();
     harness
 }

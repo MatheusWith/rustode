@@ -14,7 +14,6 @@
 
 # local tool state
 /.codegraph/
-/.serena/cache/
 /.claude/settings.local.json
 
 # Rust build output

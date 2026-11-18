@@ -17,7 +17,7 @@ The folders `01-app/` to `08-testes-do-build/` are read-only. Analyses go in `09
 
 Containment rules:
 
-1. `montar.sh` does not touch `09-analises/`, `docs/`, the root files or the configuration folders (`.claude/`, `.serena/`). The only exception is `.opencode/skills/`, which it rebuilds as a copy of `.claude/skills/` (`sincronizar-skills.sh`).
+1. `montar.sh` does not touch `09-analises/`, `docs/`, the root files or the configuration folder `.claude/`. The only exception is `.opencode/skills/`, which it rebuilds as a copy of `.claude/skills/` (`sincronizar-skills.sh`).
 2. The contents of the evidence folders change only in the live sources, followed by `./montar.sh`.
 
 ## The guarantee

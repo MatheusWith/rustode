@@ -13,10 +13,9 @@
 //!   dropped with its separator
 //!   (`src/vs/workbench/browser/parts/titlebar/windowTitle.ts:41-53`, `:59`;
 //!   `src/vs/base/common/labels.ts:347-410`);
-//! - the sidebar starts `min(300, width / 4)` points wide, and at least 170
-//!   (`src/vs/workbench/browser/layout.ts:2908`, `:3055`;
-//!   `src/vs/workbench/browser/parts/sidebar/sidebarPart.ts:50`); hiding it
-//!   hands its focus to the editor (`layout.ts:1993-1998`).
+//! - hiding the sidebar hands its focus to the editor
+//!   (`src/vs/workbench/browser/layout.ts:1993-1998`); how wide it is, and
+//!   when it collapses, is `layout.rs`; how focus moves, `focus.rs`.
 //!
 //! As in the TUI, closing a tab with unsaved changes asks first: a second
 //! Ctrl+W, or a second click on its close button, discards them.
@@ -28,13 +27,12 @@
 //! panel below the editor ([`crate::problems`]); going to a problem opens or
 //! activates its file's tab.
 
+use crate::focus::Part;
 use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
-use crate::status::STATUS_BAR_HEIGHT;
-use crate::tabs::{self, TAB_HEIGHT};
-use crate::{editor, explorer, extensions, problems, search, status};
+use crate::{editor, explorer, extensions, focus, layout, problems, search, status, tabs};
 use eframe::egui::{
-    self, Color32, Context, FontId, Label, Rect, RichText, UiBuilder, Vec2, ViewportCommand,
+    self, Color32, Context, FontId, Label, Rect, RichText, Sense, UiBuilder, Vec2, ViewportCommand,
 };
 use rustode_workspace::{
     Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Problem, ServerState, Workspace,
@@ -57,10 +55,14 @@ pub struct EditorApp {
     views: HashMap<DocumentId, editor::View>,
     explorer: explorer::View,
     strip: tabs::Strip,
-    /// Whether the sidebar is shown (Ctrl+B).
-    sidebar: bool,
-    /// The sidebar's width, set on the first frame.
-    sidebar_width: Option<f32>,
+    /// Whether the sidebar is shown (Ctrl+B), and how wide.
+    sidebar: layout::Sidebar,
+    /// Where the sidebar was drawn last frame, to tell which part has focus.
+    sidebar_area: Option<Rect>,
+    /// The same for the problems panel.
+    problems_area: Option<Rect>,
+    /// Which status bar item has focus.
+    status: status::Bar,
     /// A prompt or a failure of the last command; the next key clears it.
     message: Option<String>,
     /// Why the last save or edit failed; shown until a save succeeds.
@@ -85,38 +87,6 @@ pub struct EditorApp {
     focus_editor_next: bool,
     /// The Search view, shown in the sidebar instead of the explorer.
     search: search::Panel,
-}
-
-/// Where each part goes this frame.
-struct Areas {
-    sidebar: Option<Rect>,
-    tabs: Rect,
-    editor: Rect,
-    status: Rect,
-}
-
-fn areas(rect: Rect, sidebar: Option<f32>) -> Areas {
-    let (body, status) = rect.split_top_bottom_at_y(rect.bottom() - STATUS_BAR_HEIGHT);
-    let (sidebar, group) = match sidebar {
-        Some(width) => {
-            let (sidebar, group) = body.split_left_right_at_x(body.left() + width);
-            (Some(sidebar), group)
-        }
-        None => (None, body),
-    };
-    let (tabs, editor) = group.split_top_bottom_at_y(group.top() + TAB_HEIGHT);
-    Areas {
-        sidebar,
-        tabs,
-        editor,
-        status,
-    }
-}
-
-/// VS Code's first sidebar width for a window `width` points wide (never
-/// more than half the window until the width breakpoints arrive).
-fn sidebar_width(width: f32) -> f32 {
-    (width / 4.0).clamp(170.0, 300.0).min(width / 2.0)
 }
 
 fn file_name(document: &Document) -> String {
@@ -184,8 +154,10 @@ impl EditorApp {
             views: HashMap::new(),
             explorer: explorer::View::default(),
             strip: tabs::Strip::default(),
-            sidebar: true,
-            sidebar_width: None,
+            sidebar: layout::Sidebar::default(),
+            sidebar_area: None,
+            problems_area: None,
+            status: status::Bar::default(),
             message: None,
             error: None,
             notice: None,
@@ -330,10 +302,12 @@ impl EditorApp {
     /// The panel below the editor, if shown; returns the editor's rect.
     fn show_problems(&mut self, ui: &mut egui::Ui, rect: Rect) -> Rect {
         if !self.problems.visible {
+            self.problems_area = None;
             return rect;
         }
         let height = problems::PANEL_HEIGHT.min(rect.height() / 2.0);
         let (editor, panel) = rect.split_top_bottom_at_y(rect.bottom() - height);
+        self.problems_area = Some(panel);
         let chosen = ui
             .scope_builder(
                 UiBuilder::new().max_rect(panel).id_salt("rustode-problems"),
@@ -407,11 +381,13 @@ impl EditorApp {
             }
             Workbench::ToggleSidebar => self.toggle_sidebar(ctx),
             Workbench::FocusExplorer => self.focus_explorer(ctx),
-            Workbench::FocusNextPart => self.focus_next_part(ctx),
+            Workbench::FocusNextPart => self.focus_part(ctx, true),
+            Workbench::FocusPreviousPart => self.focus_part(ctx, false),
+            Workbench::ToggleTabMovesFocus => focus::toggle_tab_moves_focus(ctx),
             Workbench::ShowExtensions => self.show_extensions(ctx),
             Workbench::ToggleProblems => self.toggle_problems(ctx),
             Workbench::ShowSearch => {
-                self.sidebar = true;
+                self.sidebar.reveal();
                 self.extensions.shown = false;
                 self.search.show_search(&self.workspace);
             }
@@ -424,9 +400,12 @@ impl EditorApp {
         self.focus_editor(ctx);
     }
 
+    /// Focuses the editor, or the empty editor group without a tab.
     fn focus_editor(&self, ctx: &Context) {
         if self.workspace.active_document().is_some() {
             focus(ctx, editor::id());
+        } else {
+            focus(ctx, focus::empty_group_id());
         }
     }
 
@@ -450,8 +429,10 @@ impl EditorApp {
                 self.views.remove(&id);
                 if self.workspace.active_document().is_some() {
                     self.focus_editor(ctx);
-                } else if self.sidebar && self.workspace.explorer().is_some() {
+                } else if self.sidebar.visible() && self.workspace.explorer().is_some() {
                     focus(ctx, explorer::id());
+                } else {
+                    self.focus_editor(ctx);
                 }
             }
             Err(Error::Dirty(_)) => {
@@ -464,8 +445,8 @@ impl EditorApp {
     }
 
     fn toggle_sidebar(&mut self, ctx: &Context) {
-        self.sidebar = !self.sidebar;
-        if !self.sidebar && sidebar_has_focus(ctx) {
+        self.sidebar.toggle();
+        if !self.sidebar.visible() && sidebar_has_focus(ctx) {
             self.focus_editor(ctx);
         }
     }
@@ -473,7 +454,7 @@ impl EditorApp {
     /// Ctrl+Shift+X: shows the sidebar with the Extensions view and focuses
     /// its search box, or, from the search box, goes back to the editor.
     fn show_extensions(&mut self, ctx: &Context) {
-        self.sidebar = true;
+        self.sidebar.reveal();
         self.search.shown = false;
         self.notice = self.extensions.toggle(ctx, &mut self.workspace);
     }
@@ -481,7 +462,7 @@ impl EditorApp {
     /// Ctrl+Shift+E: shows the sidebar and focuses the explorer on the
     /// active file's row.
     fn focus_explorer(&mut self, ctx: &Context) {
-        self.sidebar = true;
+        self.sidebar.reveal();
         self.extensions.shown = false;
         self.search.shown = false;
         if self.workspace.explorer().is_none() {
@@ -499,29 +480,48 @@ impl EditorApp {
         focus(ctx, explorer::id());
     }
 
-    /// F6: from the editor to the explorer and back, as in the TUI.
-    fn focus_next_part(&mut self, ctx: &Context) {
-        if sidebar_has_focus(ctx) {
-            self.focus_editor(ctx);
-        } else if self.sidebar && self.search.shown {
-            self.search.focus();
-            ctx.request_repaint();
-        } else if self.sidebar && self.extensions.shown {
-            focus(ctx, extensions::search_id());
-        } else if self.sidebar {
-            self.focus_explorer(ctx);
+    /// F6 (`next`) and Shift+F6: the next or the previous part, in VS
+    /// Code's order, skipping the parts not shown.
+    fn focus_part(&mut self, ctx: &Context, next: bool) {
+        let sidebar = self.sidebar.visible()
+            && (self.extensions.shown || self.search.shown || self.workspace.explorer().is_some());
+        let panel = self.problems.visible && !self.workspace.problems().is_empty();
+        let status = ctx.content_rect().height() >= layout::STATUS_BAR_BREAKPOINT;
+        let target = match focus::focused_part(ctx, self.sidebar_area, self.problems_area) {
+            Some(part) => focus::neighbour(part, next, |part| match part {
+                Part::Sidebar => sidebar,
+                Part::Panel => panel,
+                Part::StatusBar => status,
+                Part::Editor => true,
+            }),
+            None => Part::Editor,
+        };
+        match target {
+            Part::Editor => self.focus_editor(ctx),
+            Part::Panel => focus(ctx, problems::first_row_id()),
+            Part::StatusBar => focus(ctx, status::id()),
+            Part::Sidebar if self.search.shown => {
+                self.search.focus();
+                ctx.request_repaint();
+            }
+            Part::Sidebar if self.extensions.shown => focus(ctx, extensions::search_id()),
+            Part::Sidebar => self.focus_explorer(ctx),
         }
     }
 
-    /// With nothing focused, the editor takes focus, or else the explorer.
+    /// With nothing focused, the editor takes focus, or else the explorer,
+    /// or else the empty editor group.
     fn default_focus(&self, ctx: &Context) {
         if ctx.memory(|memory| memory.focused().is_some()) {
             return;
         }
-        if self.workspace.active_document().is_some() {
-            focus(ctx, editor::id());
-        } else if self.sidebar && self.workspace.explorer().is_some() {
+        if self.workspace.active_document().is_none()
+            && self.sidebar.visible()
+            && self.workspace.explorer().is_some()
+        {
             focus(ctx, explorer::id());
+        } else {
+            self.focus_editor(ctx);
         }
     }
 
@@ -587,6 +587,11 @@ impl EditorApp {
                 self.focus_editor(ui.ctx());
                 true
             }
+            Some(tabs::Action::Select(id)) => {
+                let _ = self.workspace.activate(id);
+                focus(ui.ctx(), tabs::tab_id(id));
+                true
+            }
             Some(tabs::Action::Close(id)) => {
                 self.close(ui.ctx(), id);
                 true
@@ -598,6 +603,7 @@ impl EditorApp {
     fn show_editor(&mut self, ui: &mut egui::Ui, rect: Rect) -> bool {
         let Some(id) = self.workspace.active_document() else {
             empty_group(ui, rect);
+            focus::empty_group(ui, rect);
             return false;
         };
         let name = self
@@ -626,7 +632,7 @@ fn empty_group(ui: &mut egui::Ui, rect: Rect) {
     ui.painter().rect_filled(rect, 0.0, EDITOR_BACKGROUND);
     let lines = [
         "No file open",
-        "Open one from the explorer: Ctrl+Shift+E or F6",
+        "Open one from the explorer: Ctrl+Shift+E or Shift+F6",
     ];
     for (row, line) in (0_u8..).zip(lines) {
         let center = rect.center() + Vec2::new(0.0, (f32::from(row) - 0.5) * 20.0);
@@ -650,13 +656,12 @@ impl eframe::App for EditorApp {
         self.workspace.poll_language_servers();
         self.workspace.poll_search();
         self.note();
+        let tab = focus::tab_pressed(&ctx);
         let mut changed = self.workbench_keys(&ctx);
         self.default_focus(&ctx);
         let rect = ui.max_rect();
-        let width = *self
-            .sidebar_width
-            .get_or_insert_with(|| sidebar_width(rect.width()));
-        let areas = areas(rect, self.sidebar.then_some(width));
+        let areas = layout::areas(rect, self.sidebar.fit(rect.width()));
+        self.sidebar_area = areas.sidebar;
         if let Some(sidebar) = areas.sidebar {
             changed |= self.show_sidebar(ui, sidebar);
         }
@@ -670,16 +675,27 @@ impl eframe::App for EditorApp {
             .or(self.error.as_deref())
             .or(self.notice.as_deref());
         let active = self.workspace.active_document();
-        let counts_clicked = ui
-            .scope_builder(
-                UiBuilder::new()
-                    .max_rect(areas.status)
-                    .id_salt("rustode-status"),
-                |ui| status::show(ui, &self.workspace, active, message),
-            )
-            .inner;
-        if counts_clicked {
-            self.toggle_problems(&ctx);
+        if let Some(rect) = areas.status {
+            let outcome = ui
+                .scope_builder(
+                    UiBuilder::new()
+                        .max_rect(rect)
+                        .id(status::id())
+                        .sense(Sense::FOCUSABLE),
+                    |ui| status::show(ui, &self.workspace, active, message, &mut self.status),
+                )
+                .inner;
+            if outcome.toggle_problems {
+                self.toggle_problems(&ctx);
+            }
+            if outcome.leave {
+                self.focus_editor(&ctx);
+            }
+        }
+        if tab {
+            // egui moves focus on Tab at the end of a frame, or on the next
+            // one when it wraps around: draw that one now.
+            ctx.request_repaint();
         }
         self.update_title(&ctx);
         if let Some(latency) = &self.latency {
