@@ -284,7 +284,11 @@ impl Document {
         }
     }
 
-    pub(crate) fn version(&self) -> u64 {
+    /// The version of the text: every edit gives a new one, and undo and
+    /// redo return to earlier ones. A frontend can keep what it derived from
+    /// the text (find matches, for example) until the version changes.
+    #[must_use]
+    pub fn version(&self) -> u64 {
         self.editor.version()
     }
 

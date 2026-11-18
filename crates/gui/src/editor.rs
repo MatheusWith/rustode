@@ -11,7 +11,11 @@
 //! Modern's (`extensions/theme-defaults/themes/dark_modern.json:33-44`) with
 //! the default selection and caret colors
 //! (`src/vs/platform/theme/common/colors/editorColors.ts:121-123`,
-//! `src/vs/editor/common/core/editorColorRegistry.ts:22`).
+//! `src/vs/editor/common/core/editorColorRegistry.ts:22`). While the find
+//! widget is shown, every match in view is highlighted and the current one
+//! stands out, in Dark Modern's `editor.findMatchBackground` (`dark_modern.json:34`)
+//! and the default `editor.findMatchHighlightBackground`
+//! (`src/vs/platform/theme/common/colors/editorColors.ts:148-158`).
 //!
 //! Syntax highlights are asked of the workspace for the visible lines only,
 //! and each line is laid out in colored sections, with Dark Modern's token
@@ -43,7 +47,7 @@ use eframe::egui::{
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
 use rustode_workspace::{
-    Document, DocumentId, Highlight, Marker, Position, Selection, TokenKind, Workspace,
+    Document, DocumentId, Highlight, Marker, Position, Range, Selection, TokenKind, Workspace,
 };
 use std::sync::Arc;
 
@@ -59,6 +63,11 @@ const LINE_NUMBER: Color32 = Color32::from_rgb(0x6e, 0x76, 0x81);
 const ACTIVE_LINE_NUMBER: Color32 = Color32::from_rgb(0xcc, 0xcc, 0xcc);
 const SELECTION: Color32 = Color32::from_rgb(0x26, 0x4f, 0x78);
 const CARET: Color32 = Color32::from_rgb(0xae, 0xaf, 0xad);
+/// Dark Modern's `editor.findMatchBackground`, the current match.
+const FIND_MATCH: Color32 = Color32::from_rgb(0x9e, 0x6a, 0x03);
+/// The default `editor.findMatchHighlightBackground`, `#EA5C0055`: the other
+/// matches.
+const FIND_MATCH_HIGHLIGHT: Color32 = Color32::from_rgba_unmultiplied_const(0xea, 0x5c, 0x00, 0x55);
 /// The caret's width before it is rounded to pixels, in points.
 const CARET_WIDTH: f32 = 2.0;
 /// Margin kept between the caret and the right edge when it is revealed.
@@ -96,9 +105,17 @@ pub(crate) struct View {
     left: f32,
     /// The selection anchor while the primary button drags.
     drag_anchor: Option<usize>,
-    /// Set to bring the caret into view on the next frame, e.g. after going
-    /// to a problem.
-    pub(crate) reveal: bool,
+    /// Scroll the caret into view on the next frame: set when a command from
+    /// outside the editor moved it (the quick input, the find widget, going
+    /// to a problem).
+    reveal: bool,
+}
+
+impl View {
+    /// Scrolls the primary caret into view on the next frame.
+    pub(crate) fn reveal(&mut self) {
+        self.reveal = true;
+    }
 }
 
 /// What a frame's input did.
@@ -208,6 +225,8 @@ struct Screen<'a> {
     rows: Vec<Row>,
     /// The document's diagnostics, the most severe last.
     markers: Vec<Marker>,
+    /// Find matches to highlight, sorted (`find.rs`).
+    matches: &'a [Range],
 }
 
 impl Row {
@@ -216,13 +235,15 @@ impl Row {
     }
 }
 
-/// Shows the editor in `ui`, running the commands its input asks for.
+/// Shows the editor in `ui`, running the commands its input asks for, with
+/// `matches` (sorted find matches) highlighted.
 pub(crate) fn show(
     ui: &mut Ui,
     workspace: &mut Workspace,
     document: DocumentId,
     view: &mut View,
     label: &str,
+    matches: &[Range],
 ) -> Outcome {
     let mut outcome = Outcome::default();
     let rect = ui.available_rect_before_wrap();
@@ -253,7 +274,7 @@ pub(crate) fn show(
     if response.contains_pointer() {
         wheel(ui, view, doc.line_count(), layout.line_height);
     }
-    if outcome.changed || std::mem::take(&mut view.reveal) {
+    if std::mem::take(&mut view.reveal) || outcome.changed {
         reveal(ui, doc, &layout, view);
     }
     let mut markers = workspace.markers(document);
@@ -264,6 +285,7 @@ pub(crate) fn show(
         view,
         rows: rows(ui, doc, &layout, view),
         markers,
+        matches,
     };
     paint(ui, &screen);
     expose(ui, &response, &screen, label);
@@ -558,6 +580,7 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
     text_painter.rect_filled(layout.text, 0.0, BACKGROUND);
     let carets = selections(&text_painter, screen);
     let left = layout.origin(view).x;
+    find_matches(&text_painter, screen);
     for row in rows {
         let y = row.top + (layout.line_height - row.galley.size().y) / 2.0;
         text_painter.galley(Pos2::new(left, y), Arc::clone(&row.galley), FOREGROUND);
@@ -600,6 +623,7 @@ fn squiggles(painter: &egui::Painter, screen: &Screen<'_>) {
         view,
         rows,
         markers,
+        ..
     } = screen;
     for marker in markers {
         let from = doc.position_of(marker.range.start);
@@ -625,9 +649,52 @@ fn squiggles(painter: &egui::Painter, screen: &Screen<'_>) {
                 marker.severity,
                 x0,
                 x1,
-                row.top + LINE_HEIGHT,
+                row.top + layout.line_height,
             );
         }
+    }
+}
+
+impl Screen<'_> {
+    /// The offsets from the first visible line's start to the line after the
+    /// last one.
+    fn offsets(&self) -> Range {
+        let lines = self
+            .rows
+            .first()
+            .map_or(0..0, |first| first.line..first.line + self.rows.len());
+        Range::new(
+            self.doc.offset_of(Position::new(lines.start, 0)),
+            self.doc.offset_of(Position::new(lines.end, 0)),
+        )
+    }
+
+    /// The rectangles that cover a non-empty `range` on the visible lines:
+    /// one per line, reaching past a line's end when the range does.
+    fn rects(&self, range: Range) -> Vec<Rect> {
+        let Screen {
+            doc, layout, view, ..
+        } = self;
+        let from = doc.position_of(range.start);
+        let to = doc.position_of(range.end);
+        self.rows
+            .iter()
+            .filter(|row| !range.is_empty() && (from.line..=to.line).contains(&row.line))
+            .map(|row| {
+                let first = if row.line == from.line {
+                    from.column
+                } else {
+                    0
+                };
+                let x0 = row.x(layout, view, first);
+                let x1 = if row.line == to.line {
+                    row.x(layout, view, to.column)
+                } else {
+                    row.x(layout, view, row.display.columns()) + layout.char_width / 2.0
+                };
+                Rect::from_x_y_ranges(x0..=x1, row.top..=row.top + layout.line_height)
+            })
+            .collect()
     }
 }
 
@@ -640,35 +707,14 @@ fn selections(painter: &egui::Painter, screen: &Screen<'_>) -> Vec<Rect> {
         rows,
         ..
     } = screen;
-    let lines = rows
-        .first()
-        .map_or(0..0, |first| first.line..first.line + rows.len());
-    let start = doc.offset_of(Position::new(lines.start, 0));
-    let end = doc.offset_of(Position::new(lines.end, 0));
+    let shown = screen.offsets();
     let mut carets = Vec::new();
     for selection in doc.selections() {
         let range = selection.range();
-        if range.end < start || range.start > end {
+        if range.end < shown.start || range.start > shown.end {
             continue;
         }
-        let from = doc.position_of(range.start);
-        let to = doc.position_of(range.end);
-        let selected = rows
-            .iter()
-            .filter(|row| !selection.is_empty() && (from.line..=to.line).contains(&row.line));
-        for row in selected {
-            let first = if row.line == from.line {
-                from.column
-            } else {
-                0
-            };
-            let x0 = row.x(layout, view, first);
-            let x1 = if row.line == to.line {
-                row.x(layout, view, to.column)
-            } else {
-                row.x(layout, view, row.display.columns()) + layout.char_width / 2.0
-            };
-            let rect = Rect::from_x_y_ranges(x0..=x1, row.top..=row.top + layout.line_height);
+        for rect in screen.rects(range) {
             painter.rect_filled(rect, 0.0, SELECTION);
         }
         let head = doc.position_of(selection.head);
@@ -693,6 +739,29 @@ fn caret(layout: &Layout, view: &View, row: &Row, column: usize) -> Rect {
         Pos2::new(left, row.top),
         Vec2::new(width, layout.line_height),
     )
+}
+
+/// Highlights the find matches on the visible lines, the one the primary
+/// selection is on as the current match, as VS Code's find decorations do
+/// (`src/vs/editor/contrib/find/browser/findWidget.css`, `.findMatch` and
+/// `.currentFindMatch`).
+fn find_matches(painter: &egui::Painter, screen: &Screen<'_>) {
+    let shown = screen.offsets();
+    let current = screen.doc.primary_selection().range();
+    let first = screen.matches.partition_point(|m| m.end < shown.start);
+    let visible = screen.matches[first..]
+        .iter()
+        .take_while(|m| m.start <= shown.end);
+    for &found in visible {
+        let color = if found == current {
+            FIND_MATCH
+        } else {
+            FIND_MATCH_HIGHLIGHT
+        };
+        for rect in screen.rects(found) {
+            painter.rect_filled(rect, 0.0, color);
+        }
+    }
 }
 
 /// Exposes the editor to screen readers through AccessKit: a multi-line
