@@ -19,6 +19,11 @@
 //! Every widget is an egui widget, so each is in the AccessKit tree: the
 //! search box is a text input, names and notices are labels, actions are
 //! buttons. All work goes through the workspace, in the background.
+//!
+//! The search box and the enabled buttons are Tab stops, in order. A
+//! focused one is outlined in `focusBorder`: inside the search box, 2
+//! points outside a button (`src/vs/workbench/browser/media/style.css:270-286`;
+//! `src/vs/base/browser/ui/button/button.css:32-34`).
 
 use eframe::egui::{
     self, Align, Button, Color32, FontId, Id, Key, Label, Layout, RichText, ScrollArea, Stroke,
@@ -92,7 +97,11 @@ fn button(ui: &mut Ui, caption: &str, enabled: bool) -> bool {
     let button = Button::new(text(caption, BUTTON_TEXT))
         .fill(if enabled { BUTTON } else { INPUT })
         .stroke(Stroke::NONE);
-    ui.add_enabled(enabled, button).clicked()
+    let response = ui.add_enabled(enabled, button);
+    if response.has_focus() {
+        crate::focus::outline(ui.painter(), response.rect.expand(3.0));
+    }
+    response.clicked()
 }
 
 /// Draws the panel over the whole of `ui`; returns a message for the
@@ -100,13 +109,21 @@ fn button(ui: &mut Ui, caption: &str, enabled: bool) -> bool {
 pub(crate) fn show(ui: &mut Ui, workspace: &mut Workspace, panel: &mut Panel) -> Option<String> {
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0.0, BACKGROUND);
-    ui.painter()
-        .vline(rect.right() - 0.5, rect.y_range(), Stroke::new(1.0, BORDER));
+    ui.painter().vline(
+        rect.right() - 0.5,
+        rect.y_range(),
+        Stroke::new(crate::focus::hairline(ui.pixels_per_point()), BORDER),
+    );
     let mut message = None;
     ui.scope_builder(
         egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(12.0, 8.0))),
         |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
+            // egui outlines a focused text box with the selection stroke.
+            ui.visuals_mut().selection.stroke = Stroke::new(
+                crate::focus::hairline(ui.pixels_per_point()),
+                crate::focus::FOCUS_BORDER,
+            );
             label(ui, text("EXTENSIONS", FOREGROUND).strong());
             search_box(ui, workspace, panel);
             if let Some(status) = search_status(workspace) {

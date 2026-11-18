@@ -14,14 +14,17 @@ use winit::event::{DeviceEvent, DeviceId, ElementState, Ime, StartCause, WindowE
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::WindowId;
 
-/// The native window options: wgpu, a 1000×700 window named `rustode`.
+/// The native window options: wgpu, a 1000×700 window named `rustode`,
+/// no smaller than VS Code's 400×270 (see [`crate::layout`]). Sizes are in
+/// points: eframe applies the platform's scale factor.
 #[must_use]
 pub fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_app_id("rustode")
-            .with_inner_size([1000.0, 700.0]),
+            .with_inner_size([1000.0, 700.0])
+            .with_min_inner_size(crate::layout::WINDOW_MIN_SIZE),
         ..eframe::NativeOptions::default()
     }
 }

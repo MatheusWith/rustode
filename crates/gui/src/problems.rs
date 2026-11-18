@@ -270,16 +270,8 @@ pub(crate) fn paint_squiggle(
     painter.add(Shape::line(points, Stroke::new(1.0, color)));
 }
 
-/// The status bar's counts, drawn as VS Code draws them, an icon then a
-/// number for errors and warnings, and infos when there are any; a click
-/// toggles the panel. Returns its response and the width it took.
-pub(crate) fn counts_item(
-    ui: &mut Ui,
-    at: Pos2,
-    height: f32,
-    counts: ProblemCounts,
-) -> (egui::Response, f32) {
-    let font = FontId::proportional(12.0);
+/// The counts to show: errors and warnings, and infos when there are any.
+fn count_items(counts: ProblemCounts) -> Vec<(MarkerSeverity, usize)> {
     let mut items = vec![
         (MarkerSeverity::Error, counts.errors),
         (MarkerSeverity::Warning, counts.warnings),
@@ -287,33 +279,47 @@ pub(crate) fn counts_item(
     if counts.infos > 0 {
         items.push((MarkerSeverity::Info, counts.infos));
     }
-    let galleys: Vec<_> = items
+    items
+}
+
+/// How wide the status bar's counts are, in points.
+pub(crate) fn counts_width(ui: &Ui, counts: ProblemCounts) -> f32 {
+    let font = FontId::proportional(12.0);
+    count_items(counts)
         .iter()
         .map(|(_, n)| {
-            ui.painter()
-                .layout_no_wrap(n.to_string(), font.clone(), FOREGROUND)
+            let galley = ui
+                .painter()
+                .layout_no_wrap(n.to_string(), font.clone(), FOREGROUND);
+            ICON + 4.0 + galley.size().x + 8.0
         })
-        .collect();
-    let width: f32 = galleys
-        .iter()
-        .map(|g| ICON + 4.0 + g.size().x + 8.0)
         .sum::<f32>()
-        + 4.0;
-    let rect = Rect::from_min_size(at, Vec2::new(width, height));
+        + 4.0
+}
+
+/// The status bar's counts in `rect`, drawn as VS Code draws them, an icon
+/// then a number for errors and warnings, and infos when there are any; a
+/// click toggles the panel.
+pub(crate) fn paint_counts(ui: &mut Ui, rect: Rect, counts: ProblemCounts) -> egui::Response {
+    let font = FontId::proportional(12.0);
+    let items = count_items(counts);
     let response = ui.interact(rect, Id::new("rustode-problems-status"), Sense::click());
     let label = counts_label(counts);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
     let mut x = rect.left() + 4.0;
-    for ((severity, _), galley) in items.iter().zip(galleys) {
+    for (severity, n) in items {
         paint_icon(
             ui.painter(),
             Pos2::new(x + ICON / 2.0, rect.center().y),
-            *severity,
+            severity,
         );
         x += ICON + 4.0;
+        let galley = ui
+            .painter()
+            .layout_no_wrap(n.to_string(), font.clone(), FOREGROUND);
         let pos = Pos2::new(x, rect.center().y - galley.size().y / 2.0);
         x += galley.size().x + 8.0;
         ui.painter().galley(pos, galley, FOREGROUND);
     }
-    (response, width)
+    response
 }

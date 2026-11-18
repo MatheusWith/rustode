@@ -170,8 +170,11 @@ fn explorer_keys_expand_open_and_move_between_parts() {
         ["Ln 1, Col 1", "UTF-8", "LF", "Rust"],
         "Enter reached the explorer only"
     );
-    press(&mut harness, NONE, Key::F6);
-    assert!(explorer_focused(&harness), "F6 goes back to the explorer");
+    press(&mut harness, Modifiers::SHIFT, Key::F6);
+    assert!(
+        explorer_focused(&harness),
+        "Shift+F6 goes back to the explorer"
+    );
     press(&mut harness, NONE, Key::ArrowDown);
     press(&mut harness, NONE, Key::Space);
     assert_eq!(tabs(&harness), ["main.rs", "README.md *"]);
