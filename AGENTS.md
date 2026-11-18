@@ -83,7 +83,6 @@ If the owner asked for a task, it comes first; the four steps are for orientatio
 | Refresh the copies after new tests | `./montar.sh` (recreates 01 to 08 and the skills copy; `SEM_FORMATADO=1` skips JS formatting) |
 | Copy the skills for OpenCode | `./sincronizar-skills.sh` |
 | Reverse engineering of the packaged app (JavaScript/Electron, asar, fuses, binaries) | REA: the `/usr/bin/rea` CLI and the `rea` MCP server, registered in [`.mcp.json`](.mcp.json) (Claude Code) and [`opencode.json`](opencode.json) (OpenCode), with the `reverse-engineer-anything` skill. Rules below |
-| Symbols, definitions and references in the editor's Rust code or in the TypeScript source tree | Serena: the `serena` MCP server, registered in [`.mcp.json`](.mcp.json) (Claude Code, `claude-code` context) and [`opencode.json`](opencode.json) (OpenCode, `ide` context), configured in [`.serena/project.yml`](.serena/project.yml). Rules below |
 
 The project's skills are described in §7.
 
@@ -108,18 +107,6 @@ The project's skills are described in §7.
   ```sh
   rsync -a --delete --exclude /agents/ /usr/lib/node_modules/rea-agents/skills/reverse-engineer-anything/ .claude/skills/reverse-engineer-anything/ && ./sincronizar-skills.sh
   ```
-
-### Serena in this project
-
-[Serena](https://github.com/oraios/serena) (MIT) answers symbol questions through language servers: rust-analyzer for `crates/` and `xtask/`, and typescript-language-server for the source tree. It is installed as a uv tool (`serena-agent`, 1.7.0 on 2026-11-17). The rules in §0 to §4 take precedence.
-
-- **What it reads.** The project minus the `ignored_paths` of `.serena/project.yml`: every evidence folder except the source tree `02-engenharia-reversa/fonte/arvore`, the annex folders of `09-analises/`, `target/` and local tool state. It does not use `.gitignore`, which hides all of 01 to 08, the source tree included. Check a path with `serena project is_ignored_path <path> .`.
-- **Read-only.** `read_only: true`: Serena never edits a file; agents edit with their own tools, under §0.1 and the hooks. Its onboarding and its memory writing are off, because project knowledge goes where §9 says.
-- **rust-analyzer stays on the editor's workspace.** `linkedProjects` points it at the root `Cargo.toml`, so it never loads the Cargo projects inside the source tree (`cli/`, `copilot_shim/`), whose dependencies it would download. Its checks go to `target/rust-analyzer/` (`cargo.targetDir`), so they never hold the lock on `target/` that cargo, clippy and the hooks take.
-- **Trust.** Those two settings apply only when the project path is listed in `trusted_project_path_patterns` in `~/.serena/serena_config.yml` (set on this machine on 2026-11-17). Without it, Serena logs that the project is not trusted and rust-analyzer runs with Serena's defaults.
-- **Evidence.** A Serena answer about the source tree is cited by the `src/…:N` path it points to (§0.3), never as "Serena said". External types in the source tree do not resolve, because it has no `node_modules`.
-- **Memory.** Both language servers run next to the editor builds; check `MemAvailable` before heavy work (§3.4).
-- **Checking it.** `serena project health-check .` starts both servers and runs the symbol tools on one file; it passed on 2026-11-17.
 
 ## 7. Skills
 

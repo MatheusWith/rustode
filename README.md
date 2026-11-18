@@ -87,7 +87,7 @@ rustode is a Rust editor with one UI-agnostic core and thin frontends: a CLI, a 
 | `docs/` | reference documents: architecture, build, QA, gaps, ADRs, templates |
 | `crates/` · `xtask/` · `Cargo.toml` · `Cargo.lock` | **the rustode editor**: one crate per module ([`AGENTS.md`](AGENTS.md) §11.1) and the project task runner (`cargo xtask`) |
 | `.github/` · `.pre-commit-config.yaml` · `.semgrep/` · `deny.toml` · `committed.toml` · `clippy.toml` · `rustfmt.toml` · `rust-toolchain.toml` · `.config/` · `.cargo/` | the editor's quality pipeline: CI, Dependabot and the pull request template; the git hooks; security rules; license policy; commit conventions; lints; formatting; the pinned toolchain; the test profiles; the `xtask` alias |
-| `.claude/skills/` · `.opencode/skills/` · `.serena/` · `.ai-memory.toml` | the project's skills (original in `.claude`, identical copy for OpenCode made by `sincronizar-skills.sh`), Serena configuration (TypeScript on the source tree, read-only) and the ai-memory scope |
+| `.claude/skills/` · `.opencode/skills/` · `.ai-memory.toml` | the project's skills (original in `.claude`, identical copy for OpenCode made by `sincronizar-skills.sh`) and the ai-memory scope |
 | `.mcp.json` · `opencode.json` | REA MCP registration (reverse engineering of the packaged app) for Claude Code and OpenCode; rules in [`AGENTS.md`](AGENTS.md) §6 |
 
 Every file in 01 to 08 is a real, independent copy, with no symbolic or hard links. The only link in the VS Code repository, a test fixture in `extensions/terminal-suggest/src/test/fixtures/symlink-test/`, was copied as a regular file.
