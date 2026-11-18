@@ -1,6 +1,7 @@
 //! Input to frame for the Extensions view: Ctrl+Shift+X, a search against
 //! a local Open VSX stand-in, Install, the Installed list with its
-//! not-loaded notice, and Delete to uninstall. Snapshots are in
+//! enablement and not-loaded notice, Enter to disable or enable, and Delete
+//! to uninstall. Snapshots are in
 //! `tests/snapshots/`; run with `RUSTODE_UPDATE_SNAPSHOTS=1` to write them.
 
 use ratatui::Terminal;
@@ -28,6 +29,8 @@ fn app(name: &str, stand_in: &StandIn) -> (App, PathBuf) {
     let mut app = App::open(&file).expect("open");
     let extensions = dir.join("extensions");
     app.workspace_mut().set_extensions_location(&extensions);
+    app.workspace_mut()
+        .set_global_storage_location(&dir.join("globalStorage"));
     app.workspace_mut()
         .set_extension_registry(stand_in.url())
         .expect("registry");
@@ -238,4 +241,94 @@ fn a_failed_install_is_reported_in_the_status_bar() {
     let shown = screen(&terminal);
     assert!(shown.contains("acme.hello: "), "{shown}");
     assert!(shown.contains("HTTP 404"), "{shown}");
+}
+
+#[test]
+fn enter_disables_and_enables_an_installed_extension() {
+    let stand_in = StandIn::start();
+    publish(&stand_in);
+    let (mut app, extensions) = app("enable", &stand_in);
+    let state = extensions
+        .with_file_name("globalStorage")
+        .join("state.json");
+    let mut terminal = Terminal::new(TestBackend::new(100, 14)).expect("terminal");
+    send(&mut app, &mut terminal, &[ctrl_shift_x()]);
+    type_text(&mut app, &mut terminal, "hello");
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    settle(&mut app, &mut terminal);
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Down), key(KeyCode::Enter)],
+    );
+    settle(&mut app, &mut terminal);
+    // The installed row is the third: two results, then Installed.
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::End), key(KeyCode::Enter)],
+    );
+    assert!(
+        screen(&terminal).contains("Disabling"),
+        "{}",
+        screen(&terminal)
+    );
+    settle(&mut app, &mut terminal);
+    assert_snapshot("extensions-disabled-100x14", &screen(&terminal));
+    assert!(
+        std::fs::read_to_string(&state)
+            .expect("state")
+            .contains("acme.hello")
+    );
+
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    settle(&mut app, &mut terminal);
+    let shown = screen(&terminal);
+    assert!(
+        shown.contains("Enabled · Not loaded in this phase"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("Enabled acme.hello (not loaded in this phase)"),
+        "{shown}"
+    );
+    assert_eq!(std::fs::read_to_string(&state).expect("state"), "{}");
+}
+
+#[test]
+fn an_invalid_extension_says_why_on_enter() {
+    let stand_in = StandIn::start();
+    let (mut app, extensions) = app("invalid", &stand_in);
+    let folder = extensions.join("acme.broken-1.0.0");
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(
+        folder.join("package.json"),
+        r#"{"name":"broken","displayName":"Broken","publisher":"acme","version":"1.0.0"}"#,
+    )
+    .expect("manifest");
+    std::fs::write(
+        extensions.join("extensions.json"),
+        r#"[{"identifier":{"id":"acme.broken"},"version":"1.0.0","location":{"$mid":1,"path":"/x","scheme":"file"},"relativeLocation":"acme.broken-1.0.0"}]"#,
+    )
+    .expect("index");
+    let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("terminal");
+    send(&mut app, &mut terminal, &[ctrl_shift_x()]);
+    settle(&mut app, &mut terminal);
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Down), key(KeyCode::Enter)],
+    );
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    let shown = screen(&terminal);
+    assert!(shown.contains(" Broken 1.0.0"), "{shown}");
+    assert!(
+        shown.contains("Invalid · Not loaded in this phase"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("Broken is invalid: property `engines` is mandatory"),
+        "{shown}"
+    );
+    assert!(!app.workspace().extensions_busy(), "nothing was started");
 }

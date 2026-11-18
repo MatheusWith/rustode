@@ -28,7 +28,7 @@ The Cargo workspace has one crate per module (`Cargo.toml:3`: members `crates/*`
 Containment rules:
 
 1. **The frontends (`rustode-cli`, `rustode-tui`, `rustode-gui`) depend on no rustode crate other than `rustode-workspace`,** whether as normal, dev or build dependencies. `xtask/tests/frontend_deps.rs` reads `cargo metadata` and fails otherwise (`:49-65`). It also checks itself against a fake dependency graph (`:67-79`). Third-party crates are not limited by this test.
-2. The workspace re-exports what the frontends need, so that they never depend on the crate behind it. Examples: `rustode_workspace::trace` (`crates/workspace/src/lib.rs:16-19`) and the core and fs types (`:14-15`).
+2. The workspace re-exports what the frontends need, so that they never depend on the crate behind it. Examples: `rustode_workspace::trace` (`crates/workspace/src/lib.rs:16-19`), the core and fs types (`:14-15`), and `rustode_workspace::TokenKind`, through which the frontends color the highlights `Document::highlights` returns (ticket 27).
 3. `rustode-core` does no I/O. Reading, writing, decoding and watching files live in `rustode-fs`.
 4. A third-party crate stays behind the crate that owns its concern ([ADR 0010](0010-ecosystem-crates-allowed.md), rule 4).
 5. Behavior studied in VS Code is credited per crate ([ADR 0009](0009-mit-and-reimplemented-behavior.md)). Paths are in the source tree; the full table, with each rustode file, is in [`ATTRIBUTION.md`](../../ATTRIBUTION.md).

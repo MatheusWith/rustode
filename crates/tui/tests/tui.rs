@@ -482,6 +482,80 @@ fn truecolor_selection_uses_the_dark_modern_selection_color() {
     );
 }
 
+/// The foreground of the cell at `x`, `y`.
+fn fg(terminal: &Terminal<TestBackend>, x: u16, y: u16) -> ratatui::style::Color {
+    terminal.backend().buffer()[(x, y)].fg
+}
+
+#[test]
+fn rust_is_drawn_in_dark_modern_token_colors() {
+    use ratatui::style::Color::Rgb;
+    let (mut app, _) = open_sample("syntax-truecolor");
+    app.set_color_mode(ColorMode::TrueColor);
+    let mut terminal = terminal(100, 12);
+    draw(&mut app, &mut terminal);
+    // Row 1 is `fn main() {`, row 2 `    println!("héllo 日本");`, after
+    // a 5-column gutter.
+    assert_eq!(fg(&terminal, 5, 1), Rgb(0x56, 0x9C, 0xD6), "fn: keyword");
+    assert_eq!(fg(&terminal, 8, 1), Rgb(0xDC, 0xDC, 0xAA), "main: function");
+    assert_eq!(
+        fg(&terminal, 12, 1),
+        Rgb(0xCC, 0xCC, 0xCC),
+        "(: punctuation"
+    );
+    assert_eq!(
+        fg(&terminal, 9, 2),
+        Rgb(0xDC, 0xDC, 0xAA),
+        "println!: macro"
+    );
+    assert_eq!(fg(&terminal, 18, 2), Rgb(0xCE, 0x91, 0x78), "string");
+    let mut plain = App::open(&fixture("syntax-plain", "main.txt", SAMPLE)).expect("open");
+    plain.set_color_mode(ColorMode::TrueColor);
+    draw(&mut plain, &mut terminal);
+    assert_eq!(
+        fg(&terminal, 5, 1),
+        Rgb(0xCC, 0xCC, 0xCC),
+        "plain text is not Rust"
+    );
+}
+
+#[test]
+fn no_color_draws_rust_without_token_colors() {
+    let (mut app, _) = open_sample("syntax-none");
+    app.set_color_mode(ColorMode::None);
+    let mut terminal = terminal(100, 12);
+    draw(&mut app, &mut terminal);
+    for y in 1..4 {
+        for x in 5..40 {
+            assert_eq!(
+                fg(&terminal, x, y),
+                ratatui::style::Color::Reset,
+                "cell {x},{y}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_edit_recolors_the_lines_it_changes() {
+    let (mut app, _) = open_sample("syntax-edit");
+    app.set_color_mode(ColorMode::TrueColor);
+    let mut terminal = terminal(100, 12);
+    send(&mut app, &mut terminal, &typed("//"));
+    let comment = ratatui::style::Color::Rgb(0x6A, 0x99, 0x55);
+    assert_eq!(fg(&terminal, 5, 1), comment, "{}", screen(&terminal));
+    assert_eq!(fg(&terminal, 10, 1), comment, "main is commented out");
+    assert_eq!(
+        fg(&terminal, 9, 2),
+        ratatui::style::Color::Rgb(0xDC, 0xDC, 0xAA)
+    );
+    send(&mut app, &mut terminal, &[ctrl('z')]);
+    assert_eq!(
+        fg(&terminal, 5, 1),
+        ratatui::style::Color::Rgb(0x56, 0x9C, 0xD6)
+    );
+}
+
 fn mouse(
     kind: ratatui::crossterm::event::MouseEventKind,
     column: u16,

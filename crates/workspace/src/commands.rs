@@ -321,6 +321,12 @@ impl Workspace {
     /// `workbench.extensions.uninstallExtension` take an extension id,
     /// `workbench.extensions.search` a search text
     /// (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:432-580`).
+    /// `workbench.extensions.enableExtension` and
+    /// `workbench.extensions.disableExtension` take an extension id too; VS
+    /// Code registers no such commands (its view runs the actions
+    /// `extensions.enableGlobally` and `extensions.disableGlobally`,
+    /// `src/vs/workbench/contrib/extensions/browser/extensionsActions.ts:1741-1850`),
+    /// so these ids are rustode's, named like the install command.
     /// Returns `false` for an unknown command.
     ///
     /// # Errors
@@ -330,6 +336,8 @@ impl Workspace {
         match id {
             "workbench.extensions.installExtension" => self.install_extension(arg)?,
             "workbench.extensions.uninstallExtension" => self.uninstall_extension(arg)?,
+            "workbench.extensions.enableExtension" => self.enable_extension(arg)?,
+            "workbench.extensions.disableExtension" => self.disable_extension(arg)?,
             "workbench.extensions.search" => self.search_extensions(arg),
             _ => return Ok(false),
         }

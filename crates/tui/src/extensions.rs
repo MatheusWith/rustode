@@ -5,15 +5,18 @@
 //! holds the search box ("Search Extensions in …", `extensionsViewlet.ts:647`),
 //! the registry's results with Install / Installing / Installed
 //! (`extensionsActions.ts:478`, `:765`, `:2728`), and the Installed list
-//! (`extensionsViewlet.ts:350`) with Uninstall / Uninstalling
+//! (`extensionsViewlet.ts:350`) with Disable / Enable
+//! (`extensionsActions.ts:1741-1850`), each extension's state (Enabled,
+//! Disabled, `extensionsActions.ts:2745-2748`, or Invalid), disabled ones
+//! dimmed (`extensionsList.ts:185-188`), and Uninstall / Uninstalling
 //! (`extensionsActions.ts:939-940`). Every installed extension shows
-//! "Not loaded in this phase": nothing runs in Phase 1.
+//! "Not loaded in this phase", enabled or not: nothing runs in Phase 1.
 //!
 //! Keys: typing edits the search, Enter searches (VS Code searches as you
 //! type); Up and Down select an extension; Enter installs the selected
-//! result, Delete uninstalls the selected installed extension; Escape goes
-//! back to the editor. All work goes through the workspace, in the
-//! background.
+//! result, or disables or enables the selected installed extension (for an
+//! invalid one it tells why), Delete uninstalls it; Escape goes back to the
+//! editor. All work goes through the workspace, in the background.
 
 use crate::app::{App, Focus};
 use crate::keys;
@@ -24,8 +27,8 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders};
 use rustode_workspace::{
-    ExtensionEvent, ExtensionOperation, ExtensionSearch, ExtensionSummary, InstalledExtension,
-    NOT_LOADED,
+    EnablementState, ExtensionEvent, ExtensionOperation, ExtensionSearch, ExtensionSummary,
+    InstalledExtension, NOT_LOADED,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -135,26 +138,44 @@ impl App {
         }
     }
 
-    /// Enter: searches from the search box, installs a selected result.
+    /// Enter: searches from the search box, installs a selected result,
+    /// disables or enables a selected installed extension.
     fn extensions_enter(&mut self) {
         let Some(row) = self.extensions.selected else {
             let query = self.extensions.query.clone();
             self.workspace.search_extensions(&query);
             return;
         };
-        let id = match self.extension_rows().get(row) {
+        let started = match self.extension_rows().get(row) {
             Some(Row::Result(result))
                 if self.workspace.installed_extension(&result.id()).is_none() =>
             {
-                result.id()
+                let id = result.id();
+                self.workspace.install_extension(&id)
             }
-            Some(_) => {
+            Some(Row::Result(_)) => {
                 self.message = Some("Installed; Delete uninstalls it".to_owned());
                 return;
             }
+            Some(Row::Installed(installed)) => {
+                let (id, state) = (installed.id.clone(), installed.enablement);
+                if state == EnablementState::Invalid {
+                    self.message = Some(format!(
+                        "{} is invalid: {}",
+                        installed.display_name,
+                        installed.first_error().unwrap_or_default()
+                    ));
+                    return;
+                }
+                if state.is_enabled() {
+                    self.workspace.disable_extension(&id)
+                } else {
+                    self.workspace.enable_extension(&id)
+                }
+            }
             None => return,
         };
-        if let Err(err) = self.workspace.install_extension(&id) {
+        if let Err(err) = started {
             self.message = Some(err.to_string());
         }
     }
@@ -185,13 +206,20 @@ pub(crate) fn message(event: &ExtensionEvent) -> Option<String> {
             format!("Installed {id} {version} ({})", NOT_LOADED.to_lowercase())
         }
         ExtensionEvent::Uninstalled { id } => format!("Uninstalled {id}"),
+        ExtensionEvent::Enabled { id } => {
+            format!("Enabled {id} ({})", NOT_LOADED.to_lowercase())
+        }
+        ExtensionEvent::Disabled { id } => format!("Disabled {id}"),
         ExtensionEvent::Failed { id, message } => format!("{id}: {message}"),
-        ExtensionEvent::ListFailed { message } => message.clone(),
+        ExtensionEvent::ListFailed { message } | ExtensionEvent::StateFailed { message } => {
+            message.clone()
+        }
         _ => return None,
     })
 }
 
-/// The action shown on a row.
+/// The action shown on a row: what Enter does, or the state of the work
+/// under way.
 fn action(app: &App, row: Row<'_>) -> &'static str {
     let id = match row {
         Row::Result(result) => result.id(),
@@ -200,16 +228,23 @@ fn action(app: &App, row: Row<'_>) -> &'static str {
     match app.workspace.extension_operation(&id) {
         Some(ExtensionOperation::Installing) => "Installing",
         Some(ExtensionOperation::Uninstalling) => "Uninstalling",
-        None if app.workspace.installed_extension(&id).is_some() => match row {
-            Row::Result(_) => "Installed",
-            Row::Installed(_) => "Uninstall",
+        Some(ExtensionOperation::Enabling) => "Enabling",
+        Some(ExtensionOperation::Disabling) => "Disabling",
+        None => match row {
+            Row::Result(_) if app.workspace.installed_extension(&id).is_some() => "Installed",
+            Row::Result(_) => "Install",
+            Row::Installed(installed) => match installed.enablement {
+                EnablementState::Enabled => "Disable",
+                EnablementState::DisabledGlobally => "Enable",
+                EnablementState::Invalid => "",
+            },
         },
-        None => "Install",
     }
 }
 
-/// The two lines of a row: the name with its action at the right, then a
-/// detail line, which for an installed extension is the not-loaded notice.
+/// The two lines of a row: the name (and an installed extension's version)
+/// with its action at the right, then a detail line, which for an
+/// installed extension is its state and the not-loaded notice.
 fn row_lines(app: &App, row: Row<'_>, width: usize) -> [String; 2] {
     let (name, detail) = match row {
         Row::Result(result) => {
@@ -219,21 +254,27 @@ fn row_lines(app: &App, row: Row<'_>, width: usize) -> [String; 2] {
             } else {
                 format!("{} · {}", result.namespace, result.version)
             };
-            (result.display_name.as_str(), detail)
+            (result.display_name.clone(), detail)
         }
         Row::Installed(installed) => (
-            installed.display_name.as_str(),
-            format!("{} · {}", installed.version, installed.notice()),
+            format!("{} {}", installed.display_name, installed.version),
+            format!("{} · {}", installed.enablement.label(), installed.notice()),
         ),
     };
     let action = action(app, row);
     let room = width.saturating_sub(action.width() + 3);
-    let name = truncate(name, room);
+    let name = truncate(&name, room);
     let gap = width.saturating_sub(name.width() + action.width() + 2);
     [
         format!(" {name}{} {action}", " ".repeat(gap)),
         truncate(&format!("   {detail}"), width),
     ]
+}
+
+/// Whether a row is drawn dimmed: an installed extension that is not
+/// enabled, as VS Code dims disabled ones.
+fn dimmed(row: Row<'_>) -> bool {
+    matches!(row, Row::Installed(installed) if !installed.is_enabled())
 }
 
 fn truncate(text: &str, width: usize) -> String {
@@ -285,7 +326,12 @@ fn list_lines(app: &App, width: usize) -> Vec<(String, Option<usize>, Style)> {
             lines.push((format!(" INSTALLED · {count}"), None, theme.sidebar_header));
         }
         let [first, second] = row_lines(app, *row, width);
-        lines.push((first, Some(index), Style::new()));
+        let style = if dimmed(*row) {
+            theme.description
+        } else {
+            Style::new()
+        };
+        lines.push((first, Some(index), style));
         lines.push((second, Some(index), theme.description));
     }
     if rows.len() == results {

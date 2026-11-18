@@ -7,13 +7,20 @@
 //!   `extractUserExtension`, `src/vs/platform/extensionManagement/node/extensionManagementService.ts:619-698`),
 //!   extracted into a `.`-prefixed temporary folder first and renamed into
 //!   place, with `__metadata` (install time, platform, size) added to its
-//!   `package.json` (`extensionsScannerService.ts:39-43`, `:304-311`);
+//!   `package.json`, whose other fields keep their order, rewritten with
+//!   tabs (`extensionsScannerService.ts:39-43`, `:304-311`;
+//!   `extensionManagementService.ts:654-663`);
 //! - an `extensions.json` index: an array of `{identifier, version,
-//!   location, relativeLocation, metadata}`, where `location` is a `file`
-//!   URI kept for old readers and `relativeLocation` the folder name
-//!   (`extensionsProfileScannerService.ts:23-29`, `:243-298`, `:394-401`), with
-//!   the metadata an install from the gallery records
-//!   (`extensionManagementService.ts:1083-1124`);
+//!   location, relativeLocation, metadata}` in that key order, where
+//!   `location` is a `file` URI (`$mid`, `path`, `scheme`) kept for old
+//!   readers and `relativeLocation` the folder name
+//!   (`extensionsProfileScannerService.ts:23-29`, `:243-298`, `:394-401`;
+//!   `src/vs/base/common/uri.ts:479-513`), with the metadata an install from
+//!   the gallery records, in its order (`extensionManagementService.ts:1083-1132`);
+//! - listing reads each indexed extension's manifest and checks it
+//!   (`manifest.rs`); one whose manifest cannot be read is listed as
+//!   invalid with a manifest made up from its index entry, as VS Code
+//!   lists it (`extensionsScannerService.ts:677-700`);
 //! - uninstalling removes the index entry, then the folder: it is marked in
 //!   `.obsolete`, renamed to `<folder>.<hex>.vsctmp`, deleted, and unmarked
 //!   (`extensionManagementService.ts:721-756`, `:813-850`). VS Code deletes it
@@ -23,8 +30,10 @@
 //!   folders still marked obsolete (`extensionManagementService.ts:561-567`,
 //!   `:959-1000`).
 
-use super::InstalledExtension;
+use super::manifest::{ExtensionManifest, ManifestProblem};
 use super::registry::{Release, UNIVERSAL};
+use super::state::Identifier;
+use super::{EnablementState, InstalledExtension};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::fs;
@@ -53,7 +62,7 @@ fn io_error(path: &Path, err: &io::Error) -> String {
 }
 
 /// Writes `bytes` to `path` through a temporary file and a rename.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let name = path
         .file_name()
         .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
@@ -72,26 +81,15 @@ fn entry_id(entry: &Value) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
-/// An extension's package.json, as far as listing it needs.
-#[derive(Debug, serde::Deserialize)]
-struct Manifest {
-    name: String,
-    publisher: Option<String>,
-    version: String,
-    #[serde(rename = "displayName")]
-    display_name: Option<String>,
-    description: Option<String>,
-}
-
 /// A `%key%` placeholder resolved from `package.nls.json`, as VS Code
 /// localizes manifests (`src/vs/platform/extensionManagement/common/extensionNls.ts`).
-fn localized(value: Option<String>, nls: &Value) -> Option<String> {
+fn localized(value: Option<&str>, nls: &Value) -> Option<String> {
     let value = value?;
     let key = value.strip_prefix('%').and_then(|v| v.strip_suffix('%'));
     match key.and_then(|key| nls.get(key)) {
         Some(Value::String(text)) => Some(text.clone()),
         Some(Value::Object(message)) => message["message"].as_str().map(str::to_owned),
-        _ => Some(value),
+        _ => Some(value.to_owned()),
     }
 }
 
@@ -250,24 +248,36 @@ impl Store<'_> {
         }
     }
 
-    /// The installed extensions, sorted by name, after cleaning up.
-    pub(crate) fn scan(&self) -> Result<Vec<InstalledExtension>, String> {
+    /// The installed extensions, sorted by name, after cleaning up, with
+    /// their enablement given the globally `disabled` ones. An extension
+    /// whose manifest cannot be read is listed as invalid, as VS Code lists
+    /// it (`extensionsScannerService.ts:677-700`).
+    pub(crate) fn scan(&self, disabled: &[Identifier]) -> Result<Vec<InstalledExtension>, String> {
         let entries = self.read_index()?;
         self.clean_up(&entries);
         let mut list: Vec<InstalledExtension> = entries
             .iter()
             .filter_map(|entry| {
-                let id = entry_id(entry)?;
                 let location = self.location(entry)?;
-                let found = read_extension(&id, entry, &location);
-                if found.is_none() {
-                    tracing::warn!(%id, location = %location.display(), "an indexed extension is missing");
-                }
-                found
+                Some(read_extension(entry, &location, disabled))
             })
             .collect();
         list.sort_by_key(|e| (e.display_name.to_lowercase(), e.id.clone()));
         Ok(list)
+    }
+
+    /// The installed extension `id` and its identifier, if it is installed.
+    pub(crate) fn find(
+        &self,
+        id: &str,
+        disabled: &[Identifier],
+    ) -> Result<Option<(InstalledExtension, Identifier)>, String> {
+        let entries = self.read_index()?;
+        Ok(entries.iter().find_map(|entry| {
+            let identifier = identifier(entry).filter(|i| i.id == id)?;
+            let location = self.location(entry)?;
+            Some((read_extension(entry, &location, disabled), identifier))
+        }))
     }
 
     /// The installed version of `id`, if any; fails when the index is invalid.
@@ -329,29 +339,82 @@ impl Store<'_> {
     }
 }
 
-/// An installed extension from its index entry and package.json.
-fn read_extension(id: &str, entry: &Value, location: &Path) -> Option<InstalledExtension> {
-    let text = fs::read_to_string(location.join("package.json")).ok()?;
-    let manifest: Manifest = serde_json::from_str(&text).ok()?;
+/// The entry's identifier as VS Code reads it: the id in lower case, and the
+/// gallery uuid if the entry has one (`extensionsProfileScannerService.ts:270-276`).
+fn identifier(entry: &Value) -> Option<Identifier> {
+    let id = entry_id(entry)?;
+    let uuid = entry["metadata"]["id"]
+        .as_str()
+        .or_else(|| entry["identifier"]["uuid"].as_str())
+        .map(str::to_owned);
+    Some(Identifier { id, uuid })
+}
+
+/// The manifest in `location`, or the one VS Code makes up from the index
+/// entry when it cannot be read, with the reason
+/// (`extensionsScannerService.ts:681-700`, `:769-798`).
+fn read_manifest(id: &str, entry: &Value, location: &Path) -> (ExtensionManifest, Option<String>) {
+    let path = location.join("package.json");
+    let read = fs::read_to_string(&path)
+        .map_err(|err| format!("cannot read {}: {err}", path.display()))
+        .and_then(|text| {
+            ExtensionManifest::parse(&text).map_err(|err| format!("{}: {err}", path.display()))
+        });
+    match read {
+        Ok(manifest) => (manifest, None),
+        Err(reason) => {
+            let (publisher, name) = id.split_once('.').unwrap_or(("", id));
+            let mut fields = Map::new();
+            fields.insert("name".into(), name.into());
+            fields.insert("publisher".into(), publisher.into());
+            fields.insert("version".into(), entry["version"].clone());
+            fields.insert("engines".into(), serde_json::json!({ "vscode": "" }));
+            (ExtensionManifest::from_fields(fields), Some(reason))
+        }
+    }
+}
+
+/// An installed extension from its index entry and package.json, checked
+/// as VS Code's scanner checks it.
+fn read_extension(entry: &Value, location: &Path, disabled: &[Identifier]) -> InstalledExtension {
+    let identifier = identifier(entry).unwrap_or(Identifier {
+        id: String::new(),
+        uuid: None,
+    });
+    let (manifest, unreadable) = read_manifest(&identifier.id, entry, location);
+    let problems = match unreadable {
+        Some(reason) => vec![ManifestProblem {
+            severity: crate::Severity::Error,
+            message: reason,
+        }],
+        None => manifest.validate(location),
+    };
     let nls = fs::read_to_string(location.join("package.nls.json"))
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .unwrap_or(Value::Null);
     let metadata = &entry["metadata"];
-    Some(InstalledExtension {
-        id: id.to_owned(),
+    let valid = !problems.iter().any(ManifestProblem::is_error);
+    let is_disabled = disabled.iter().any(|d| d.same(&identifier));
+    InstalledExtension {
         version: entry["version"]
             .as_str()
-            .unwrap_or(&manifest.version)
+            .or(manifest.version())
+            .unwrap_or_default()
             .to_owned(),
-        display_name: localized(manifest.display_name, &nls)
+        display_name: localized(manifest.display_name(), &nls)
             .filter(|d| !d.is_empty())
-            .unwrap_or_else(|| manifest.name.clone()),
-        description: localized(manifest.description, &nls).unwrap_or_default(),
+            .or_else(|| manifest.name().map(str::to_owned))
+            .unwrap_or_else(|| identifier.id.clone()),
+        description: localized(manifest.description(), &nls).unwrap_or_default(),
         publisher_display_name: metadata["publisherDisplayName"].as_str().map(str::to_owned),
         target_platform: metadata["targetPlatform"].as_str().map(str::to_owned),
         location: location.to_owned(),
-    })
+        enablement: EnablementState::of(is_disabled, valid),
+        manifest,
+        problems,
+        id: identifier.id,
+    }
 }
 
 /// The extracted package.json must name the extension and version asked
@@ -361,24 +424,29 @@ fn check_manifest(folder: &Path, id: &str, version: &str) -> Result<(), String> 
     let path = folder.join("package.json");
     let text = fs::read_to_string(&path)
         .map_err(|_| "the VSIX has no extension/package.json".to_owned())?;
-    let manifest: Manifest = serde_json::from_str(&text)
+    let manifest = ExtensionManifest::parse(&text)
         .map_err(|err| format!("the VSIX's package.json is not valid: {err}"))?;
     let found = format!(
         "{}.{}",
-        manifest.publisher.unwrap_or_default(),
-        manifest.name
+        manifest.publisher().unwrap_or_default(),
+        manifest.name().unwrap_or_default()
     )
     .to_ascii_lowercase();
-    if found != id || manifest.version != version {
+    let found_version = manifest.version().unwrap_or_default();
+    if found != id || found_version != version {
         return Err(format!(
-            "the VSIX holds {found} {}, not {id} {version}",
-            manifest.version
+            "the VSIX holds {found} {found_version}, not {id} {version}"
         ));
     }
     Ok(())
 }
 
-/// Adds `__metadata` to the extracted package.json, keeping what is there.
+/// Adds `__metadata` to the extracted package.json, keeping what is there:
+/// the fields stay in their order, `__metadata` is merged into or added
+/// last, and the file is written with tabs, as `updateManifestMetadata`
+/// writes it (`JSON.stringify(manifest, null, '\t')`,
+/// `extensionsScannerService.ts:304-311`; keys in the order of
+/// `extensionManagementService.ts:654-657`).
 fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Result<(), String> {
     let path = folder.join("package.json");
     let text = fs::read_to_string(&path).map_err(|err| io_error(&path, &err))?;
@@ -389,6 +457,9 @@ fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Resul
     let metadata = object
         .entry("__metadata")
         .or_insert_with(|| Value::Object(Map::new()));
+    if !metadata.is_object() {
+        *metadata = Value::Object(Map::new());
+    }
     if let Some(metadata) = metadata.as_object_mut() {
         metadata.insert("installedTimestamp".into(), now_millis().into());
         metadata.insert(
@@ -406,8 +477,9 @@ fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Resul
     fs::write(&path, bytes).map_err(|err| io_error(&path, &err))
 }
 
-/// The metadata VS Code records for an install from the gallery; the
-/// fields it leaves undefined are left out. (Keys are written sorted.)
+/// The metadata VS Code records for an install from the gallery, in its
+/// order; the fields it leaves undefined are left out, and the gallery's
+/// `id` and `publisherId` (uuids) are unknown to Open VSX's REST API.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_excessive_bools)] // one field per flag VS Code records

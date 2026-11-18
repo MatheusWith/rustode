@@ -352,6 +352,28 @@ fn resizing_the_window_changes_how_many_lines_are_shown() {
     assert_eq!(shown(&harness), "line 0\nline 1\nline 2\nline 3\nline 4");
 }
 
+const RUST: &str = "// Greets.
+fn main() {
+    let name = \"rustode\";
+    if name.len() > 3 {
+        println!(\"hi\\n\");
+    }
+}
+";
+
+#[test]
+fn rust_files_are_drawn_in_dark_modern_token_colors() {
+    let mut harness = open(&fixture("rust", "main.rs", RUST));
+    assert_eq!(shown(&harness), RUST, "colors leave the exposed text alone");
+    assert_status(&harness, "Rust");
+    harness.snapshot("rust_highlighting");
+    // Typing goes through the incremental reparse to the next frame.
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    type_text(&mut harness, "//");
+    assert!(shown(&harness).contains("//fn main() {"));
+    harness.snapshot("rust_highlighting_edited");
+}
+
 #[test]
 fn a_selection_and_the_caret_are_drawn() {
     let mut harness = open_text("drawn", "let answer = 42;\nlet question = None;\n");

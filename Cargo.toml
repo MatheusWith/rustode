@@ -13,6 +13,7 @@ repository = "https://github.com/MatheusWith/rustode"
 rustode-config = { path = "crates/config" }
 rustode-core = { path = "crates/core" }
 rustode-fs = { path = "crates/fs" }
+rustode-syntax = { path = "crates/syntax" }
 rustode-trace = { path = "crates/trace" }
 rustode-workspace = { path = "crates/workspace" }
 # Micro-benchmarks (ADR 0026): no plotters and no rayon; the gate reads the
@@ -40,9 +41,16 @@ ureq = { version = "3.5.2", default-features = false, features = ["_ring", "rust
 zip = { version = "9.6.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+# `preserve_order`: JSON objects keep their key order, so extension manifests
+# are rewritten with their fields in place and `extensions.json` is written
+# in VS Code's key order (ADR 0029).
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 tracing = "0.1.44"
+# Syntax: the Tree-sitter runtime (C, built with cc) and the Rust grammar,
+# whose highlight query rustode-syntax uses as is.
+tree-sitter = { version = "0.27.2", default-features = false, features = ["std"] }
+tree-sitter-rust = "0.24.2"
 unicode-width = "0.2.3"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "env-filter", "fmt", "json", "std"] }
 # Client-side decorations without a title font (sctk-adwaita without

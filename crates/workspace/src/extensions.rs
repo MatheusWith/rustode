@@ -1,12 +1,14 @@
-//! Extension management against Open VSX: search, install, uninstall and
-//! the installed list. Phase 1 loads and runs nothing, so every installed
-//! extension carries [`NOT_LOADED`] (ADR 0018, rule 3), and the Microsoft
-//! Marketplace is never contacted (AGENTS.md §1.2): its hosts are refused
-//! before any request, redirects included.
+//! Extension management against Open VSX: search, install, uninstall,
+//! enable, disable and the installed list. Phase 1 loads and runs nothing,
+//! so every installed extension carries [`NOT_LOADED`] whether it is enabled
+//! or not (ADR 0018, rule 3), and the Microsoft Marketplace is never
+//! contacted (AGENTS.md §1.2): its hosts are refused before any request,
+//! redirects included.
 //!
 //! Network and disk work never runs on the frontend's thread. Searches run
-//! on threads of their own; installs, uninstalls and listings run one at a
-//! time on a worker thread, so the extensions folder has one writer.
+//! on threads of their own; installs, uninstalls, enablement changes and
+//! listings run one at a time on a worker thread, so the extensions folder
+//! and the global state file have one writer.
 //! Results come back through [`Workspace::poll_extensions`], and an
 //! optional waker ([`Workspace::set_extensions_waker`]) tells a frontend
 //! that sleeps until input when to poll.
@@ -18,18 +20,32 @@
 //! (`extensionManagementUtil.ts:80-86`, `extensionManagement.ts:22`); the
 //! commands `workbench.extensions.installExtension`, `…uninstallExtension`
 //! and `workbench.extensions.search`
-//! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:432-580`).
-//! The storage layout is described in `storage.rs`, extraction in `vsix.rs`
-//! and the registry client in `registry.rs`.
+//! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:432-580`);
+//! the enablement states and their rules: an extension is enabled unless the
+//! user disabled it, an invalid one that the user did not disable is
+//! "disabled by invalid extension", its enablement cannot change, and
+//! uninstalling an extension forgets that it was disabled
+//! (`src/vs/workbench/services/extensionManagement/common/extensionManagement.ts:101-116`;
+//! `src/vs/workbench/services/extensionManagement/browser/extensionEnablementService.ts:94`,
+//! `:278-304`, `:415-439`, `:454-481`, `:650-668`, `:730-740`, `:892-896`).
+//! The storage layout is described in `storage.rs`, the enablement state's
+//! in `state.rs`, the manifest model and its checks in `manifest.rs`,
+//! extraction in `vsix.rs` and the registry client in `registry.rs`.
 
+mod manifest;
 mod registry;
 #[cfg(feature = "stand-in")]
 pub mod stand_in;
+mod state;
 mod storage;
 mod vsix;
 
+pub use manifest::{ExtensionManifest, ManifestProblem, VSCODE_API_DATE, VSCODE_API_VERSION};
+pub use state::{DISABLED_KEY, STATE_FILE};
+
 use crate::{Event, Workspace};
 use registry::Registry;
+use state::{Identifier, State};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::File;
@@ -74,6 +90,50 @@ impl ExtensionSummary {
     }
 }
 
+/// Whether an installed extension is enabled, as VS Code's
+/// `EnablementState` says it for the whole profile. Workspace-level
+/// enablement (`EnabledWorkspace`, `DisabledWorkspace`) is not kept yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnablementState {
+    /// Enabled, the default (`EnabledGlobally`). Nothing runs it in Phase 1.
+    Enabled,
+    /// Disabled by the user everywhere (`DisabledGlobally`).
+    DisabledGlobally,
+    /// Not disabled by the user, but its manifest fails validation, so it
+    /// can be neither run nor enabled or disabled
+    /// (`DisabledByInvalidExtension`).
+    Invalid,
+}
+
+impl EnablementState {
+    /// The state of an extension the user disabled or not, valid or not.
+    #[must_use]
+    pub fn of(disabled: bool, valid: bool) -> Self {
+        match (disabled, valid) {
+            (true, _) => Self::DisabledGlobally,
+            (false, true) => Self::Enabled,
+            (false, false) => Self::Invalid,
+        }
+    }
+
+    /// Whether it counts as enabled.
+    #[must_use]
+    pub fn is_enabled(self) -> bool {
+        self == Self::Enabled
+    }
+
+    /// The word for it, as VS Code labels enabled and disabled extensions
+    /// (`extensionsActions.ts:2745-2748`).
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::DisabledGlobally => "Disabled",
+            Self::Invalid => "Invalid",
+        }
+    }
+}
+
 /// An extension in the extensions folder. Nothing loads it in Phase 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledExtension {
@@ -91,9 +151,36 @@ pub struct InstalledExtension {
     pub target_platform: Option<String>,
     /// Its folder.
     pub location: PathBuf,
+    /// Its package.json; made up from the index when it cannot be read.
+    pub manifest: ExtensionManifest,
+    /// What validating the manifest found; an error makes it invalid.
+    pub problems: Vec<ManifestProblem>,
+    /// Whether it is enabled.
+    pub enablement: EnablementState,
 }
 
 impl InstalledExtension {
+    /// Whether its manifest passed validation (warnings allowed).
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        !self.problems.iter().any(ManifestProblem::is_error)
+    }
+
+    /// Whether it is enabled. Enabled or not, nothing loads it in Phase 1.
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        self.enablement.is_enabled()
+    }
+
+    /// The first error validation found, if any.
+    #[must_use]
+    pub fn first_error(&self) -> Option<&str> {
+        self.problems
+            .iter()
+            .find(|p| p.is_error())
+            .map(|p| p.message.as_str())
+    }
+
     /// Whether the extension runs: never in Phase 1.
     #[must_use]
     pub fn is_loaded(&self) -> bool {
@@ -136,13 +223,17 @@ pub enum ExtensionSearch {
     },
 }
 
-/// An install or uninstall waiting to finish.
+/// An install, uninstall or enablement change waiting to finish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtensionOperation {
     /// Being downloaded and installed.
     Installing,
     /// Being uninstalled.
     Uninstalling,
+    /// Being enabled.
+    Enabling,
+    /// Being disabled.
+    Disabling,
 }
 
 /// Something that happened to extensions.
@@ -173,7 +264,23 @@ pub enum ExtensionEvent {
         /// `publisher.name`, in lower case.
         id: String,
     },
-    /// An install or uninstall failed; nothing changed.
+    /// A disabled extension was enabled. It still does not load.
+    Enabled {
+        /// `publisher.name`, in lower case.
+        id: String,
+    },
+    /// An enabled extension was disabled.
+    Disabled {
+        /// `publisher.name`, in lower case.
+        id: String,
+    },
+    /// The enablement state could not be read: every extension was listed
+    /// as enabled, and the file is left unchanged.
+    StateFailed {
+        /// Why.
+        message: String,
+    },
+    /// An install, uninstall or enablement change failed; nothing changed.
     Failed {
         /// `publisher.name`, in lower case.
         id: String,
@@ -193,7 +300,10 @@ pub enum ExtensionError {
     Refused(String),
     /// No extensions folder was set.
     NoLocation,
-    /// The extension is already being installed or uninstalled.
+    /// No global storage folder (for the enablement state) was set.
+    NoStorageLocation,
+    /// The extension is already being installed, uninstalled, enabled or
+    /// disabled.
     Busy(String),
 }
 
@@ -214,7 +324,10 @@ impl fmt::Display for ExtensionError {
                 )
             }
             Self::NoLocation => f.write_str("no extensions folder is set"),
-            Self::Busy(id) => write!(f, "{id} is already being installed or uninstalled"),
+            Self::NoStorageLocation => {
+                f.write_str("no global storage folder is set for the enablement state")
+            }
+            Self::Busy(id) => write!(f, "{id} is already being changed"),
         }
     }
 }
@@ -237,6 +350,27 @@ pub fn default_extensions_dir(env: impl Fn(&str) -> Option<OsString>) -> Option<
     Some(data.join("rustode").join("extensions"))
 }
 
+/// rustode's global storage folder, which holds the enablement state
+/// ([`STATE_FILE`]): `globalStorage` in the user folder, as VS Code keeps
+/// `globalStorage/state.vscdb` in its `User` folder
+/// (`src/vs/platform/userDataProfile/common/userDataProfile.ts:196`). The
+/// user folder is `RUSTODE_USER_DIR`, else `rustode/User` under
+/// `XDG_CONFIG_HOME` (when absolute), else under `~/.config`, where the
+/// frontends read `settings.json`; never a VS Code profile's folder.
+pub fn default_global_storage_dir(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let set = |key: &str| env(key).filter(|value| !value.is_empty());
+    let user = match set("RUSTODE_USER_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => set("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".config")))?
+            .join("rustode")
+            .join("User"),
+    };
+    Some(user.join("globalStorage"))
+}
+
 type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// Work for the worker thread.
@@ -245,11 +379,36 @@ enum Job {
     List,
     Install(String),
     Uninstall(String),
+    Enable(String),
+    Disable(String),
+}
+
+impl Job {
+    /// The extension the job is about, in lower case; empty for a listing.
+    fn id(&self) -> String {
+        match self {
+            Self::List => String::new(),
+            Self::Install(id) | Self::Uninstall(id) | Self::Enable(id) | Self::Disable(id) => {
+                id.to_ascii_lowercase()
+            }
+        }
+    }
+}
+
+/// What a job did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Done {
+    Listed,
+    Installed(String),
+    Uninstalled,
+    /// Whether the enablement changed.
+    Enablement(bool),
 }
 
 struct Task {
     job: Job,
     dir: PathBuf,
+    storage: Option<PathBuf>,
     registry: Arc<Registry>,
     waker: Option<Waker>,
 }
@@ -262,8 +421,10 @@ enum Outcome {
     },
     Finished {
         job: Job,
-        result: Result<Option<String>, String>,
+        result: Result<Done, String>,
         list: Result<Vec<InstalledExtension>, String>,
+        /// Why the enablement state could not be read, if it could not.
+        state_problem: Option<String>,
     },
 }
 
@@ -271,6 +432,7 @@ enum Outcome {
 #[derive(Default)]
 pub(crate) struct Extensions {
     dir: Option<PathBuf>,
+    storage: Option<PathBuf>,
     registry: Option<Arc<Registry>>,
     waker: Option<Waker>,
     worker: Option<Sender<Task>>,
@@ -286,6 +448,7 @@ impl fmt::Debug for Extensions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Extensions")
             .field("dir", &self.dir)
+            .field("storage", &self.storage)
             .field("registry", &self.registry.as_ref().map(|r| r.base()))
             .field("search", &self.search)
             .field("installed", &self.installed.len())
@@ -314,6 +477,7 @@ impl Extensions {
         let task = Task {
             job,
             dir,
+            storage: self.storage.clone(),
             registry: self.registry(),
             waker: self.waker.clone(),
         };
@@ -328,6 +492,7 @@ impl Extensions {
                     job: task.job,
                     result: Err("cannot start the extensions worker thread".to_owned()),
                     list: Ok(self.installed.clone()),
+                    state_problem: None,
                 });
             }
             self.worker = Some(worker);
@@ -364,24 +529,16 @@ impl Extensions {
                 };
                 events.push(ExtensionEvent::Searched { query });
             }
-            Outcome::Finished { job, result, list } => {
+            Outcome::Finished {
+                job,
+                result,
+                list,
+                state_problem,
+            } => {
                 self.jobs = self.jobs.saturating_sub(1);
-                let id = match &job {
-                    Job::Install(id) | Job::Uninstall(id) => id.to_ascii_lowercase(),
-                    Job::List => String::new(),
-                };
+                let id = job.id();
                 self.pending.retain(|(pending, _)| *pending != id);
-                match (job, result) {
-                    (Job::Install(_), Ok(version)) => events.push(ExtensionEvent::Installed {
-                        id,
-                        version: version.unwrap_or_default(),
-                    }),
-                    (Job::Uninstall(_), Ok(_)) => events.push(ExtensionEvent::Uninstalled { id }),
-                    (Job::Install(_) | Job::Uninstall(_), Err(message)) => {
-                        events.push(ExtensionEvent::Failed { id, message });
-                    }
-                    (Job::List, _) => {}
-                }
+                events.extend(job_event(&job, id, result));
                 match list {
                     Ok(list) => {
                         self.installed = list;
@@ -389,10 +546,25 @@ impl Extensions {
                     }
                     Err(message) => events.push(ExtensionEvent::ListFailed { message }),
                 }
+                if let Some(message) = state_problem {
+                    events.push(ExtensionEvent::StateFailed { message });
+                }
             }
         }
         events
     }
+}
+
+/// The event a finished job reports, if any.
+fn job_event(job: &Job, id: String, result: Result<Done, String>) -> Option<ExtensionEvent> {
+    Some(match (job, result) {
+        (Job::List, _) | (_, Ok(Done::Enablement(false) | Done::Listed)) => return None,
+        (_, Err(message)) => ExtensionEvent::Failed { id, message },
+        (_, Ok(Done::Installed(version))) => ExtensionEvent::Installed { id, version },
+        (_, Ok(Done::Uninstalled)) => ExtensionEvent::Uninstalled { id },
+        (Job::Enable(_), Ok(Done::Enablement(true))) => ExtensionEvent::Enabled { id },
+        (_, Ok(Done::Enablement(true))) => ExtensionEvent::Disabled { id },
+    })
 }
 
 fn spawn_worker(outcomes: Sender<Outcome>) -> Sender<Task> {
@@ -419,21 +591,69 @@ fn spawn_worker(outcomes: Sender<Outcome>) -> Sender<Task> {
 /// Runs one job on the worker thread.
 fn run(task: &Task) -> Outcome {
     let store = Store { dir: &task.dir };
+    let state = task.storage.as_deref().map(|dir| State { dir });
     let result = match &task.job {
         Job::List => std::fs::create_dir_all(&task.dir)
-            .map(|()| None)
+            .map(|()| Done::Listed)
             .map_err(|err| format!("{}: {err}", task.dir.display())),
-        Job::Install(id) => install(&store, &task.registry, id).map(Some),
-        Job::Uninstall(id) => store.remove(&id.to_ascii_lowercase()).map(|()| None),
+        Job::Install(id) => install(&store, &task.registry, id).map(Done::Installed),
+        Job::Uninstall(id) => uninstall(&store, state.as_ref(), &id.to_ascii_lowercase()),
+        Job::Enable(id) => set_enablement(&store, state.as_ref(), &id.to_ascii_lowercase(), false),
+        Job::Disable(id) => set_enablement(&store, state.as_ref(), &id.to_ascii_lowercase(), true),
     };
     if let Err(message) = &result {
         tracing::warn!(job = ?task.job, %message, "extension job failed");
     }
+    let (disabled, state_problem) = match state.as_ref().map(State::disabled) {
+        Some(Ok(disabled)) => (disabled, None),
+        Some(Err(message)) => (Vec::new(), Some(message)),
+        None => (Vec::new(), None),
+    };
     Outcome::Finished {
         job: task.job.clone(),
         result,
-        list: store.scan(),
+        list: store.scan(&disabled),
+        state_problem,
     }
+}
+
+/// Uninstalls `id`, then forgets that it was disabled, as VS Code resets
+/// the enablement of an uninstalled extension.
+fn uninstall(store: &Store<'_>, state: Option<&State<'_>>, id: &str) -> Result<Done, String> {
+    store.remove(id)?;
+    let identifier = Identifier {
+        id: id.to_owned(),
+        uuid: None,
+    };
+    if let Some(Err(err)) = state.map(|state| state.set_disabled(&identifier, false)) {
+        tracing::warn!(%id, %err, "cannot reset the enablement of an uninstalled extension");
+    }
+    Ok(Done::Uninstalled)
+}
+
+/// Disables or enables the installed extension `id` for the whole profile;
+/// refused for an extension that is not installed or is invalid.
+fn set_enablement(
+    store: &Store<'_>,
+    state: Option<&State<'_>>,
+    id: &str,
+    disable: bool,
+) -> Result<Done, String> {
+    let state = state.ok_or_else(|| ExtensionError::NoStorageLocation.to_string())?;
+    let disabled = state.disabled()?;
+    let Some((extension, identifier)) = store.find(id, &disabled)? else {
+        return Err(format!("{id} is not installed"));
+    };
+    if extension.enablement == EnablementState::Invalid {
+        return Err(format!(
+            "cannot change the enablement of {}: it is invalid ({})",
+            extension.display_name,
+            extension.first_error().unwrap_or_default()
+        ));
+    }
+    state
+        .set_disabled(&identifier, disable)
+        .map(Done::Enablement)
 }
 
 /// Downloads, checks, extracts and indexes the latest release of `id`.
@@ -495,6 +715,19 @@ impl Workspace {
     #[must_use]
     pub fn extensions_location(&self) -> Option<&Path> {
         self.extensions.dir.as_deref()
+    }
+
+    /// Sets the global storage folder, which holds the enablement state
+    /// ([`STATE_FILE`]). Without one, every extension lists as enabled and
+    /// enablement cannot change.
+    pub fn set_global_storage_location(&mut self, dir: &Path) {
+        self.extensions.storage = Some(dir.to_owned());
+    }
+
+    /// The global storage folder, if one is set.
+    #[must_use]
+    pub fn global_storage_location(&self) -> Option<&Path> {
+        self.extensions.storage.as_deref()
     }
 
     /// Sets the registry's base URL ([`OPEN_VSX`] by default).
@@ -584,15 +817,43 @@ impl Workspace {
         self.start(id, ExtensionOperation::Uninstalling)
     }
 
+    /// Enables the installed extension `id` for the whole profile, in the
+    /// background. Enabled or not, nothing loads it in Phase 1.
+    ///
+    /// # Errors
+    /// As [`Workspace::install_extension`], and when no global storage
+    /// folder is set.
+    pub fn enable_extension(&mut self, id: &str) -> Result<(), ExtensionError> {
+        self.start(id, ExtensionOperation::Enabling)
+    }
+
+    /// Disables the installed extension `id` for the whole profile, in the
+    /// background.
+    ///
+    /// # Errors
+    /// As [`Workspace::enable_extension`].
+    pub fn disable_extension(&mut self, id: &str) -> Result<(), ExtensionError> {
+        self.start(id, ExtensionOperation::Disabling)
+    }
+
     fn start(&mut self, id: &str, operation: ExtensionOperation) -> Result<(), ExtensionError> {
         let id = checked_id(id)?;
         let key = id.to_ascii_lowercase();
         if self.extensions.operation(&key).is_some() {
             return Err(ExtensionError::Busy(key));
         }
+        let changes_enablement = matches!(
+            operation,
+            ExtensionOperation::Enabling | ExtensionOperation::Disabling
+        );
+        if changes_enablement && self.extensions.storage.is_none() {
+            return Err(ExtensionError::NoStorageLocation);
+        }
         let job = match operation {
             ExtensionOperation::Installing => Job::Install(id),
             ExtensionOperation::Uninstalling => Job::Uninstall(id),
+            ExtensionOperation::Enabling => Job::Enable(id),
+            ExtensionOperation::Disabling => Job::Disable(id),
         };
         self.extensions.queue(job)?;
         self.extensions.pending.push((key, operation));
@@ -637,13 +898,15 @@ impl Workspace {
             .find(|e| e.id.eq_ignore_ascii_case(id))
     }
 
-    /// The install or uninstall under way for `id`, if any.
+    /// The install, uninstall or enablement change under way for `id`, if
+    /// any.
     #[must_use]
     pub fn extension_operation(&self, id: &str) -> Option<ExtensionOperation> {
         self.extensions.operation(&id.to_ascii_lowercase())
     }
 
-    /// Whether a search, install, uninstall or listing is under way.
+    /// Whether a search, install, uninstall, enablement change or listing
+    /// is under way.
     #[must_use]
     pub fn extensions_busy(&self) -> bool {
         self.extensions.jobs > 0
@@ -673,6 +936,11 @@ mod tests {
         let host = ExtensionError::Refused("example.vsassets.io".into()).to_string();
         assert!(host.contains("never contacts it"), "{host}");
         assert!(ExtensionError::NoLocation.to_string().contains("folder"));
+        assert!(
+            ExtensionError::NoStorageLocation
+                .to_string()
+                .contains("global storage")
+        );
         assert!(
             ExtensionError::Busy("a.b".into())
                 .to_string()

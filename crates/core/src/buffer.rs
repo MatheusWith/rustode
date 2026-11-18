@@ -106,13 +106,90 @@ impl Buffer {
             .count()
     }
 
-    pub(crate) fn insert(&mut self, offset: usize, text: &str) {
-        self.rope.insert(offset, text);
+    /// Length in bytes of the UTF-8 text.
+    #[must_use]
+    pub fn len_bytes(&self) -> usize {
+        self.rope.len_bytes()
     }
 
-    pub(crate) fn remove(&mut self, range: Range) {
-        self.rope.remove(range.start..range.end);
+    /// The char holding byte `byte` (the length at the end).
+    #[must_use]
+    pub fn byte_to_char(&self, byte: usize) -> usize {
+        self.rope.byte_to_char(byte.min(self.len_bytes()))
     }
+
+    /// The first byte of char `offset` (the length in bytes at the end).
+    #[must_use]
+    pub fn char_to_byte(&self, offset: usize) -> usize {
+        self.rope.char_to_byte(offset.min(self.len_chars()))
+    }
+
+    /// The text from byte `byte` to the end of the rope chunk holding it,
+    /// empty at the end: a parser reads the text chunk by chunk without
+    /// copying it. `byte` must be on a char boundary.
+    #[must_use]
+    pub fn chunk_at_byte(&self, byte: usize) -> &str {
+        if byte >= self.len_bytes() {
+            return "";
+        }
+        let (chunk, start, _, _) = self.rope.chunk_at_byte(byte);
+        &chunk[byte - start..]
+    }
+
+    /// The chunks of the text between bytes `start` and `end`, which must be
+    /// on char boundaries.
+    pub fn byte_chunks(&self, start: usize, end: usize) -> impl Iterator<Item = &str> {
+        let end = end.min(self.len_bytes());
+        self.rope.byte_slice(start.min(end)..end).chunks()
+    }
+
+    /// Byte `byte` with its line and byte column.
+    fn byte_position(&self, byte: usize) -> BytePosition {
+        let line = self.rope.byte_to_line(byte);
+        BytePosition {
+            offset: byte,
+            line,
+            column: byte - self.rope.line_to_byte(line),
+        }
+    }
+
+    /// Replaces `range` with `text`; returns the change in bytes.
+    pub(crate) fn splice(&mut self, range: Range, text: &str) -> ByteEdit {
+        let start = self.byte_position(self.rope.char_to_byte(range.start));
+        let old_end = self.byte_position(self.rope.char_to_byte(range.end));
+        self.rope.remove(range.start..range.end);
+        self.rope.insert(range.start, text);
+        ByteEdit {
+            start,
+            old_end,
+            new_end: self.byte_position(start.offset + text.len()),
+        }
+    }
+}
+
+/// A byte offset in the text, with its line and its column in bytes. Lines
+/// are counted as the buffer counts them, ending at CR, LF or CRLF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BytePosition {
+    /// Bytes from the start of the text.
+    pub offset: usize,
+    /// The line, zero-based.
+    pub line: usize,
+    /// Bytes from the start of the line.
+    pub column: usize,
+}
+
+/// One change to the text in bytes, as an incremental parser wants it: the
+/// text from `start` to `old_end` was replaced by the text from `start` to
+/// `new_end`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteEdit {
+    /// Where the change starts, in the old and the new text alike.
+    pub start: BytePosition,
+    /// Where the replaced text ended, in the old text.
+    pub old_end: BytePosition,
+    /// Where the inserted text ends, in the new text.
+    pub new_end: BytePosition,
 }
 
 #[cfg(test)]
@@ -141,5 +218,36 @@ mod tests {
             1,
             "only CR/LF/CRLF"
         );
+    }
+
+    #[test]
+    fn splice_reports_the_change_in_bytes_lines_and_byte_columns() {
+        let mut buffer = Buffer::from_text("é\nab\r\ncd");
+        assert_eq!((buffer.len_bytes(), buffer.char_to_byte(2)), (9, 3));
+        assert_eq!(buffer.byte_to_char(3), 2);
+        let edit = buffer.splice(Range::new(3, 6), "x\ny");
+        assert_eq!(buffer.text(), "é\nax\nycd");
+        let at = |offset, line, column| BytePosition {
+            offset,
+            line,
+            column,
+        };
+        assert_eq!(edit.start, at(4, 1, 1));
+        assert_eq!(edit.old_end, at(7, 2, 0), "after the CRLF");
+        assert_eq!(edit.new_end, at(7, 2, 1));
+    }
+
+    #[test]
+    fn chunks_cover_the_text_without_copying_it() {
+        let text = "fn é() {}\n".repeat(500);
+        let buffer = Buffer::from_text(&text);
+        let mut read = String::new();
+        while read.len() < buffer.len_bytes() {
+            read.push_str(buffer.chunk_at_byte(read.len()));
+        }
+        assert_eq!(read, text);
+        assert_eq!(buffer.chunk_at_byte(buffer.len_bytes()), "");
+        let middle: String = buffer.byte_chunks(3, 11).collect();
+        assert_eq!(middle, &text[3..11]);
     }
 }

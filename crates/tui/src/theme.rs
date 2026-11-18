@@ -21,9 +21,18 @@
 //! gets 16 colors. `RUSTODE_COLOR` (`truecolor`, `256`, `16`, `none`)
 //! overrides the guess. Meaning never rests on color alone: the active tab,
 //! the selected row and matches are also bold or reversed.
+//!
+//! Syntax colors are Dark Modern's token colors, which the workspace gives
+//! for each token kind (`TokenKind::dark_modern`); with 16 colors each kind
+//! takes the nearest basic color, and with `NO_COLOR` the text is plain.
+//! They only decorate the text, which reads the same without them. Selected
+//! text keeps its token color on the selection background, as in VS Code,
+//! except with 16 colors, where a basic blue token would vanish on the blue
+//! selection.
 
 use ratatui::style::{Color, Modifier, Style};
 use rustode_workspace::MarkerSeverity;
+use rustode_workspace::TokenKind;
 
 /// How many colors the terminal shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +75,7 @@ impl ColorMode {
 /// The styles of every part of the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Theme {
+    mode: ColorMode,
     pub editor: Style,
     pub gutter: Style,
     pub gutter_active: Style,
@@ -116,6 +126,7 @@ impl Theme {
         let dark = plain(c(0xCC_CC_CC, Color::Reset), c(0x18_18_18, Color::Reset));
         let pick = |colored: Style, fallback: Style| if none { fallback } else { colored };
         Self {
+            mode,
             editor,
             gutter: pick(
                 Style::new().fg(c(0x6E_76_81, Color::DarkGray)),
@@ -227,6 +238,36 @@ fn severity_colors(mode: ColorMode) -> [Color; 4] {
     ]
 }
 
+impl Theme {
+    /// The style of text of token kind `kind`.
+    pub(crate) fn token(&self, kind: TokenKind) -> Style {
+        if self.mode == ColorMode::None {
+            return Style::new();
+        }
+        let basic = match kind {
+            TokenKind::Comment => Color::Green,
+            TokenKind::String => Color::LightRed,
+            TokenKind::Escape => Color::LightYellow,
+            TokenKind::Number => Color::LightGreen,
+            TokenKind::Boolean | TokenKind::Keyword => Color::Blue,
+            TokenKind::ControlKeyword => Color::Magenta,
+            TokenKind::Function => Color::Yellow,
+            TokenKind::Type => Color::Cyan,
+            TokenKind::Variable => Color::LightBlue,
+            _ => Color::Reset,
+        };
+        Style::new().fg(color(self.mode, kind.dark_modern(), basic))
+    }
+
+    /// Selected text whose token style is `token`.
+    pub(crate) fn selected(&self, token: Style) -> Style {
+        match self.mode {
+            ColorMode::TrueColor | ColorMode::Ansi256 => token.patch(self.selection),
+            ColorMode::Ansi16 | ColorMode::None => self.selection,
+        }
+    }
+}
+
 /// The closest xterm 256-color index: the 6×6×6 cube or the gray ramp.
 fn nearest_256(rgb: u32) -> u8 {
     const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
@@ -299,6 +340,34 @@ mod tests {
                 ("COLORTERM", "truecolor")
             ])),
             ColorMode::None
+        );
+    }
+
+    #[test]
+    fn token_colors_follow_the_mode() {
+        let fg = |mode, kind| Theme::new(mode).token(kind).fg;
+        assert_eq!(
+            fg(ColorMode::TrueColor, TokenKind::Keyword),
+            Some(Color::Rgb(0x56, 0x9C, 0xD6))
+        );
+        assert_eq!(
+            fg(ColorMode::Ansi256, TokenKind::Function),
+            Some(Color::Indexed(nearest_256(0xDC_DC_AA)))
+        );
+        assert_eq!(
+            fg(ColorMode::Ansi16, TokenKind::Comment),
+            Some(Color::Green)
+        );
+        assert_eq!(
+            fg(ColorMode::Ansi16, TokenKind::Punctuation),
+            Some(Color::Reset)
+        );
+        assert_eq!(fg(ColorMode::None, TokenKind::String), None);
+        let sixteen = Theme::new(ColorMode::Ansi16);
+        assert_eq!(
+            sixteen.selected(sixteen.token(TokenKind::Keyword)),
+            sixteen.selection,
+            "no blue on blue"
         );
     }
 
