@@ -22,7 +22,7 @@ criterion = { version = "0.8.2", default-features = false }
 # GUI: eframe on wgpu (no glow) with AccessKit. winit is the version eframe
 # uses; the GUI wraps eframe's event handler to time input-to-present.
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "wayland", "wgpu", "x11"] }
-egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
+egui_kittest = { version = "0.37.0", features = ["eframe", "snapshot", "wgpu"] }
 encoding_rs = "0.8"
 # Search include and exclude globs; already in the graph through ignore.
 globset = { version = "0.4.21", default-features = false }
