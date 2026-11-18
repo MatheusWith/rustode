@@ -173,7 +173,7 @@ Editor:
   - Verified: `rea mcp doctor` healthy (229 tools); the `codium` fuses were read; static analysis of `out/main.js` took 21 s, with no writes to 01 to 08.
   - Native decompilation is unavailable, because REA 6.8.0 only accepts Ghidra 12.1.x.
 - **2026-11-16 (documents):** rustode gets the documentation set, following the filmcraft standard: `AGENTS.md` (single source; `CLAUDE.md` only imports it), `ROADMAP.md`, `docs/`, ADRs, templates and skills. First analysis recorded (network traffic).
-- **2026-11-16 (rustode):** project assembled with real copies (no links) of the app, documents, screenshots, QA, port and reverse-engineering material; test results copied to `08-testes-do-build/`.
+- **2026-11-16 (rustode):** project assembled with real copies (no links) of the app, documents, screenshots, QA, port and analysis material; test results copied to `08-testes-do-build/`.
 - **2026-11-16 (tests):** smoke 0 failures; network passed; CDP battery equal to 1.138 after fixing the harness (M12) and confirming VSCodium's AI default (P05); load and stress run.
 - **2026-11-16 (build done):** commit recorded via `BUILD_SOURCEVERSION`; compile cache generated on a virtual display after patch 96 (UID suffix).
 - **2026-11-16 (build, 3rd attempt):** bundle without source maps (patch 97) finishes in 65 s with a 2.7 GB peak; swap guard in `lib.sh`.

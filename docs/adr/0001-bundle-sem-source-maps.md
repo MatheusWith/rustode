@@ -33,5 +33,5 @@ The generated JavaScript is the same with or without the option. The option only
 ## Consequences
 
 - Measured: the bundle finished in 65 s with a 2.7 GB peak in the cgroup (before, it did not finish).
-- Stack traces and minified snippets don't point straight to the source. Reverse engineering now depends on the source tree and on anchors ([ADR 0004](0004-arvore-fonte-e-a-referencia.md), the `find-minified-symbol` skill, gap G2).
+- Stack traces and minified snippets don't point straight to the source. Analysis now depends on the source tree and on anchors ([ADR 0004](0004-arvore-fonte-e-a-referencia.md), the `find-minified-symbol` skill, gap G2).
 - Getting maps requires a build on a machine with more RAM. Any other change to the bundle needs a new decision, not an extension of this one.

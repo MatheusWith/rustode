@@ -1,5 +1,5 @@
 rustode
-Reverse-engineering project for a local build of VSCodium 1.147.0.
+Study of a local build of VSCodium 1.147.0, and the rustode editor.
 
 This project's analysis documents (README.md, AGENTS.md, CLAUDE.md, ROADMAP.md, docs/, 09-analises/)
 do not have a license yet: the decision is pending with the project owner.
