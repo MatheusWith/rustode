@@ -15,7 +15,7 @@ Phase 1 ships in ten milestones:
 
 | Milestone | Scope |
 |---|---|
-| M0, pipeline and governance | repository and privacy review; workspace skeleton, pinned toolchain and lints; pre-commit and pre-push hooks; CI with pull-request title checks and coverage gates; Dependabot, cargo deny and cargo audit; the contributing guide with the review checklist; the Editor section of `AGENTS.md` and the ADRs; the Wayland virtual-input spike |
+| M0, pipeline and governance | repository and privacy review; workspace skeleton, pinned toolchain and lints; pre-commit and pre-push hooks; CI with pull-request title checks and coverage gates; cargo deny and cargo audit (Dependabot was in the scope until the owner removed it on 2026-11-18); the contributing guide with the review checklist; the Editor section of `AGENTS.md` and the ADRs; the Wayland virtual-input spike |
 | M1, core and CLI | buffer, editing, multi-cursor, undo/redo, encoding and line-ending I/O, external change detection, configuration, tracing, and the CLI (open, version, bench) |
 | M2, workspace and TUI | the workspace API, and the TUI with tabs, explorer, command palette, quick open, status bar and find/replace |
 | M3, GUI | the same feature set in egui, and the first cross-editor benchmark run |
