@@ -53,7 +53,6 @@ The other 90 built-in extensions come from the source tree (`fonte/arvore/extens
 | `kwin_wayland --virtual` | virtual display for the tests | GPL-2.0-or-later (used as a tool, not incorporated) |
 | rsync, sha256sum, file | copying, manifest, binary types | GPL (system tools) |
 | REA (`rea-agents`) 6.8.0 | static analysis of the packaged app (JavaScript/Electron, fuses) | MIT |
-| Serena (`serena-agent`) 1.7.0 | symbol search and references in the source tree and the editor's crates, through language servers | MIT |
 
 ## Downloaded at runtime by the app
 
