@@ -1,6 +1,6 @@
 # ADR 0023: The same checks run in git hooks and in CI, and the security scans run offline
 
-- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session; applied in `.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `.github/dependabot.yml` and `.semgrep/`); the Semgrep registry rules in CI are not applied
+- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session; applied in `.pre-commit-config.yaml`, `.github/workflows/ci.yml` and `.semgrep/`); the Semgrep registry rules in CI are not applied
 - **Build:** rustode at `d6debfb`
 
 ## Context
@@ -16,7 +16,7 @@ Hooks can be skipped with `--no-verify`. CI catches that only if it runs the sam
 | push | branch name and target, every message in the pushed range, the full `nextest` suite, `clippy`, `cargo deny` |
 | pull request (CI) | all of the above on Linux x64, plus the pull request title, the coverage gates, `cargo audit`, `gitleaks` over the history and the Semgrep rule tests |
 
-Dependabot opens weekly updates for crates and for GitHub Actions (`.github/dependabot.yml`).
+Dependency updates are made by hand, in ordinary pull requests that pass the same checks. Dependabot opened weekly updates for crates and GitHub Actions until the owner removed it on 2026-11-18; `cargo deny` and `cargo audit` still flag vulnerable or disallowed dependencies.
 
 Semgrep runs offline with metrics off, using rules written for this project. Because the registry rules cannot be vendored, they may run only in CI.
 

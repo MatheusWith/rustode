@@ -84,8 +84,7 @@ jobs:
         run: cargo xtask bench-gate --base "$BASE_SHA" --threshold 10
 
   conventions:
-    # Dependabot titles and branches follow its own format (prefix configured in dependabot.yml).
-    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

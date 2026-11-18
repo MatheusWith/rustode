@@ -24,7 +24,7 @@ Containment rules:
 1. The rules have one implementation, in `xtask/src/conventions.rs` (types and scopes `:4-26`, title `:29`, subject `:76-88`, trailer `:90-99`, branch `:101-113`). The commit-msg hook, the pre-push hook and CI all use it (`.pre-commit-config.yaml:39-56`; `.github/workflows/ci.yml:66-92`). `committed` checks the same types and scopes, plus imperative mood and line length (`committed.toml:1-12`).
 2. The pre-push hook checks the target branch, the branch name and every message in the pushed range (`xtask/src/pre_push.rs:10-34`). `RUSTODE_ALLOW_MAIN_PUSH=1` exists only to bootstrap the repository (`xtask/src/pre_push.rs:9-11`).
 3. Every rejection points to [`CONTRIBUTING.md`](../../CONTRIBUTING.md), "Editor code: commits, branches and checks" (`xtask/src/conventions.rs:32`).
-4. Dependabot's titles use the `build` and `ci` prefixes, and its pull requests skip the title job (`.github/dependabot.yml:7-18`; `.github/workflows/ci.yml:67-68`).
+4. Every pull request runs the title job; none is exempt. (Dependabot's pull requests were exempt until the owner removed Dependabot on 2026-11-18.)
 
 ## The guarantee
 
