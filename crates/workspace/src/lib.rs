@@ -22,8 +22,9 @@ pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
 pub use document::{Document, DocumentId, Highlight};
 pub use explorer::{Explorer, ExplorerRow};
 pub use extensions::{
-    ExtensionError, ExtensionEvent, ExtensionOperation, ExtensionSearch, ExtensionSummary,
-    InstalledExtension, NOT_LOADED, OPEN_VSX, default_extensions_dir,
+    EnablementState, ExtensionError, ExtensionEvent, ExtensionManifest, ExtensionOperation,
+    ExtensionSearch, ExtensionSummary, InstalledExtension, ManifestProblem, NOT_LOADED, OPEN_VSX,
+    default_extensions_dir, default_global_storage_dir,
 };
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
@@ -112,8 +113,8 @@ pub enum Event {
         /// The document.
         id: DocumentId,
     },
-    /// Extension search, install, uninstall or listing results arrived
-    /// ([`Workspace::poll_extensions`]).
+    /// Extension search, install, uninstall, enablement or listing results
+    /// arrived ([`Workspace::poll_extensions`]).
     Extension(ExtensionEvent),
     /// Diagnostics were published or cleared: markers, the problems list
     /// and the counts may have changed.

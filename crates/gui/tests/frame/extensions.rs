@@ -1,7 +1,7 @@
 //! The Extensions view in the sidebar: Ctrl+Shift+X, a search against
-//! a local Open VSX stand-in, the Install and Uninstall buttons, and the
-//! Installed list with its not-loaded notice, read from the AccessKit tree
-//! and image snapshots. The extension logic is tested at the workspace
+//! a local Open VSX stand-in, the Install, Uninstall, Disable and Enable
+//! buttons, and the Installed list with each extension's state and its
+//! not-loaded notice, read from the AccessKit tree and image snapshots. The extension logic is tested at the workspace
 //! seam (`crates/workspace/tests/extensions.rs`).
 
 use eframe::egui::{Event, Key, Modifiers, accesskit::Role};
@@ -29,6 +29,7 @@ fn open(name: &str, stand_in: &StandIn) -> (Harness<'static, EditorApp>, PathBuf
     let extensions = dir.join("extensions");
     let mut workspace = Workspace::new();
     workspace.set_extensions_location(&extensions);
+    workspace.set_global_storage_location(&dir.join("globalStorage"));
     workspace
         .set_extension_registry(stand_in.url())
         .expect("registry");
@@ -162,8 +163,9 @@ fn install_then_uninstall_with_the_buttons() {
     );
     assert_eq!(buttons(&harness, "Installed"), 1);
     assert_eq!(buttons(&harness, "Uninstall"), 1);
+    assert_eq!(buttons(&harness, "Disable"), 1);
     assert_label(&harness, "INSTALLED · 1");
-    assert_label(&harness, "1.2.3 · Not loaded in this phase");
+    assert_label(&harness, "1.2.3 · Enabled · Not loaded in this phase");
     assert_label(&harness, "Not loaded in this phase");
     assert_label(
         &harness,
@@ -178,4 +180,75 @@ fn install_then_uninstall_with_the_buttons() {
     assert_label(&harness, "Uninstalled acme.hello.");
     assert_eq!(buttons(&harness, "Install"), 2);
     assert!(!extensions.join("acme.hello-1.2.3-universal").exists());
+}
+
+#[test]
+fn disable_then_enable_with_the_buttons() {
+    let stand_in = StandIn::start();
+    publish(&stand_in);
+    let (mut harness, extensions) = open("enable", &stand_in);
+    let state = extensions
+        .with_file_name("globalStorage")
+        .join("state.json");
+    search(&mut harness);
+    harness
+        .query_all_by_label("Install")
+        .next()
+        .expect("an Install button")
+        .click();
+    harness.step();
+    settle(&mut harness);
+
+    harness.get_by_label("Disable").click();
+    harness.step();
+    settle(&mut harness);
+    assert_label(&harness, "1.2.3 · Disabled · Not loaded in this phase");
+    assert_label(&harness, "Disabled acme.hello.");
+    assert_eq!(buttons(&harness, "Enable"), 1);
+    assert_eq!(buttons(&harness, "Disable"), 0);
+    assert!(
+        std::fs::read_to_string(&state)
+            .expect("state")
+            .contains("acme.hello")
+    );
+    harness.snapshot("extensions_disabled");
+
+    harness.get_by_label("Enable").click();
+    harness.step();
+    settle(&mut harness);
+    assert_label(&harness, "1.2.3 · Enabled · Not loaded in this phase");
+    assert_label(&harness, "Enabled acme.hello (not loaded in this phase).");
+    assert_eq!(buttons(&harness, "Disable"), 1);
+    assert_eq!(std::fs::read_to_string(&state).expect("state"), "{}");
+}
+
+#[test]
+fn an_invalid_extension_shows_why_and_cannot_be_enabled() {
+    let stand_in = StandIn::start();
+    let (mut harness, extensions) = open("invalid", &stand_in);
+    let folder = extensions.join("acme.broken-1.0.0");
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(
+        folder.join("package.json"),
+        r#"{"name":"broken","displayName":"Broken","publisher":"acme","version":"1.0.0"}"#,
+    )
+    .expect("manifest");
+    std::fs::write(
+        extensions.join("extensions.json"),
+        r#"[{"identifier":{"id":"acme.broken"},"version":"1.0.0","location":{"$mid":1,"path":"/x","scheme":"file"},"relativeLocation":"acme.broken-1.0.0"}]"#,
+    )
+    .expect("index");
+    ctrl_shift_x(&mut harness);
+    settle(&mut harness);
+    assert_label(&harness, "Broken");
+    assert_label(&harness, "1.0.0 · Invalid · Not loaded in this phase");
+    assert_label(
+        &harness,
+        "property `engines` is mandatory and must be of type `object`",
+    );
+    assert_eq!(
+        buttons(&harness, "Enable") + buttons(&harness, "Disable"),
+        0
+    );
+    assert_eq!(buttons(&harness, "Uninstall"), 1);
 }

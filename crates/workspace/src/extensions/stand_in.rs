@@ -82,6 +82,10 @@ pub struct Fixture {
     pub description: String,
     /// `universal`, `linux-x64`, …
     pub target_platform: String,
+    /// Its `engines.vscode`.
+    pub engine: String,
+    /// More package.json fields, written after the others in this order.
+    pub manifest_fields: Vec<(String, Value)>,
     /// Extra VSIX entries (full paths, e.g. `extension/out/main.js`).
     pub files: Vec<(String, Vec<u8>)>,
 }
@@ -97,6 +101,8 @@ impl Fixture {
             display_name: format!("{name} display"),
             description: format!("About {name}"),
             target_platform: "universal".into(),
+            engine: "^1.80.0".into(),
+            manifest_fields: Vec::new(),
             files: Vec::new(),
         }
     }
@@ -104,15 +110,19 @@ impl Fixture {
     /// Its package.json.
     #[must_use]
     pub fn manifest(&self) -> Value {
-        json!({
+        let mut manifest = json!({
             "name": self.name,
             "publisher": self.namespace,
             "version": self.version,
             "displayName": self.display_name,
             "description": self.description,
-            "engines": { "vscode": "^1.80.0" },
+            "engines": { "vscode": self.engine },
             "main": "./out/main.js",
-        })
+        });
+        if let Some(fields) = manifest.as_object_mut() {
+            fields.extend(self.manifest_fields.iter().cloned());
+        }
+        manifest
     }
 
     /// Its VSIX: the manifest files, `extension/package.json`, a README,

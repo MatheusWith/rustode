@@ -6,8 +6,8 @@
  Rainbow Brackets                   Install│
    acme · 0.4.0                            │
  INSTALLED · 1                             │
- Hello World                      Uninstall│
-   1.2.3 · Not loaded in this phase        │
+ Hello World 1.2.3                  Disable│
+   Enabled · Not loaded in this phase      │
                                            │
                                            │
                                            │

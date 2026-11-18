@@ -662,8 +662,14 @@ fn extension_notice(event: &ExtensionEvent) -> Option<String> {
             format!("Installed {id} {version} ({}).", NOT_LOADED.to_lowercase())
         }
         ExtensionEvent::Uninstalled { id } => format!("Uninstalled {id}."),
+        ExtensionEvent::Enabled { id } => {
+            format!("Enabled {id} ({}).", NOT_LOADED.to_lowercase())
+        }
+        ExtensionEvent::Disabled { id } => format!("Disabled {id}."),
         ExtensionEvent::Failed { id, message } => format!("{id}: {message}"),
-        ExtensionEvent::ListFailed { message } => message.clone(),
+        ExtensionEvent::ListFailed { message } | ExtensionEvent::StateFailed { message } => {
+            message.clone()
+        }
         _ => return None,
     })
 }

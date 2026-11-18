@@ -6,9 +6,13 @@
 //! holds the search box (`extensionsViewlet.ts:647`), the registry's
 //! results with Install / Installing / Installed buttons
 //! (`extensionsActions.ts:478`, `:765`, `:2728`) and the Installed list
-//! (`extensionsViewlet.ts:350`) with Uninstall / Uninstalling
-//! (`extensionsActions.ts:939-940`). Every installed extension shows "Not
-//! loaded in this phase". Colors are Dark Modern's sidebar, input and
+//! (`extensionsViewlet.ts:350`) with Disable / Enable
+//! (`extensionsActions.ts:1741-1850`) and Uninstall / Uninstalling
+//! (`extensionsActions.ts:939-940`) buttons, each extension's state
+//! (Enabled, Disabled, `extensionsActions.ts:2745-2748`, or Invalid with the
+//! reason, as VS Code's status shows validation errors,
+//! `extensionsActions.ts:3126-3130`). Every installed extension shows "Not
+//! loaded in this phase", enabled or not. Colors are Dark Modern's sidebar, input and
 //! button colors (`extensions/theme-defaults/themes/dark_modern.json:15-17`,
 //! `:28`, `:51-54`, `:83-89`).
 //!
@@ -21,7 +25,8 @@ use eframe::egui::{
     TextEdit, Ui, Vec2,
 };
 use rustode_workspace::{
-    ExtensionOperation, ExtensionSearch, ExtensionSummary, NOT_LOADED, Workspace,
+    EnablementState, ExtensionOperation, ExtensionSearch, ExtensionSummary, InstalledExtension,
+    NOT_LOADED, Workspace,
 };
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
@@ -164,6 +169,7 @@ fn list(ui: &mut Ui, workspace: &mut Workspace) -> Option<String> {
         let (caption, enabled) = match workspace.extension_operation(&id) {
             Some(ExtensionOperation::Installing) => ("Installing", false),
             Some(ExtensionOperation::Uninstalling) => ("Uninstalling", false),
+            Some(_) => ("Installed", false),
             None if installed => ("Installed", false),
             None => ("Install", true),
         };
@@ -172,7 +178,7 @@ fn list(ui: &mut Ui, workspace: &mut Workspace) -> Option<String> {
         } else {
             format!("{} · {}", result.namespace, result.version)
         };
-        if row(ui, &result.display_name, &detail, caption, enabled) {
+        if row(ui, &result.display_name, &[&detail], &[(caption, enabled)]) == Some(0) {
             install = Some(id);
         }
     }
@@ -185,40 +191,84 @@ fn list(ui: &mut Ui, workspace: &mut Workspace) -> Option<String> {
     if installed.is_empty() {
         label(ui, text("No extensions installed", DESCRIPTION));
     }
-    let mut uninstall = None;
+    let mut chosen = None;
     for extension in &installed {
-        let caption = match workspace.extension_operation(&extension.id) {
-            Some(ExtensionOperation::Uninstalling) => "Uninstalling",
-            Some(ExtensionOperation::Installing) => "Installing",
-            None => "Uninstall",
-        };
-        let detail = format!("{} · {}", extension.version, extension.notice());
-        if row(
-            ui,
-            &extension.display_name,
-            &detail,
-            caption,
-            caption == "Uninstall",
-        ) {
-            uninstall = Some(extension.id.clone());
+        if let Some(action) = installed_row(ui, workspace, extension) {
+            chosen = Some((action, extension.id.clone()));
         }
     }
-    let result = match (install, uninstall) {
+    let result = match (install, chosen) {
         (Some(id), _) => workspace.install_extension(&id),
-        (None, Some(id)) => workspace.uninstall_extension(&id),
+        (None, Some((Action::Uninstall, id))) => workspace.uninstall_extension(&id),
+        (None, Some((Action::Enable, id))) => workspace.enable_extension(&id),
+        (None, Some((Action::Disable, id))) => workspace.disable_extension(&id),
         (None, None) => Ok(()),
     };
     result.err().map(|err| err.to_string())
 }
 
-/// One extension: its name with an action button, then a detail line.
-/// Returns whether the button was clicked.
-fn row(ui: &mut Ui, name: &str, detail: &str, caption: &str, enabled: bool) -> bool {
+/// A button on an installed extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Uninstall,
+    Enable,
+    Disable,
+}
+
+/// An installed extension: its name with Uninstall and Disable or Enable
+/// (neither for an invalid one), its version, state and the not-loaded
+/// notice, and why it is invalid if it is. Returns the button clicked.
+fn installed_row(
+    ui: &mut Ui,
+    workspace: &Workspace,
+    extension: &InstalledExtension,
+) -> Option<Action> {
+    let operation = workspace.extension_operation(&extension.id);
+    let uninstall = match operation {
+        Some(ExtensionOperation::Uninstalling) => ("Uninstalling", false),
+        Some(ExtensionOperation::Installing) => ("Installing", false),
+        Some(_) => ("Uninstall", false),
+        None => ("Uninstall", true),
+    };
+    let (toggle, action) = match (operation, extension.enablement) {
+        (Some(ExtensionOperation::Enabling), _) => (Some(("Enabling", false)), Action::Enable),
+        (Some(ExtensionOperation::Disabling), _) => (Some(("Disabling", false)), Action::Disable),
+        (_, EnablementState::Invalid) => (None, Action::Enable),
+        (_, EnablementState::Enabled) => (Some(("Disable", operation.is_none())), Action::Disable),
+        (_, EnablementState::DisabledGlobally) => {
+            (Some(("Enable", operation.is_none())), Action::Enable)
+        }
+    };
+    let mut buttons = vec![uninstall];
+    buttons.extend(toggle);
+    let detail = format!(
+        "{} · {} · {}",
+        extension.version,
+        extension.enablement.label(),
+        extension.notice()
+    );
+    let reason = extension.first_error().map(str::to_owned);
+    let mut details = vec![detail.as_str()];
+    details.extend(reason.as_deref());
+    match row(ui, &extension.display_name, &details, &buttons)? {
+        0 => Some(Action::Uninstall),
+        _ => Some(action),
+    }
+}
+
+/// One extension: its name with action buttons (the first rightmost), then
+/// detail lines. Returns the index of the button clicked.
+fn row(ui: &mut Ui, name: &str, details: &[&str], buttons: &[(&str, bool)]) -> Option<usize> {
     ui.add_space(4.0);
     let clicked = ui
         .horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let clicked = button(ui, caption, enabled);
+                let mut clicked = None;
+                for (index, (caption, enabled)) in buttons.iter().enumerate() {
+                    if button(ui, caption, *enabled) {
+                        clicked = Some(index);
+                    }
+                }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     label(ui, text(name, FOREGROUND).strong());
                 });
@@ -227,6 +277,8 @@ fn row(ui: &mut Ui, name: &str, detail: &str, caption: &str, enabled: bool) -> b
             .inner
         })
         .inner;
-    label(ui, text(detail, DESCRIPTION));
+    for detail in details {
+        label(ui, text(*detail, DESCRIPTION));
+    }
     clicked
 }
