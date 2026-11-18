@@ -73,8 +73,7 @@ impl Document {
         let info = rustode_fs::detect_eol(&text);
         let name = path
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+            .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
         Self {
             language: language::detect(&name),
             eol: (info.dominant, info.mixed),

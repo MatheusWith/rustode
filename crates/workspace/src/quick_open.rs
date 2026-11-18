@@ -61,12 +61,10 @@ fn split(path: &Path, root: Option<&Path>) -> (String, String) {
     let shown = root.and_then(|r| path.strip_prefix(r).ok()).unwrap_or(path);
     let label = shown
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
     let description = shown
         .parent()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_else(Default::default, |p| p.to_string_lossy().into_owned());
     (label, description)
 }
 

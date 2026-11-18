@@ -116,8 +116,7 @@ fn measure(ui: &Ui, workspace: &Workspace) -> Vec<Tab> {
             let name = doc
                 .path()
                 .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
+                .map_or_else(Default::default, |name| name.to_string_lossy().into_owned());
             let label = ui
                 .painter()
                 .layout_no_wrap(name.clone(), font(), ACTIVE_FOREGROUND)

@@ -6,7 +6,14 @@
 //! (`src/vs/platform/theme/common/colors/editorColors.ts:121-123`), list
 //! selection `#04395E` and match highlight `#2AAAFF`
 //! (`src/vs/platform/theme/common/colors/listColors.ts:33-36`, `:81-84`),
-//! cursor `#AEAFAD` (`src/vs/editor/common/core/editorColorRegistry.ts:22`).
+//! cursor `#AEAFAD` (`src/vs/editor/common/core/editorColorRegistry.ts:22`),
+//! error, warning, info and hint squiggles `#F14C4C`, `#CCA700`, `#59A4F9`
+//! and `#EEEEEE` at 70% over the background (`src/vs/platform/theme/common/colors/editorColors.ts:70-107`).
+//!
+//! Diagnostics are underlined in their color, where the terminal colors
+//! underlines; under `NO_COLOR` they are underlined (errors also bold), and
+//! the gutter and the problems panel name the severity with a letter: E, W
+//! or I.
 //!
 //! The mode follows the terminal: `NO_COLOR` (any value, see no-color.org)
 //! turns colors off; `COLORTERM=truecolor` or `24bit` gives 24-bit color;
@@ -16,6 +23,7 @@
 //! the selected row and matches are also bold or reversed.
 
 use ratatui::style::{Color, Modifier, Style};
+use rustode_workspace::MarkerSeverity;
 
 /// How many colors the terminal shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +85,10 @@ pub(crate) struct Theme {
     pub quick_selected: Style,
     pub highlight: Style,
     pub description: Style,
+    /// Underlines for diagnostics, by severity: error, warning, info, hint.
+    pub markers: [Style; 4],
+    /// The severity letters (E, W, I) of the gutter and the problems panel.
+    pub letters: [Style; 3],
 }
 
 /// A palette color, as the mode can show it; `basic` stands in for 16 colors.
@@ -156,8 +168,63 @@ impl Theme {
                 Style::new().fg(c(0x9D_9D_9D, Color::DarkGray)),
                 Style::new().add_modifier(Modifier::DIM),
             ),
+            markers: severity_colors(mode).map(|color| {
+                let underline = Style::new().add_modifier(Modifier::UNDERLINED);
+                if none {
+                    underline
+                } else {
+                    underline.underline_color(color)
+                }
+            }),
+            letters: {
+                let [error, warning, info, _] = severity_colors(mode);
+                [error, warning, info].map(|color| pick(bold.fg(color), bold))
+            },
+        }
+        .with_bold_errors(none)
+    }
+
+    /// Without colors, errors are bold as well as underlined.
+    fn with_bold_errors(mut self, none: bool) -> Self {
+        if none {
+            self.markers[0] = self.markers[0].add_modifier(Modifier::BOLD);
+        }
+        self
+    }
+
+    /// The underline of a diagnostic of `severity`.
+    pub(crate) fn marker(&self, severity: MarkerSeverity) -> Style {
+        self.markers[severity_index(severity)]
+    }
+
+    /// The letter naming a problem's severity, and its style.
+    pub(crate) fn letter(&self, severity: MarkerSeverity) -> (&'static str, Style) {
+        match severity {
+            MarkerSeverity::Error => ("E", self.letters[0]),
+            MarkerSeverity::Warning => ("W", self.letters[1]),
+            MarkerSeverity::Info => ("I", self.letters[2]),
+            MarkerSeverity::Hint => ("H", self.description),
         }
     }
+}
+
+fn severity_index(severity: MarkerSeverity) -> usize {
+    match severity {
+        MarkerSeverity::Error => 0,
+        MarkerSeverity::Warning => 1,
+        MarkerSeverity::Info => 2,
+        MarkerSeverity::Hint => 3,
+    }
+}
+
+/// Error, warning, info and hint colors in `mode`.
+fn severity_colors(mode: ColorMode) -> [Color; 4] {
+    [
+        color(mode, 0xF1_4C_4C, Color::LightRed),
+        color(mode, 0xCC_A7_00, Color::Yellow),
+        color(mode, 0x59_A4_F9, Color::LightBlue),
+        color(mode, 0xB0_B0_B0, Color::Gray),
+    ]
 }
 
 /// The closest xterm 256-color index: the 6×6×6 cube or the gray ramp.

@@ -12,7 +12,8 @@ use ratatui::{DefaultTerminal, Frame, Terminal};
 use rustode_workspace::trace::{LatencyRecorder, LatencyReport};
 use rustode_workspace::{
     CommandMatch, ContextValue, Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow,
-    FileMatch, Movement, Position, QuickQuery, Resolution, Selection, Workspace, parse_quick_query,
+    FileMatch, Movement, Position, QuickQuery, Resolution, Selection, ServerState, Workspace,
+    parse_quick_query,
 };
 use std::collections::HashMap;
 use std::io;
@@ -29,6 +30,7 @@ pub(crate) enum Focus {
     Explorer,
     /// The Extensions view in the sidebar.
     Extensions,
+    Problems,
 }
 
 /// Where a document's view is scrolled to.
@@ -60,6 +62,10 @@ pub(crate) struct Hits {
     pub tabs: Vec<(u16, u16, u16, DocumentId)>,
     /// The explorer's rows.
     pub explorer: Option<Rect>,
+    /// The problems panel's rows, and the problem each one shows.
+    pub problems: Option<(Rect, Vec<Option<usize>>)>,
+    /// The status bar's problem counts: row, first and one-past-last column.
+    pub problems_status: Option<(u16, u16, u16)>,
 }
 
 /// Lines one wheel notch scrolls.
@@ -118,6 +124,8 @@ pub struct App {
     pub(crate) find_visible: bool,
     /// The Extensions view's state.
     pub(crate) extensions: crate::extensions::ExtensionsView,
+    /// The problems panel.
+    pub(crate) problems: crate::problems::ProblemsPanel,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -169,6 +177,7 @@ impl App {
             find: None,
             find_visible: false,
             extensions: crate::extensions::ExtensionsView::default(),
+            problems: crate::problems::ProblemsPanel::default(),
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
@@ -245,7 +254,8 @@ impl App {
     }
 
     /// Runs the event loop until the user quits. While idle it wakes every
-    /// 250 ms to pick up changes made to files by other programs.
+    /// 250 ms to pick up changes made to files by other programs and what the
+    /// language servers sent.
     ///
     /// # Errors
     /// When the terminal cannot be read or drawn.
@@ -258,11 +268,12 @@ impl App {
             } else {
                 self.workspace.poll_external_changes();
                 self.workspace.poll_extensions();
+                let servers = self.poll_language_servers();
                 let config_changed = !self.workspace.reload_config().is_empty();
                 if config_changed {
                     self.report_config_problems();
                 }
-                if self.take_events() || config_changed {
+                if self.take_events() || config_changed || servers {
                     terminal.draw(|frame| self.draw(frame))?;
                 }
             }
@@ -270,8 +281,16 @@ impl App {
         Ok(())
     }
 
+    /// Processes what the language servers sent; returns whether anything
+    /// changed, so the screen needs drawing.
+    pub fn poll_language_servers(&mut self) -> bool {
+        self.workspace.poll_language_servers();
+        self.take_events()
+    }
+
     /// Applies one terminal event to the workspace.
     pub fn handle(&mut self, event: &Event) {
+        self.workspace.poll_language_servers();
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release && self.quick.is_some() => {
                 self.quick_key(*key);
@@ -314,12 +333,16 @@ impl App {
                     self.run_command(command);
                 }
             }
-            Focus::Explorer => {
+            Focus::Explorer | Focus::Problems => {
                 if let Some(command) = keys::global(key) {
                     self.run_global(command, key);
-                } else if let Some(explorer_key) = keys::explorer_key(key) {
+                } else if let Some(list_key) = keys::explorer_key(key) {
                     self.message = None;
-                    self.explorer_key(explorer_key);
+                    if self.focus == Focus::Problems {
+                        self.problems_key(list_key);
+                    } else {
+                        self.explorer_key(list_key);
+                    }
                 }
             }
             Focus::Extensions => self.extensions_key(key),
@@ -420,7 +443,8 @@ impl App {
     }
 
     fn report_config_problems(&mut self) {
-        let problems = self.workspace.config().diagnostics().count();
+        let problems = self.workspace.config().diagnostics().count()
+            + self.workspace.language_server_problems().len();
         if problems > 0 {
             self.message = Some(format!(
                 "{problems} problem(s) in settings.json or keybindings.json"
@@ -453,6 +477,7 @@ impl App {
             Command::Replace => self.open_find(true),
             Command::FindNext => self.find_step(true),
             Command::FindPrevious => self.find_step(false),
+            Command::ToggleProblems => self.toggle_problems(),
             other => self.edit(other),
         }
     }
@@ -585,18 +610,65 @@ impl App {
     fn focus_next_part(&mut self) {
         match self.focus {
             Focus::Editor => self.focus_explorer(),
-            Focus::Explorer | Focus::Extensions if self.document().is_some() => {
+            Focus::Explorer | Focus::Extensions | Focus::Problems if self.document().is_some() => {
                 self.focus = Focus::Editor;
             }
-            Focus::Explorer | Focus::Extensions => {}
+            Focus::Explorer | Focus::Extensions | Focus::Problems => {}
+        }
+    }
+
+    /// Ctrl+Shift+M: shows and focuses the problems panel, or hides it when
+    /// it has focus.
+    fn toggle_problems(&mut self) {
+        if self.focus == Focus::Problems {
+            self.problems.visible = false;
+            self.focus = Focus::Editor;
+        } else {
+            self.problems.visible = true;
+            self.focus = Focus::Problems;
+        }
+    }
+
+    /// Keys while the problems panel has focus.
+    fn problems_key(&mut self, key: ExplorerKey) {
+        let count = self.workspace.problems().len();
+        let last = count.saturating_sub(1);
+        let selected = self.problems.selected.min(last);
+        self.problems.selected = match key {
+            ExplorerKey::Up => selected.saturating_sub(1),
+            ExplorerKey::Down => (selected + 1).min(last),
+            ExplorerKey::PageUp => selected.saturating_sub(self.page),
+            ExplorerKey::PageDown => (selected + self.page).min(last),
+            ExplorerKey::Home => 0,
+            ExplorerKey::End => last,
+            ExplorerKey::Open { .. } => {
+                self.go_to_problem(selected);
+                return;
+            }
+            ExplorerKey::Leave => {
+                self.focus = Focus::Editor;
+                return;
+            }
+            ExplorerKey::Collapse | ExplorerKey::Expand => selected,
+        };
+    }
+
+    /// Opens the `index`th problem's file at the problem, focusing the editor.
+    fn go_to_problem(&mut self, index: usize) {
+        let Some(problem) = self.workspace.problems().into_iter().nth(index) else {
+            return;
+        };
+        self.problems.selected = index;
+        match self.workspace.go_to_problem(&problem) {
+            Ok(_) => self.focus = Focus::Editor,
+            Err(err) => self.message = Some(err.to_string()),
         }
     }
 
     pub(crate) fn rows(&self) -> Vec<ExplorerRow> {
         self.workspace
             .explorer()
-            .map(rustode_workspace::Explorer::rows)
-            .unwrap_or_default()
+            .map_or_else(Default::default, rustode_workspace::Explorer::rows)
     }
 
     fn explorer_key(&mut self, key: ExplorerKey) {
@@ -793,6 +865,22 @@ impl App {
             self.focus = Focus::Editor;
             return;
         }
+        if self
+            .hits
+            .problems_status
+            .is_some_and(|(y, x0, x1)| y == row && (x0..x1).contains(&column))
+        {
+            self.toggle_problems();
+            return;
+        }
+        if let Some((area, rows)) = self.hits.problems.clone().filter(|(a, _)| inside(*a)) {
+            if let Some(&Some(index)) = rows.get(usize::from(row - area.y)) {
+                self.go_to_problem(index);
+            } else {
+                self.focus = Focus::Problems;
+            }
+            return;
+        }
         if let Some(area) = self.hits.explorer.filter(|&a| inside(a)) {
             let index = self.explorer_top + usize::from(row - area.y);
             let rows = self.rows();
@@ -865,6 +953,17 @@ impl App {
         }
     }
 
+    /// What the crashed server of `language` says about itself.
+    fn server_message(&self, language: &str) -> String {
+        let why = self
+            .workspace
+            .language_servers()
+            .into_iter()
+            .find_map(|s| s.message.filter(|_| s.language == language))
+            .unwrap_or_else(|| "crashed".to_owned());
+        format!("Language server for {language}: {why}")
+    }
+
     /// Drains workspace events (they would pile up otherwise) and turns the
     /// ones the user must know about into a message. Returns whether any came.
     fn take_events(&mut self) -> bool {
@@ -886,6 +985,10 @@ impl App {
                     Some(message) => message,
                     None => continue,
                 },
+                WorkspaceEvent::LanguageServerChanged {
+                    language,
+                    state: ServerState::Crashed,
+                } => self.server_message(language),
                 _ => continue,
             };
             self.message = Some(message);
