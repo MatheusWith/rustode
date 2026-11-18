@@ -8,7 +8,7 @@
 "Faster and leaner than VS Code" is a claim, and it needs numbers that can be compared. The study already has the pieces:
 
 - an App that can be verified against the manifest (AGENTS.md §0.6);
-- a virtual display ([ADR 0006](0006-testes-em-tela-virtual.md));
+- a virtual display ([ADR 0006](0006-tests-on-virtual-display.md));
 - a QA harness with a startup benchmark (`05-qa/suite/scenarios/startup_bench.cjs`) and memory guards (`05-qa/suite/scenarios/run_scenario.sh:26-35`).
 
 ADR 0006 also records that absolute times on the virtual display do not hold for the real session. Relative comparisons on the same display do.
@@ -31,13 +31,13 @@ ADR 0006 also records that absolute times on the virtual display do not hold for
 
 Containment rules:
 
-1. The App never runs in place from `01-app/`. It runs as a temporary copy on disk, checked against the manifest and for extra files before each run (AGENTS.md §11.5). Running it in place wrote three compile-cache files into `01-app/` on 2026-11-17 ([`09-analises/0002`](../../09-analises/0002-entrada-virtual-wayland.md), "Limitations").
+1. The App never runs in place from `01-app/`. It runs as a temporary copy on disk, checked against the manifest and for extra files before each run (AGENTS.md §11.5). Running it in place wrote three compile-cache files into `01-app/` on 2026-11-17 ([`09-findings/0002`](../../09-findings/0002-virtual-wayland-input.md), "Limitations").
 2. The App gets an isolated profile (AGENTS.md §3.1) and no network unless the scenario needs it (§3.3). It is driven over CDP (§3.2), except for typing input ([ADR 0025](0025-typing-latency-injected-input.md)).
 3. The memory guard follows the QA harness:
    - a run does not start below the scenario's need (the QA launcher refuses below 1,800 MB available, `05-qa/suite/scenarios/run_scenario.sh:26-28`);
    - a run aborts if available memory drops below 700 MB (`run_scenario.sh:34-35`; the watchdog in `05-qa/suite/collectors/sampler.py:183-184`).
 4. Every result records the command, the folder it ran from, the run, the commit, the build profile and its measured/estimated label (AGENTS.md §0.4, §11.6). A result reports its repetitions and percentiles, never a single run.
-5. Each milestone's report is a finding in `09-analises/`, and the Gap Analysis in `ROADMAP.md` is updated from it.
+5. Each milestone's report is a finding in `09-findings/`, and the Gap Analysis in `ROADMAP.md` is updated from it.
 
 ## The guarantee
 
@@ -46,6 +46,6 @@ Every comparison is like for like (same scenario, same display, same rendering, 
 ## Consequences
 
 - Measured on 2026-11-17: the App is intact. From `01-app/VSCode-linux-x64`, `sha256sum -c --quiet` against the manifest printed nothing, and the file list equals the manifest's 3,008 entries.
-- A relocated copy may not reuse the App's Node compile cache. If it does not, cold-start numbers differ from those of in-place runs ([`lacunas.md`](../lacunas.md) G14).
-- The App side of "first frame" and of a typed key's frame still needs a defined event ([`lacunas.md`](../lacunas.md) G15). The QA startup benchmark measures "workbench ready" instead.
+- A relocated copy may not reuse the App's Node compile cache. If it does not, cold-start numbers differ from those of in-place runs ([`gaps.md`](../gaps.md) G14).
+- The App side of "first frame" and of a typed key's frame still needs a defined event ([`gaps.md`](../gaps.md) G15). The QA startup benchmark measures "workbench ready" instead.
 - The versioned scenario list does not exist yet. It comes with the benchmark runner (`rustode bench`, M1).

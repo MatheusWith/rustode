@@ -5,7 +5,7 @@
 
 ## Context
 
-Code - OSS and VSCodium are MIT ([`ATTRIBUTION.md`](../../ATTRIBUTION.md), "Analyzed software"). The editor is worth building only if it behaves like VS Code where users expect it to: undo grouping, multi-cursor, encodings, configuration. The study holds the exact source tree of the App (`02-engenharia-reversa/fonte/arvore/`), so that behavior can be read line by line. That raises two risks:
+Code - OSS and VSCodium are MIT ([`ATTRIBUTION.md`](../../ATTRIBUTION.md), "Analyzed software"). The editor is worth building only if it behaves like VS Code where users expect it to: undo grouping, multi-cursor, encodings, configuration. The study holds the exact source tree of the App (`02-package-analysis/source/tree/`), so that behavior can be read line by line. That raises two risks:
 
 - translating the TypeScript line by line would make rustode a port of code it does not own, with that code's structure and bugs;
 - using the behavior without credit would hide where it came from.
@@ -31,11 +31,11 @@ Containment rules:
 
 Every piece of behavior taken from VS Code can be traced to the source-tree lines it came from, and no rustode file is a translation of a VS Code file.
 
-Check: each row of the ATTRIBUTION table cites a source-tree path that exists (`test -e 02-engenharia-reversa/fonte/arvore/<path>`), and the rustode file it names has a doc comment that cites the same source.
+Check: each row of the ATTRIBUTION table cites a source-tree path that exists (`test -e 02-package-analysis/source/tree/<path>`), and the rustode file it names has a doc comment that cites the same source.
 
 ## Consequences
 
 - Measured: 10 behaviors are credited so far, in `core`, `fs`, `config` and `workspace` (the 10 rows of the ATTRIBUTION table at `d6debfb`).
 - Measured: rule 2 is not fully applied yet. Two of the files listed in the table cite no source in their doc comments: `crates/fs/src/encoding.rs` and `crates/core/src/selection.rs`. Command: `grep -n -e 'src/vs' -e 'studied' crates/fs/src/encoding.rs crates/core/src/selection.rs` prints nothing. Adding the comments is a code change.
 - No `LICENSE` file exists yet. Its copyright line names the holder, so writing it is the owner's decision. The license of the analysis documents is a separate decision, also still the owner's ([`NOTICE`](../../NOTICE); ROADMAP, "Next steps").
-- This ADR does not settle whether data, as opposed to behavior, may be reused. One example is a theme's color values ([`lacunas.md`](../lacunas.md) G18).
+- This ADR does not settle whether data, as opposed to behavior, may be reused. One example is a theme's color values ([`gaps.md`](../gaps.md) G18).

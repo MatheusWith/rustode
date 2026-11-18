@@ -47,7 +47,7 @@ cd ~/Projects/vscodium-port
 ./apply.sh && ./install.sh && MAX_OLD_SPACE_SIZE=2560 ./finish.sh
 ~/Projects/vscode/qa/suite/tools/run_virtual.sh ./build.sh   # virtual display: the compile cache opens the app
 ./smoke.sh
-cd ~/Projects/rustode && ./montar.sh                         # refreshes this project's copies
+cd ~/Projects/rustode && ./assemble.sh                         # refreshes this project's copies
 ```
 
 Requirements measured on this machine:

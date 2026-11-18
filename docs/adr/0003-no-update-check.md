@@ -18,7 +18,7 @@ Containment rules:
 
 ## The guarantee
 
-No update query leaves the app (measured: the network test shows no `VSCodium/versions`; [`09-analises/0001`](../../09-analises/0001-trafego-de-rede.md)).
+No update query leaves the app (measured: the network test shows no `VSCodium/versions`; [`09-findings/0001`](../../09-findings/0001-network-traffic.md)).
 
 ## Consequences
 

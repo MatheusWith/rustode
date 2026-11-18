@@ -120,7 +120,7 @@ impl Sandbox {
         self.path("project/01-app/VSCode-linux-x64")
     }
 
-    /// A few files and their manifest, built the way `montar.sh` builds it.
+    /// A few files and their manifest, built the way `assemble.sh` builds it.
     fn fake_app(&self) {
         self.write_executable(
             "project/01-app/VSCode-linux-x64/codium",
@@ -132,7 +132,7 @@ impl Sandbox {
         );
         self.write("project/01-app/VSCode-linux-x64/bin/codium", "#!/bin/sh\n");
         self.write(
-            "project/02-engenharia-reversa/versao.txt",
+            "project/02-package-analysis/version.txt",
             "1.147.0\nabc123\nx64\n",
         );
         let out = Command::new("sh")
@@ -145,7 +145,7 @@ impl Sandbox {
             .expect("sha256sum");
         assert!(out.status.success());
         fs::write(
-            self.path("project/02-engenharia-reversa/manifesto-sha256.txt"),
+            self.path("project/02-package-analysis/manifest-sha256.txt"),
             out.stdout,
         )
         .expect("manifest");

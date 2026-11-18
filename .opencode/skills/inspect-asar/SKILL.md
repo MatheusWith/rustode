@@ -7,19 +7,19 @@ description: Examines the runtime modules packed in node_modules.asar (version, 
 
 Material (relative to the project root):
 
-- `02-engenharia-reversa/asar/node_modules.asar.lista.txt`: a list of everything in the asar
-- `02-engenharia-reversa/asar/node_modules.asar.extraido/`: the extracted contents (including the files that live in `.unpacked`)
+- `02-package-analysis/asar/node_modules.asar.list.txt`: a list of everything in the asar
+- `02-package-analysis/asar/node_modules.asar.extracted/`: the extracted contents (including the files that live in `.unpacked`)
 - `01-app/VSCode-linux-x64/resources/app/node_modules.asar.unpacked/`: native modules (`.node`) and whatever must stay outside the asar
 - `01-app/VSCode-linux-x64/resources/app/node_modules/`: modules kept outside the asar on purpose (`semver`, `shell-quote`, `zod`, `@pondwader/socks5-server`, `@vscode/sandbox-runtime`)
-- `02-engenharia-reversa/fonte/arvore/package.json` and `pnpm-lock.yaml`: what the source declares
-- `02-engenharia-reversa/binarios.txt`: the type of each binary
+- `02-package-analysis/source/tree/package.json` and `pnpm-lock.yaml`: what the source declares
+- `02-package-analysis/binaries.txt`: the type of each binary
 
 ## Process
 
 ### 1. Find the module
 
 ```sh
-grep -E '^/(@[^/]+/)?<name>(/|$)' 02-engenharia-reversa/asar/node_modules.asar.lista.txt | head
+grep -E '^/(@[^/]+/)?<name>(/|$)' 02-package-analysis/asar/node_modules.asar.list.txt | head
 ```
 
 If it isn't in the asar, look in the package's `node_modules/` and `node_modules.asar.unpacked/`.
@@ -27,21 +27,21 @@ If it isn't in the asar, look in the package's `node_modules/` and `node_modules
 ### 2. Version and origin
 
 ```sh
-jq -r '.name + " " + .version + " " + (.license // "?")' 02-engenharia-reversa/asar/node_modules.asar.extraido/<name>/package.json
-grep -nE '"<name>"' 02-engenharia-reversa/fonte/arvore/package.json
-grep -nE "^  '?/?<name>@" 02-engenharia-reversa/fonte/arvore/pnpm-lock.yaml | head
+jq -r '.name + " " + .version + " " + (.license // "?")' 02-package-analysis/asar/node_modules.asar.extracted/<name>/package.json
+grep -nE '"<name>"' 02-package-analysis/source/tree/package.json
+grep -nE "^  '?/?<name>@" 02-package-analysis/source/tree/pnpm-lock.yaml | head
 ```
 
 Say whether it is a direct dependency (it is in the root `package.json`) or a transitive one (only in the lockfile). VSCodium forks have the `@vscodium/` scope.
 
 ### 3. Native or outside the asar?
 
-- The module's `.node`: `grep '<name>' 02-engenharia-reversa/binarios.txt`.
-- Why it lives outside the asar: the exception list is in `02-engenharia-reversa/fonte/arvore/build/gulpfile.vscode.ts` (the `createAsar` call).
+- The module's `.node`: `grep '<name>' 02-package-analysis/binaries.txt`.
+- Why it lives outside the asar: the exception list is in `02-package-analysis/source/tree/build/gulpfile.vscode.ts` (the `createAsar` call).
 
 ### 4. Who uses it
 
-Look for the import in the source: `grep -rn --include='*.ts' -E "from '<name>'|import\\('<name>'\\)" 02-engenharia-reversa/fonte/arvore/src | head`. Remember that the agent host looks for modules in `node_modules.asar.unpacked` only when the app has a recorded commit ([`docs/aprendizado/0001`](../../../docs/aprendizado/0001-commit-muda-caminho-dos-modulos.md)).
+Look for the import in the source: `grep -rn --include='*.ts' -E "from '<name>'|import\\('<name>'\\)" 02-package-analysis/source/tree/src | head`. Remember that the agent host looks for modules in `node_modules.asar.unpacked` only when the app has a recorded commit ([`docs/learnings/0001`](../../../docs/learnings/0001-commit-changes-module-paths.md)).
 
 ### 5. Report
 

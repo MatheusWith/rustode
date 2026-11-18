@@ -15,7 +15,7 @@ egui's built-in `TextEdit` does not fit a code editor's files. In egui 0.36.2 (`
 
 For a 1 GB file, that is at least 2 GB copied per frame (estimated from the code: two full copies per frame).
 
-Finding [0002](../../09-analises/0002-entrada-virtual-wayland.md) ran an eframe 0.36.2 stand-in on the virtual display. Input reached it through the same winit → egui-winit → `egui::Event` path that the GUI will use.
+Finding [0002](../../09-findings/0002-virtual-wayland-input.md) ran an eframe 0.36.2 stand-in on the virtual display. Input reached it through the same winit → egui-winit → `egui::Event` path that the GUI will use.
 
 ## Decision
 
@@ -43,8 +43,8 @@ A frame costs the GUI only the visible lines, whatever the file size, and an idl
 ## Consequences
 
 - The custom widget means writing text layout, selection drawing, input-method support and accessibility for the editor area. It is the largest single piece of M3 (estimated from the scope).
-- The finding's stand-in used glow, not wgpu. The wgpu path has not been tried on the virtual display ([0002](../../09-analises/0002-entrada-virtual-wayland.md), "Limitations").
-- The App's default dark theme is "Dark 2026", not Dark Modern ([`lacunas.md`](../lacunas.md) G18).
+- The finding's stand-in used glow, not wgpu. The wgpu path has not been tried on the virtual display ([0002](../../09-findings/0002-virtual-wayland-input.md), "Limitations").
+- The App's default dark theme is "Dark 2026", not Dark Modern ([`gaps.md`](../gaps.md) G18).
 - The tabs, explorer and status bar (`crates/gui/src/tabs.rs`, `explorer.rs`, `status.rs`) make three choices of their own. A quick Ctrl+Tab switches straight to the previously used tab, without VS Code's editor picker; the quick input it would use exists now (`quick_input.rs`), the picker does not yet. A tab with unsaved changes says so in its AccessKit description; VS Code's tab label is the name alone. The explorer tree points screen readers at its selected row as the active descendant, so they report focus on that row.
 - The breakpoints, scaling and keyboard (`crates/gui/src/layout.rs`, `focus.rs`, `status.rs`, `editor.rs`) make five choices of their own:
   - VS Code never collapses the sidebar. Its grid keeps the parts at their minimum widths and clips the editor. rustode collapses the sidebar below 390 points, the sidebar's 170 plus the editor's 220, with no activity bar. Asking for the sidebar (Ctrl+B, Ctrl+Shift+E, Ctrl+Shift+X) shows it anyway, at most half the window wide. With VS Code's 400 × 270 minimum window, the collapse only happens where the window manager ignores the minimum. The status bar is hidden when the window is shorter than 127 points.

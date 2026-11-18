@@ -13,27 +13,27 @@ The live sources are:
 - `~/Projects/vscodium-port` (scripts and patches);
 - `~/Projects/vscode/qa` (QA).
 
-[`montar.sh`](montar.sh) copies them here.
+[`assemble.sh`](assemble.sh) copies them here.
 
 The same repository is the home of the **rustode editor**, written in Rust in `crates/` and `xtask/`, which reimplements behavior studied in the App (Phase 1; [`ROADMAP.md`](ROADMAP.md)). This file has two parts: the **Study** rules (§0–§10), for the study of the App, and the **Editor** rules (§11), for the editor. §0–§4 bind both parts.
 
-**Language.** Every document in this project is written in English: this file, `README.md`, `ROADMAP.md`, `docs/`, ADRs, templates, skills and analyses in `09-analises/`. Folder and file names keep their original (Portuguese) spelling, because `montar.sh` and the links depend on them. Quotes from evidence stay verbatim.
+**Language.** Every document in this project is written in English: this file, `README.md`, `ROADMAP.md`, `docs/`, ADRs, templates, skills and analyses in `09-findings/`. Folder and file names are in English too, including the evidence folders `01-app/` to `08-build-tests/` and every file `assemble.sh` generates in them. The only Portuguese names left are the ones the live sources themselves use (the QA run folders such as `2026-11-16-codium1.147-rede`, the QA documents in `05-qa/docs/`, the port's logs and patches): they are copied verbatim, so they change only at their source. Quotes from evidence stay verbatim.
 
 ## 0. Never lose or tamper with evidence
 
-1. **The folders `01-app/` to `08-testes-do-build/` are read-only evidence.** They are copies rebuilt by [`montar.sh`](montar.sh), which deletes and recreates their contents on every run (`rm -rf` in 03, 04 and 08; `rsync --delete` in the others). Do not edit, create or delete anything inside them. Whatever is written there is lost, and whatever is changed no longer matches the analyzed app.
-2. **Analyses go in [`09-analises/`](09-analises/); reference documents go in [`docs/`](docs/).** Working files go in a temporary folder outside the project (`mktemp -d`), never in the evidence folders.
+1. **The folders `01-app/` to `08-build-tests/` are read-only evidence.** They are copies rebuilt by [`assemble.sh`](assemble.sh), which deletes and recreates their contents on every run (`rm -rf` in 03, 04 and 08; `rsync --delete` in the others). Do not edit, create or delete anything inside them. Whatever is written there is lost, and whatever is changed no longer matches the analyzed app.
+2. **Analyses go in [`09-findings/`](09-findings/); reference documents go in [`docs/`](docs/).** Working files go in a temporary folder outside the project (`mktemp -d`), never in the evidence folders.
 3. **Every claim cites its evidence.** Any of these counts as evidence:
-   - a path with a line number in the source tree (`02-engenharia-reversa/fonte/arvore/src/…:N`);
-   - a file in `02-engenharia-reversa/out-formatado/`;
+   - a path with a line number in the source tree (`02-package-analysis/source/tree/src/…:N`);
+   - a file in `02-package-analysis/out-formatted/`;
    - a patch (`06-port/patches/…`);
    - a line of the SHA-256 manifest;
-   - a test run (`08-testes-do-build/<run>/`).
+   - a test run (`08-build-tests/<run>/`).
 
    Without evidence, the claim is a hypothesis and is written as one.
 4. **Say whether a number was measured or estimated.** "Measured" comes with the command or the run that produced it; "estimated" says where the estimate came from. Do not present a single case as a rule. This covers benchmark and performance claims about the editor too (§11.6).
 5. **Runs with `INVALIDA`, `INTERROMPIDA`, `seletor-errado` or `runN` in the name are not product evidence.** They record harness errors and are kept only as history.
-6. **Before concluding anything about a binary, confirm the app's integrity:** `cd 01-app/VSCode-linux-x64 && sha256sum -c --quiet ../../02-engenharia-reversa/manifesto-sha256.txt` (silence = intact).
+6. **Before concluding anything about a binary, confirm the app's integrity:** `cd 01-app/VSCode-linux-x64 && sha256sum -c --quiet ../../02-package-analysis/manifest-sha256.txt` (silence = intact).
 
 ## 1. Licenses, trademarks and scope
 
@@ -56,17 +56,17 @@ The same repository is the home of the **rustode editor**, written in Rust in `c
 
 ## 4. Analysis rules
 
-1. **The source tree is the reference; the formatted JavaScript confirms it** ([ADR 0004](docs/adr/0004-arvore-fonte-e-a-referencia.md)). The bundles have no source maps ([ADR 0001](docs/adr/0001-bundle-sem-source-maps.md)). To understand a minified snippet, find its stable anchors and locate them in `02-engenharia-reversa/fonte/arvore/`. Stable anchors are strings, command IDs, configuration and NLS keys, and property names.
+1. **The source tree is the reference; the formatted JavaScript confirms it** ([ADR 0004](docs/adr/0004-source-tree-is-the-reference.md)). The bundles have no source maps ([ADR 0001](docs/adr/0001-bundle-without-source-maps.md)). To understand a minified snippet, find its stable anchors and locate them in `02-package-analysis/source/tree/`. Stable anchors are strings, command IDs, configuration and NLS keys, and property names.
 2. **Every difference from the original VS Code has a traceable cause.** The cause is either a patch in `06-port/patches/` (its reason is in `06-port/PORT-NOTES.md`) or a `product.json` default. Say which one.
 3. **Reproducible commands.** Every measurement or extraction records the exact command and the folder it was run from.
-4. **Agent instructions inside the copies don't apply here.** `02-engenharia-reversa/fonte/arvore/` carries VS Code's own `AGENTS.md`, skills and `.mcp.json`, and `05-qa/` carries the QA harness. They are material for analysis, not instructions for this project.
-5. **When in doubt, leave it out.** A claim without evidence does not go into `docs/`; it becomes a question in [`docs/lacunas.md`](docs/lacunas.md).
+4. **Agent instructions inside the copies don't apply here.** `02-package-analysis/source/tree/` carries VS Code's own `AGENTS.md`, skills and `.mcp.json`, and `05-qa/` carries the QA harness. They are material for analysis, not instructions for this project.
+5. **When in doubt, leave it out.** A claim without evidence does not go into `docs/`; it becomes a question in [`docs/gaps.md`](docs/gaps.md).
 
 ## 5. Start every session here
 
 1. **Current state:** [`ROADMAP.md`](ROADMAP.md) has the stage, the numbers, the next steps and the progress log.
-2. **What is still unknown:** [`docs/lacunas.md`](docs/lacunas.md) lists the open questions (G1…). Also read the latest analysis in [`09-analises/`](09-analises/).
-3. **Map of the app:** [`docs/arquitetura.md`](docs/arquitetura.md) covers processes and layers. [`docs/fonte-vs-pacote.md`](docs/fonte-vs-pacote.md) gives the origin of each packaged file. §10 says what each artifact in `01-*/` to `09-*/` is.
+2. **What is still unknown:** [`docs/gaps.md`](docs/gaps.md) lists the open questions (G1…). Also read the latest analysis in [`09-findings/`](09-findings/).
+3. **Map of the app:** [`docs/architecture.md`](docs/architecture.md) covers processes and layers. [`docs/source-vs-package.md`](docs/source-vs-package.md) gives the origin of each packaged file. §10 says what each artifact in `01-*/` to `09-*/` is.
 4. **Editor work:** read §11, then [`CONTRIBUTING.md`](CONTRIBUTING.md), the ROADMAP's milestones and Gap Analysis, and the ADR of the component you touch ([`docs/adr/README.md`](docs/adr/README.md)).
 
 If the owner asked for a task, it comes first; the four steps are for orientation. Don't stop to ask, unless the decision is marked as the owner's (§1.4 and §3.2; "Owner decision" in the ROADMAP).
@@ -80,8 +80,8 @@ If the owner asked for a task, it comes first; the four steps are for orientatio
 | Format minified JS | `~/Projects/vscode-vscodium/build/node_modules/.pnpm/@esbuild+linux-x64@0.27.2/node_modules/@esbuild/linux-x64/bin/esbuild <input.js> --outfile=<output.js>` |
 | Structural search in TypeScript | `ast-grep` skill (`.claude/skills/ast-grep/`) |
 | Open the app without it showing on the desktop | `~/Projects/vscode/qa/suite/tools/run_virtual.sh <command>` (use the originals in `~/Projects/vscode/qa/`; the copy in `05-qa/` is evidence) |
-| Refresh the copies after new tests | `./montar.sh` (recreates 01 to 08 and the skills copy; `SEM_FORMATADO=1` skips JS formatting) |
-| Copy the skills for OpenCode | `./sincronizar-skills.sh` |
+| Refresh the copies after new tests | `./assemble.sh` (recreates 01 to 08 and the skills copy; `SKIP_FORMAT=1` skips JS formatting) |
+| Copy the skills for OpenCode | `./sync-skills.sh` |
 | Static and runtime analysis of the packaged app (JavaScript/Electron, asar, fuses, binaries) | REA: the `/usr/bin/rea` CLI and the `rea` MCP server, registered in [`.mcp.json`](.mcp.json) (Claude Code) and [`opencode.json`](opencode.json) (OpenCode), with the `reverse-engineer-anything` skill. Rules below |
 
 The project's skills are described in §7.
@@ -105,12 +105,12 @@ The project's skills are described in §7.
 - **Updating.** The global package belongs to root, so run `sudo rea update`. Then copy the skill again and sync:
 
   ```sh
-  rsync -a --delete --exclude /agents/ /usr/lib/node_modules/rea-agents/skills/reverse-engineer-anything/ .claude/skills/reverse-engineer-anything/ && ./sincronizar-skills.sh
+  rsync -a --delete --exclude /agents/ /usr/lib/node_modules/rea-agents/skills/reverse-engineer-anything/ .claude/skills/reverse-engineer-anything/ && ./sync-skills.sh
   ```
 
 ## 7. Skills
 
-The original lives in [`.claude/skills/`](.claude/skills/), which Claude Code reads. [`.opencode/skills/`](.opencode/skills/) is an identical copy for OpenCode, rebuilt by `./sincronizar-skills.sh` (`montar.sh` also rebuilds it). **Edit only in `.claude/skills/`.**
+The original lives in [`.claude/skills/`](.claude/skills/), which Claude Code reads. [`.opencode/skills/`](.opencode/skills/) is an identical copy for OpenCode, rebuilt by `./sync-skills.sh` (`assemble.sh` also rebuilds it). **Edit only in `.claude/skills/`.**
 
 Each skill has one folder with at least two files (a skill may add reference files, as `tdd/` does with `tests.md` and `mocking.md`):
 - `SKILL.md`: the instructions;
@@ -120,12 +120,12 @@ The agent uses **automatic** skills on its own when the task matches the descrip
 
 | Skill | Triggered by | Use when | Input → output |
 |---|---|---|---|
-| [`find-minified-symbol`](.claude/skills/find-minified-symbol/SKILL.md) | automatic | you need to explain a snippet of the packaged JavaScript, or link an app error to its source `.ts` | stack trace, `out-formatado/` snippet or behavior → `src/<file>.ts:L`, anchors used and confidence (high, medium, low) |
+| [`find-minified-symbol`](.claude/skills/find-minified-symbol/SKILL.md) | automatic | you need to explain a snippet of the packaged JavaScript, or link an app error to its source `.ts` | stack trace, `out-formatted/` snippet or behavior → `src/<file>.ts:L`, anchors used and confidence (high, medium, low) |
 | [`trace-behavior-to-patch`](.claude/skills/trace-behavior-to-patch/SKILL.md) | automatic | the app does something different from the original VS Code, or you need to know where a piece of the source tree came from | observed difference → the patch (or `product.json` key) that causes it and the reason recorded in `PORT-NOTES.md` |
 | [`inspect-asar`](.claude/skills/inspect-asar/SKILL.md) | automatic | you need the version, location or origin of a runtime dependency | module name → version and license, where it sits in the package (asar, `.unpacked`, outside the asar), direct or transitive, who uses it |
 | [`compare-builds`](.claude/skills/compare-builds/SKILL.md) | automatic | before concluding anything about a binary, when the app is rebuilt, or when comparing with another build | (other app) → integrity against the manifest; new, removed and changed files, by area |
 | [`find-qa-evidence`](.claude/skills/find-qa-evidence/SKILL.md) | automatic | a claim needs test evidence, or you need to know whether something was already tested | claim → valid run, step, screenshot and the 1.138 reference result |
-| [`write-finding`](.claude/skills/write-finding/SKILL.md) | owner only | recording a finished analysis | conversation and evidence → `09-analises/NNNN-slug.md`, with the indexes (`09-analises/README.md`, gaps, ROADMAP) updated |
+| [`write-finding`](.claude/skills/write-finding/SKILL.md) | owner only | recording a finished analysis | conversation and evidence → `09-findings/NNNN-slug.md`, with the indexes (`09-findings/README.md`, gaps, ROADMAP) updated |
 | [`launch-built-app`](.claude/skills/launch-built-app/SKILL.md) | owner only | observing the running app | what to observe → app opened in a temporary profile, on a virtual display, with CDP on port 9333; closed and cleaned up at the end |
 | [`ast-grep`](.claude/skills/ast-grep/SKILL.md) | automatic | searching for a code shape (AST pattern) in the TypeScript source tree, beyond what `grep` can reach | pattern → files and snippets (copied from filmcraft) |
 | [`grilling`](.claude/skills/grilling/SKILL.md) | automatic or the owner | stress-testing a plan or decision with rounds of questions | plan → questions with a recommended answer, until no open decision is left (copied from filmcraft) |
@@ -175,11 +175,11 @@ To create or change a skill:
    The body has `## Process` with numbered steps (`### 1. …`), each saying when it is done, and the output format.
 2. **Metadata for other tools.** Create `agents/openai.yaml` with `interface.display_name` (the name in Title Case) and `interface.short_description`. Owner-only skills also get `policy.allow_implicit_invocation: false`.
 3. **Paths relative to the project root, and commands tested before they go into the skill.** The `compare-builds` recipe, for example, was tested against the manifest.
-4. **One row in the table above.** Then run `./sincronizar-skills.sh` to update the OpenCode copy.
+4. **One row in the table above.** Then run `./sync-skills.sh` to update the OpenCode copy.
 
 ## 8. Checks before concluding
 
-- App integrity (§0.6): `cd 01-app/VSCode-linux-x64 && sha256sum -c --quiet ../../02-engenharia-reversa/manifesto-sha256.txt`.
+- App integrity (§0.6): `cd 01-app/VSCode-linux-x64 && sha256sum -c --quiet ../../02-package-analysis/manifest-sha256.txt`.
 - Every cited file exists: run `test -e <path>` for each cited path.
 - No writes to 01 to 08: compare `find 0[1-8]* -newer <marker>` before and after the work.
 - Same skills in both tools: `diff -rq .claude/skills .opencode/skills` (no output).
@@ -189,47 +189,47 @@ To create or change a skill:
 
 | What | Where | Template |
 |---|---|---|
-| Finding (a question answered with evidence) | `09-analises/NNNN-slug.md` | [`docs/modelos/achado.md`](docs/modelos/achado.md) or the `write-finding` skill |
-| Decision | `docs/adr/NNNN-slug.md` | [`docs/modelos/adr.md`](docs/modelos/adr.md) |
-| Open question | [`docs/lacunas.md`](docs/lacunas.md) | entry `G<n>` |
-| Studied component | `docs/componentes/<area>.md` | [`docs/modelos/componente.md`](docs/modelos/componente.md) |
-| Something learned that serves other projects | `docs/aprendizado/NNNN-slug.md` | [`docs/aprendizado/README.md`](docs/aprendizado/README.md) |
+| Finding (a question answered with evidence) | `09-findings/NNNN-slug.md` | [`docs/templates/finding.md`](docs/templates/finding.md) or the `write-finding` skill |
+| Decision | `docs/adr/NNNN-slug.md` | [`docs/templates/adr.md`](docs/templates/adr.md) |
+| Open question | [`docs/gaps.md`](docs/gaps.md) | entry `G<n>` |
+| Studied component | `docs/components/<area>.md` | [`docs/templates/component.md`](docs/templates/component.md) |
+| Something learned that serves other projects | `docs/learnings/NNNN-slug.md` | [`docs/learnings/README.md`](docs/learnings/README.md) |
 | Progress | [`ROADMAP.md`](ROADMAP.md) | "Progress log", metadata line and revision history |
 | Editor milestone state, numbers and Gap Analysis | [`ROADMAP.md`](ROADMAP.md), "Editor: Phase 1 milestones" and "Gap Analysis against VS Code" | the existing tables |
 | Behavior studied in VS Code and reimplemented by the editor | [`ATTRIBUTION.md`](ATTRIBUTION.md), "Behavior studied and reimplemented by the editor", plus the file's doc comment and the component's ADR | [ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md) |
 | Editor dependency | [`ATTRIBUTION.md`](ATTRIBUTION.md), "Editor dependencies" | crate, version, license, what for |
-| Benchmark report against the App | `09-analises/NNNN-slug.md` | [`docs/modelos/achado.md`](docs/modelos/achado.md) |
+| Benchmark report against the App | `09-findings/NNNN-slug.md` | [`docs/templates/finding.md`](docs/templates/finding.md) |
 | Editor conventions and the review checklist | [`CONTRIBUTING.md`](CONTRIBUTING.md), where every hook error points | — |
 
 ## 10. Artifact map (01 to 09)
 
-What each folder holds and what each artifact is for. Folders 01 to 08 are read-only copies (§0.1); the "Source" column names where `montar.sh` copies them from. Counts were **measured** on 2026-11-16 from the project root with `find <folder> -type f | wc -l` and `du -sh <folder>`; they change whenever `montar.sh` runs again.
+What each folder holds and what each artifact is for. Folders 01 to 08 are read-only copies (§0.1); the "Source" column names where `assemble.sh` copies them from. Counts were **measured** on 2026-11-16 from the project root with `find <folder> -type f | wc -l` and `du -sh <folder>`; they change whenever `assemble.sh` runs again.
 
 | Folder | Source | Files · size | Role |
 |---|---|---|---|
 | `01-app/` | `~/Projects/VSCode-linux-x64` | 3,008 · 705 MB | the packaged app under analysis |
-| `02-engenharia-reversa/` | derived from 01 and the build tree | 19,104 · 496 MB | material for reading the package |
-| `03-documentos/` | copied from 05, 06 and 07 | 25 · 280 KB | the documents, gathered in one place |
-| `04-fotos/` | images copied from `05-qa/results/` | 660 · 83 MB | test screenshots |
+| `02-package-analysis/` | derived from 01 and the build tree | 19,104 · 496 MB | material for reading the package |
+| `03-documents/` | copied from 05, 06 and 07 | 25 · 280 KB | the documents, gathered in one place |
+| `04-screenshots/` | images copied from `05-qa/results/` | 660 · 83 MB | test screenshots |
 | `05-qa/` | `~/Projects/vscode/qa` | 1,274 · 125 MB | the QA project and every run |
 | `06-port/` | `~/Projects/vscodium-port` | 162 · 2.8 MB | how the build tree was made |
-| `07-vscodium-origem/` | `~/Projects/vscodium` (filtered) | 289 · 30 MB | the VSCodium the port started from |
-| `08-testes-do-build/` | runs in `05-qa/results/` from 2026-11-16 on | 182 · 11 MB | tests of the built app |
-| `09-analises/` | written here | 38 · 368 KB (re-measured on 2026-11-17) | this project's findings and their annexes |
+| `07-vscodium-source/` | `~/Projects/vscodium` (filtered) | 289 · 30 MB | the VSCodium the port started from |
+| `08-build-tests/` | runs in `05-qa/results/` from 2026-11-16 on | 182 · 11 MB | tests of the built app |
+| `09-findings/` | written here | 38 · 368 KB (re-measured on 2026-11-17) | this project's findings and their annexes |
 
 ### 01-app/VSCode-linux-x64/
 
 | Artifact | What it is |
 |---|---|
 | `codium` | the Electron main binary |
-| `bin/codium` | shell launcher for the CLI (`file` says "a sh script", `02-engenharia-reversa/binarios.txt`); named after `applicationName` by patch `00-binary-fix-name` (`build/gulpfile.vscode.ts`) |
+| `bin/codium` | shell launcher for the CLI (`file` says "a sh script", `02-package-analysis/binaries.txt`); named after `applicationName` by patch `00-binary-fix-name` (`build/gulpfile.vscode.ts`) |
 | `chrome-sandbox`, `chrome_crashpad_handler` | Chromium's setuid sandbox helper and crash reporter |
 | `lib*.so*`, `vk_swiftshader_icd.json` | bundled libraries: ANGLE (`libEGL`, `libGLESv2`), `libffmpeg`, Vulkan loader and SwiftShader |
 | `*.pak`, `locales/*.pak`, `icudtl.dat` | Chromium resources, UI strings per locale, ICU data |
 | `snapshot_blob.bin`, `v8_context_snapshot.bin` | V8 startup snapshots |
 | `LICENSES.chromium.html` | Chromium's third-party licenses |
 | `resources/completions/` | shell completions (`bash/codium`, `zsh/_codium`) |
-| `resources/app/out/` | the application JavaScript: entry points, the 32 bundles listed in `out-formatado/`, CSS, `media/` and the NLS files (`nls.keys.json`, `nls.messages.json`, `nls.metadata.json`) |
+| `resources/app/out/` | the application JavaScript: entry points, the 32 bundles listed in `out-formatted/`, CSS, `media/` and the NLS files (`nls.keys.json`, `nls.messages.json`, `nls.metadata.json`) |
 | `resources/app/extensions/` | the 93 built-in extensions, plus a shared `node_modules/` (TypeScript) |
 | `resources/app/node_modules.asar` | runtime dependencies in one archive (82 MB) |
 | `resources/app/node_modules.asar.unpacked/` | modules that must live on disk: the native `.node` addons (`node-pty`, `@parcel/watcher`, `@vscode/sqlite3`, `@vscode/spdlog`, `kerberos`, the `@vscodium/*` forks, …) |
@@ -240,32 +240,32 @@ What each folder holds and what each artifact is for. Folders 01 to 08 are read-
 | `resources/app/resources/linux/code.png` | the app icon |
 | `resources/app/LICENSE.txt`, `ThirdPartyNotices.txt` | licenses |
 
-### 02-engenharia-reversa/
+### 02-package-analysis/
 
 | Artifact | What it is |
 |---|---|
-| `manifesto-sha256.txt` | SHA-256 of every file in 01 (3,008 lines); the integrity check (§0.6) and the base of `compare-builds` |
-| `binarios.txt` | `file` output for every executable, `.node` and `.so` in 01 (48 lines) |
-| `versao.txt` | `codium --version`: version, commit, architecture |
+| `manifest-sha256.txt` | SHA-256 of every file in 01 (3,008 lines); the integrity check (§0.6) and the base of `compare-builds` |
+| `binaries.txt` | `file` output for every executable, `.node` and `.so` in 01 (48 lines) |
+| `version.txt` | `codium --version`: version, commit, architecture |
 | `product.json`, `package.json` | copies of the packaged ones, for quick reading |
-| `fonte/arvore/` | the exact source tree of the build (14,465 files): VS Code commit + patches + post-install steps, without `node_modules` or outputs. The reference for every analysis (§4.1) |
-| `fonte/port-aplicado.diff` | the full diff from the original VS Code to the build tree; deleted files show only as deleted |
-| `fonte/port-aplicado.stat.txt` | the diff's summary line (7,232 files changed) |
-| `fonte/origem.txt` | VS Code and VSCodium commits, app version, Electron, the build's git tree and when it was assembled |
-| `asar/node_modules.asar.lista.txt` | the asar's file list (5,269 lines) |
-| `asar/node_modules.asar.extraido/` | the asar extracted (144 top-level packages); the native addons are in 01's `.unpacked/` |
-| `out-formatado/` | the 32 `.js` files of `resources/app/out/` reformatted by esbuild; same paths, names still minified |
+| `source/tree/` | the exact source tree of the build (14,465 files): VS Code commit + patches + post-install steps, without `node_modules` or outputs. The reference for every analysis (§4.1) |
+| `source/port-applied.diff` | the full diff from the original VS Code to the build tree; deleted files show only as deleted |
+| `source/port-applied.stat.txt` | the diff's summary line (7,232 files changed) |
+| `source/origin.txt` | VS Code and VSCodium commits, app version, Electron, the build's git tree and when it was assembled |
+| `asar/node_modules.asar.list.txt` | the asar's file list (5,269 lines) |
+| `asar/node_modules.asar.extracted/` | the asar extracted (144 top-level packages); the native addons are in 01's `.unpacked/` |
+| `out-formatted/` | the 32 `.js` files of `resources/app/out/` reformatted by esbuild; same paths, names still minified |
 
-### 03-documentos/
+### 03-documents/
 
 | Artifact | What it is |
 |---|---|
 | `qa/` | copy of `05-qa/docs/`: QA strategy (`00`), inventory (`01`), contracts and configuration (`02`), menus (`03`), execution and findings (`04`), resolved items (`05`), build tests (`06`) and `generated/` (per-step tables, module inventory) |
 | `PORT-NOTES.md` | copy of `06-port/PORT-NOTES.md`: why each patch was adapted or skipped |
-| `vscodium-docs/` | copy of `07-vscodium-origem/docs/` |
-| `rede-<run>.md` | each run's `network-report.md`, renamed after the run |
+| `vscodium-docs/` | copy of `07-vscodium-source/docs/` |
+| `network-<run>.md` | each run's `network-report.md`, renamed after the run |
 
-### 04-fotos/
+### 04-screenshots/
 
 Every `.png`, `.jpg`, `.jpeg` and `.webp` in `05-qa/results/`, in the same folder tree (`<run>/screenshots/…`). Folders of invalid runs (§0.5) come along and are not evidence.
 
@@ -273,7 +273,7 @@ Every `.png`, `.jpg`, `.jpeg` and `.webp` in `05-qa/results/`, in the same folde
 
 | Artifact | What it is |
 |---|---|
-| `README.md`, `docs/` | the QA project's own description and documents (source of `03-documentos/qa/`) |
+| `README.md`, `docs/` | the QA project's own description and documents (source of `03-documents/qa/`) |
 | `suite/driver/` | `Driver.ts`, the interface the scenarios use, and `native_input.cjs` |
 | `suite/scenarios/` | CDP scenarios (`explore_*.cjs`), the startup benchmark (`startup_bench.cjs`) and the launchers (`run_scenario.sh`, `run_network.sh`, `run_battery.sh`, …) |
 | `suite/collectors/` | `sampler.py` (process tree and memory, with watchdog) and `conn_watch.py` |
@@ -315,7 +315,7 @@ Files inside a run folder (writers measured with `grep` in `05-qa/suite/`):
 | `patches/port/` | the 20 adapted or port-only patches (`96` to `99`) and `linux/` |
 | `logs/` | the logs of each step (`apply-*`, `install-*`, `finish-*`, `build-*`, `typecheck*`), the import scans (`imports-*.txt`), the worktree snapshots (`*.tree`), `env-install.txt` and the deferred rejects of patch 53 (`adiados-53/*.rej`) |
 
-### 07-vscodium-origem/
+### 07-vscodium-source/
 
 | Artifact | What it is |
 |---|---|
@@ -326,20 +326,20 @@ Files inside a run folder (writers measured with `grep` in `05-qa/suite/`):
 | `*.sh` | VSCodium's build and release scripts (`prepare_vscode.sh`, `build.sh`, …), the model `06-port/` follows |
 | `docs/`, `README.md`, `LICENSE` | VSCodium's documentation and license |
 
-### 08-testes-do-build/
+### 08-build-tests/
 
-Copies of the runs in `05-qa/results/` dated 2026-11-16 or later (15 run folders and 2 battery logs), with the same file set as above. `RESUMO.md` is generated by `montar.sh`: one line per run with its verdict, followed by the battery logs. Runs named `code1.138` are the reference; `codium1.147` is the built app.
+Copies of the runs in `05-qa/results/` dated 2026-11-16 or later (15 run folders and 2 battery logs), with the same file set as above. `SUMMARY.md` is generated by `assemble.sh`: one line per run with its verdict, followed by the battery logs. Runs named `code1.138` are the reference; `codium1.147` is the built app.
 
-### 09-analises/
+### 09-findings/
 
-The only folder of the nine that this project writes (§0.2). `README.md` is the index; each `NNNN-slug.md` answers one question with evidence, following [`docs/modelos/achado.md`](docs/modelos/achado.md). An analysis may keep its raw material in an annex folder, `NNNN-anexos/`, next to it. Today:
+The only folder of the nine that this project writes (§0.2). `README.md` is the index; each `NNNN-slug.md` answers one question with evidence, following [`docs/templates/finding.md`](docs/templates/finding.md). An analysis may keep its raw material in an annex folder, `NNNN-attachments/`, next to it. Today:
 
 | Artifact | What it is |
 |---|---|
-| `0001-trafego-de-rede.md` | which servers the App contacts on its own |
-| `0002-entrada-virtual-wayland.md` | whether keystrokes can be injected into rustode and the App on the virtual display (the spike for typing latency) |
-| `0002-anexos/tools/` | the spike's throwaway tools, guarded to `qa-virt-*` sockets and a private bus: `fakeinput/` and `standin/` (separate Cargo projects, outside the editor's workspace), `eistype/eistype.c`, the session scripts, the CDP driver (`app-driver.cjs`) and `deltas.py` |
-| `0002-anexos/runs/1` to `runs/3` | the raw outputs of the three recorded runs, per run: the injectors' console output, the stand-in's output, the keys the App received and a screenshot of the App |
+| `0001-network-traffic.md` | which servers the App contacts on its own |
+| `0002-virtual-wayland-input.md` | whether keystrokes can be injected into rustode and the App on the virtual display (the spike for typing latency) |
+| `0002-attachments/tools/` | the spike's throwaway tools, guarded to `qa-virt-*` sockets and a private bus: `fakeinput/` and `standin/` (separate Cargo projects, outside the editor's workspace), `eistype/eistype.c`, the session scripts, the CDP driver (`app-driver.cjs`) and `deltas.py` |
+| `0002-attachments/runs/1` to `runs/3` | the raw outputs of the three recorded runs, per run: the injectors' console output, the stand-in's output, the keys the App received and a screenshot of the App |
 
 ## 11. Editor
 
@@ -393,15 +393,15 @@ The rustode editor is written in Rust, in `crates/` and `xtask/`. It reimplement
 
 1. **One editor instance at a time** (§3.4): never the App and a rustode frontend together, and never two App instances.
 2. **Memory guard.** Before a run, check `MemAvailable` and don't start below what the scenario needs; the QA launcher refuses below 1,800 MB (`05-qa/suite/scenarios/run_scenario.sh:26-28`). During a run, abort below 700 MB available, as the QA watchdog does (`05-qa/suite/scenarios/run_scenario.sh:34-35`). The stress tests skip themselves when memory is short (`crates/workspace/tests/stress.rs:50-58`); run the large ones one at a time, with the App closed.
-3. **Never run the App in place.** Editor work never runs `01-app/VSCode-linux-x64/codium` from `01-app/`. Running it there lets Node write compile-cache files into evidence folder 01 (§0.1). On 2026-11-17, sessions run without `NODE_DISABLE_COMPILE_CACHE=1` added three such files under `resources/app/node-compile-cache/extension-host/`, and §0.6 did not notice, because `sha256sum -c` checks only the files the manifest lists ([`09-analises/0002`](09-analises/0002-entrada-virtual-wayland.md), "Limitations"; [`docs/lacunas.md`](docs/lacunas.md) G13). Benchmarks run a temporary copy instead, verified before each run. From the project root, in bash (tested on 2026-11-17: both checks printed nothing):
+3. **Never run the App in place.** Editor work never runs `01-app/VSCode-linux-x64/codium` from `01-app/`. Running it there lets Node write compile-cache files into evidence folder 01 (§0.1). On 2026-11-17, sessions run without `NODE_DISABLE_COMPILE_CACHE=1` added three such files under `resources/app/node-compile-cache/extension-host/`, and §0.6 did not notice, because `sha256sum -c` checks only the files the manifest lists ([`09-findings/0002`](09-findings/0002-virtual-wayland-input.md), "Limitations"; [`docs/gaps.md`](docs/gaps.md) G13). Benchmarks run a temporary copy instead, verified before each run. From the project root, in bash (tested on 2026-11-17: both checks printed nothing):
 
    ```bash
    R=$PWD
    A=$(mktemp -d -p /var/tmp rustode-app.XXXXXX)   # on disk: /tmp is a 3.8 GB tmpfs here, and the App takes 705 MB
    cp -a 01-app/VSCode-linux-x64 "$A/"
    cd "$A/VSCode-linux-x64"
-   sha256sum -c --quiet "$R/02-engenharia-reversa/manifesto-sha256.txt"   # silence = intact (§0.6)
-   diff <(find . -type f | sort) <(sed 's/^[0-9a-f]*  //' "$R/02-engenharia-reversa/manifesto-sha256.txt" | sort)   # silence = no file added or missing
+   sha256sum -c --quiet "$R/02-package-analysis/manifest-sha256.txt"   # silence = intact (§0.6)
+   diff <(find . -type f | sort) <(sed 's/^[0-9a-f]*  //' "$R/02-package-analysis/manifest-sha256.txt" | sort)   # silence = no file added or missing
    # … run the scenario against "$A/VSCode-linux-x64/codium", with an isolated profile (§3.1) …
    cd "$R" && rm -rf "$A"
    ```
@@ -419,7 +419,7 @@ The rustode editor is written in Rust, in `crates/` and `xtask/`. It reimplement
    - a named test, with the command that ran it;
    - a benchmark run, with its folder.
 2. **A measured number** comes with the exact command, the folder it ran from, the commit, the build profile (release or debug) and the date. **An estimated number** says where the estimate came from. For example, the stress budgets record each measured value with its date and build next to the budget (`crates/workspace/tests/stress.rs:85-110`).
-3. **A comparison is like for like:** the same scenario from the versioned list, on the same virtual display, with software rendering on both sides ([ADR 0024](docs/adr/0024-comparison-with-the-app.md)). Absolute times on the virtual display don't hold for the real session ([ADR 0006](docs/adr/0006-testes-em-tela-virtual.md)).
+3. **A comparison is like for like:** the same scenario from the versioned list, on the same virtual display, with software rendering on both sides ([ADR 0024](docs/adr/0024-comparison-with-the-app.md)). Absolute times on the virtual display don't hold for the real session ([ADR 0006](docs/adr/0006-tests-on-virtual-display.md)).
 4. **One run is not a result** (§0.4): report the repetitions and the percentiles.
 5. **The App copy is verified before a comparison** (§0.6, §11.5). A run with a harness error is named as such and is not evidence (§0.5).
 

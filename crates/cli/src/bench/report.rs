@@ -257,7 +257,7 @@ impl Report<'_> {
         if let Some(version) = &e.app_version {
             let _ = writeln!(
                 out,
-                "  App         {version} (02-engenharia-reversa/versao.txt)"
+                "  App         {version} (02-package-analysis/version.txt)"
             );
         }
         let _ = writeln!(

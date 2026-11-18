@@ -5,7 +5,7 @@
 
 ## Context
 
-A consistent history makes reviews and changelogs cheap, and pushing straight to `main` skips review and CI. It is not known whether the owner's plan offers server-side branch protection for a private repository ([`lacunas.md`](../lacunas.md) G19).
+A consistent history makes reviews and changelogs cheap, and pushing straight to `main` skips review and CI. It is not known whether the owner's plan offers server-side branch protection for a private repository ([`gaps.md`](../gaps.md) G19).
 
 ## Decision
 

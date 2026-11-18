@@ -20,4 +20,4 @@
 
 ## Verified by
 
-<Test run, `smoke.sh`, hash, or an analysis in `09-analises/`.>
+<Test run, `smoke.sh`, hash, or an analysis in `09-findings/`.>

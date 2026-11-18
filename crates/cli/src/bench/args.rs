@@ -20,7 +20,7 @@ Options:
   --side <SIDE>         both (default), rustode or app
   --scenarios <FILE>    the scenario list [default: bench/scenarios.toml]
   --out <DIR>           where run folders go [default: target/bench]
-  --project <DIR>       the folder with 01-app/ and 02-engenharia-reversa/ [default: .]
+  --project <DIR>       the folder with 01-app/ and 02-package-analysis/ [default: .]
   --app-copy-dir <DIR>  where the App copy and profiles go, on disk [default: the run folder]
   -h, --help            print this help
 

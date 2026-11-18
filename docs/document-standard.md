@@ -39,19 +39,19 @@ Precedence in filmcraft: `AGENTS.md` > `CLAUDE.md` > `docs/*`; `CONTRIBUTING.md`
 | `ROADMAP.md` | [`ROADMAP.md`](../ROADMAP.md) | same shape; "Owner decision" marks what depends on the owner |
 | `CONTRIBUTING.md`, `ATTRIBUTION.md`, `NOTICE` | [`CONTRIBUTING.md`](../CONTRIBUTING.md), [`ATTRIBUTION.md`](../ATTRIBUTION.md), [`NOTICE`](../NOTICE) | the categories became analyzed software, downloaded extensions, patches, screenshots, tools and runtime downloads |
 | (no docs index) | [`docs/README.md`](README.md) | added: filmcraft doesn't have one |
-| `docs/architecture.md`, `gaps.md`, `testing.md`, parity docs | [`arquitetura.md`](arquitetura.md), [`lacunas.md`](lacunas.md), [`qa.md`](qa.md), [`fonte-vs-pacote.md`](fonte-vs-pacote.md) | "parity" here is source × package |
+| `docs/architecture.md`, `gaps.md`, `testing.md`, parity docs | [`architecture.md`](architecture.md), [`gaps.md`](gaps.md), [`qa.md`](qa.md), [`source-vs-package.md`](source-vs-package.md) | "parity" here is source × package |
 | `docs/adr/` | [`docs/adr/`](adr/) with an index | 6 ADRs for the build decisions (3 accepted, 3 proposed) |
-| `docs/learning/` | [`docs/aprendizado/`](aprendizado/) | a short, numbered lesson format |
-| crate READMEs | [`docs/componentes/`](componentes/) + [`docs/modelos/componente.md`](modelos/componente.md) | one document per studied subsystem |
-| `.attribution` (sidecar per asset) | [`docs/modelos/proveniencia.md`](modelos/proveniencia.md) | a `.procedencia` sidecar for extracted or captured material |
-| (no analyses) | [`09-analises/`](../09-analises/) | numbered findings; out of `montar.sh`'s reach |
-| `.opencode/skills/` (generic) | [`.claude/skills/`](../.claude/skills/) (original) and [`.opencode/skills/`](../.opencode/skills/) (copy) | 7 analysis skills of its own + `ast-grep` and `grilling` copied from filmcraft + REA's `reverse-engineer-anything`. The original lives in `.claude/skills` (Claude Code), and `sincronizar-skills.sh` keeps the identical copy for OpenCode, without links |
+| `docs/learning/` | [`docs/learnings/`](learnings/) | a short, numbered lesson format |
+| crate READMEs | [`docs/components/`](components/) + [`docs/templates/component.md`](templates/component.md) | one document per studied subsystem |
+| `.attribution` (sidecar per asset) | [`docs/templates/provenance.md`](templates/provenance.md) | a `.provenance` sidecar for extracted or captured material |
+| (no analyses) | [`09-findings/`](../09-findings/) | numbered findings; out of `assemble.sh`'s reach |
+| `.opencode/skills/` (generic) | [`.claude/skills/`](../.claude/skills/) (original) and [`.opencode/skills/`](../.opencode/skills/) (copy) | 7 analysis skills of its own + `ast-grep` and `grilling` copied from filmcraft + REA's `reverse-engineer-anything`. The original lives in `.claude/skills` (Claude Code), and `sync-skills.sh` keeps the identical copy for OpenCode, without links |
 | `.serena/project.yml`, `.ai-memory.toml` | `.ai-memory.toml`, adapted | ai-memory scoped to `rustode`. Serena was configured too (TypeScript, later rust-analyzer as well) and removed at the owner's request on 2026-11-18 |
 | `.codegraph/` | created by the owner | indexing is the owner's decision (ROADMAP, next step 6) |
 | `.mcp.json` (the app's servers) | [`.mcp.json`](../.mcp.json) and [`opencode.json`](../opencode.json) with only REA | filmcraft's servers don't apply; CodeGraph and ai-memory are already global |
 | the `implement`, `tdd`, `code-review`, `to-tickets`, `grill-with-docs` and `wait-what` skills | not copied at first. With the editor, `implement`, `tdd`, `to-tickets` and `grill-with-docs` are in `.claude/skills/`, together with `grill-me` and `to-spec` (first commit `78aa4d5`; OpenCode copy `06e4dca`). `code-review` and `wait-what` are still not copied | the editor brought a git repository and code under development. Some of these skills still point to skills and files that this project does not have ([`AGENTS.md`](../AGENTS.md) §7) |
 
-**Language.** filmcraft writes its documents in English (except the pt-BR study guide). rustode first wrote them in Portuguese and, at the owner's request on 2026-11-16, switched to English. Folder and file names kept their Portuguese spelling, because `montar.sh` and the links depend on them.
+**Language.** filmcraft writes its documents in English (except the pt-BR study guide). rustode first wrote them in Portuguese and, at the owner's request on 2026-11-16, switched to English. Folder and file names kept their Portuguese spelling at first; on 2026-11-18, at the owner's request, every name was renamed to English (`montar.sh` → `assemble.sh`, `09-analises/` → `09-findings/`, `docs/modelos/` → `docs/templates/`, `02-engenharia-reversa/` → `02-package-analysis/`, `manifesto-sha256.txt` → `manifest-sha256.txt`, `fonte/arvore/` → `source/tree/`, …). Only names copied verbatim from the live sources stay in Portuguese (AGENTS.md, "Language").
 
 ## 3. filmcraft problems that were not copied
 

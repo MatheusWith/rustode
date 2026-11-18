@@ -47,7 +47,7 @@ pub(crate) struct Plan<'a> {
     pub cwd: PathBuf,
     /// `<out>/<run id>`.
     pub run_folder: PathBuf,
-    /// The rustode project with `01-app/` and `02-engenharia-reversa/`.
+    /// The rustode project with `01-app/` and `02-package-analysis/`.
     pub project: PathBuf,
     /// Where the App copy folder is created.
     pub copy_parent: PathBuf,
@@ -129,13 +129,12 @@ impl<'a> Plan<'a> {
 
     /// The SHA-256 manifest of the App.
     pub(crate) fn manifest(&self) -> PathBuf {
-        self.project
-            .join("02-engenharia-reversa/manifesto-sha256.txt")
+        self.project.join("02-package-analysis/manifest-sha256.txt")
     }
 
-    /// `codium --version` of the App, recorded by `montar.sh`.
+    /// `codium --version` of the App, recorded by `assemble.sh`.
     pub(crate) fn version_file(&self) -> PathBuf {
-        self.project.join("02-engenharia-reversa/versao.txt")
+        self.project.join("02-package-analysis/version.txt")
     }
 
     /// The generated fixture.

@@ -9,17 +9,17 @@ Every difference from the original VS Code has a traceable cause: a patch, a JSO
 
 Sources (relative to the project root):
 
-- `02-engenharia-reversa/fonte/port-aplicado.diff`: everything that changed from the base commit to the build tree
+- `02-package-analysis/source/port-applied.diff`: everything that changed from the base commit to the build tree
 - `06-port/patches/orig/` (as it came from VSCodium) and `06-port/patches/port/` (adapted to 1.147, or port-only, 96 to 99)
 - `06-port/PORT-NOTES.md`: the reason for each adaptation and local decision
 - `docs/patches.md`: a table of every patch and its status
-- `02-engenharia-reversa/product.json`: the packaged `product.json`
+- `02-package-analysis/product.json`: the packaged `product.json`
 
 ## Process
 
 ### 1. Describe the difference
 
-One sentence: "in the app, X happens; in VS Code, Y happens". If the difference came from a test, cite the run (`08-testes-do-build/<run>/`).
+One sentence: "in the app, X happens; in VS Code, Y happens". If the difference came from a test, cite the run (`08-build-tests/<run>/`).
 
 ### 2. Find the responsible code
 
@@ -28,7 +28,7 @@ Use the `find-minified-symbol` skill or search for anchors directly in the tree.
 ### 3. Check whether the file was changed
 
 ```sh
-grep -n '^diff --git a/<relative-path>' 02-engenharia-reversa/fonte/port-aplicado.diff
+grep -n '^diff --git a/<relative-path>' 02-package-analysis/source/port-applied.diff
 grep -ln '<relative-path>' 06-port/patches/orig/*.patch 06-port/patches/orig/linux/*.patch 06-port/patches/port/*.patch 06-port/patches/port/linux/*.patch
 ```
 
@@ -40,7 +40,7 @@ grep -ln '<relative-path>' 06-port/patches/orig/*.patch 06-port/patches/orig/lin
 ### 4. Find the reason
 
 - Patch in `patches/port/`: look up its name in `06-port/PORT-NOTES.md` (the patch table or "Decisões locais").
-- Patch only in `patches/orig/`: it is VSCodium's, unchanged; the reason is VSCodium's intent (`07-vscodium-origem/docs/`).
+- Patch only in `patches/orig/`: it is VSCodium's, unchanged; the reason is VSCodium's intent (`07-vscodium-source/docs/`).
 - Patch 96 to 99 or a local decision: also see `docs/adr/`.
 
 ### 5. Report

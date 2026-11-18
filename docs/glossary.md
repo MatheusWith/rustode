@@ -10,18 +10,18 @@
 | **Evidence** | anything in folders 01 to 08, citable by path, line, hash or run (AGENTS.md §0) |
 | **Frontend** | an editor UI that drives the workspace crate: the CLI, the TUI or the GUI (AGENTS.md §11.1) |
 | **Gap Analysis** | the ROADMAP section that compares rustode with VS Code: what is implemented (and how it differs), what is in progress and what is in the backlog |
-| **Live source** | the original folders outside rustode (`~/Projects/VSCode-linux-x64`, `vscode-vscodium`, `vscodium-port`, `vscode/qa`), which `montar.sh` copies from |
-| **Manifest** | `02-engenharia-reversa/manifesto-sha256.txt`: the SHA-256 of every file in the app |
+| **Live source** | the original folders outside rustode (`~/Projects/VSCode-linux-x64`, `vscode-vscodium`, `vscodium-port`, `vscode/qa`), which `assemble.sh` copies from |
+| **Manifest** | `02-package-analysis/manifest-sha256.txt`: the SHA-256 of every file in the app |
 | **Measured / estimated** | a label that every number must carry (AGENTS.md §0.4) |
 | **Milestone** | one of the ten steps of the editor's Phase 1, M0 to M9 (ADR 0018) |
 | **NLS** | VS Code's translatable strings (`localize(...)`). In the bundle they become indexes, and the strings live in `nls.messages.js` |
-| **out-formatado** | `02-engenharia-reversa/out-formatado/`: the bundles reformatted by esbuild; names stay minified |
+| **out-formatted** | `02-package-analysis/out-formatted/`: the bundles reformatted by esbuild; names stay minified |
 | **Port** | the adaptation of VSCodium's patches and scripts (written for 1.143.1) to VS Code 1.147.0 |
 | **Port patch** | a patch in `06-port/patches/port/`: either adapted from VSCodium to 1.147 or exclusive to the port (prefix 96 to 99) |
 | **Reference** | Arch's `code` 1.138.0, used as the baseline in the tests |
-| **Run** | a test result folder (`08-testes-do-build/<date>-<label>/`); runs with `INVALIDA` in the name are not evidence |
+| **Run** | a test result folder (`08-build-tests/<date>-<label>/`); runs with `INVALIDA` in the name are not evidence |
 | **Scenario** | an operation measured the same way on rustode and on the App, from the versioned list of ADR 0024 |
 | **Seam** | a public boundary where the editor's tests observe behavior: the workspace API, input to frame, or the CLI process (ADR 0019) |
-| **Source tree** | `02-engenharia-reversa/fonte/arvore/`: the exact code that produced the app (commit + patches + post-install steps), without `node_modules` |
+| **Source tree** | `02-package-analysis/source/tree/`: the exact code that produced the app (commit + patches + post-install steps), without `node_modules` |
 | **Virtual display** | the `kwin_wayland --virtual` compositor where the tests open the app without it showing on the desktop |
 | **Workspace crate** | `rustode-workspace`: the editor's single in-process API, and the only rustode crate the frontends depend on (ADR 0013) |

@@ -7,8 +7,8 @@
 
 The App is a Linux x64 build (README, "What it is"). Everything the comparison depends on is Linux-specific:
 
-- the virtual display is `kwin_wayland --virtual` ([ADR 0006](0006-testes-em-tela-virtual.md));
-- the keystroke-injection paths are KWin's ([`09-analises/0002`](../../09-analises/0002-entrada-virtual-wayland.md));
+- the virtual display is `kwin_wayland --virtual` ([ADR 0006](0006-tests-on-virtual-display.md));
+- the keystroke-injection paths are KWin's ([`09-findings/0002`](../../09-findings/0002-virtual-wayland-input.md));
 - the QA harness reads `/proc/meminfo` for its memory guard (`05-qa/suite/scenarios/run_scenario.sh:26-28`).
 
 Windows and macOS builds would multiply the CI and benchmark work, and there is no baseline on those systems to compare against.

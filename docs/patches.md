@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** minor (translated to English) · **Target:** VSCodium `ca7f7b44b5e5` ported to VS Code 1.147.0
 
-These are all the port's patches. From VSCodium: 32 applied unchanged, 19 adapted to 1.147, 6 skipped and 2 JSON actions; plus 4 exclusive to the port. The reason for each adaptation is in [`06-port/PORT-NOTES.md`](../06-port/PORT-NOTES.md). The diff of everything applied is in [`02-engenharia-reversa/fonte/port-aplicado.diff`](../02-engenharia-reversa/fonte/port-aplicado.diff).
+These are all the port's patches. From VSCodium: 32 applied unchanged, 19 adapted to 1.147, 6 skipped and 2 JSON actions; plus 4 exclusive to the port. The reason for each adaptation is in [`06-port/PORT-NOTES.md`](../06-port/PORT-NOTES.md). The diff of everything applied is in [`02-package-analysis/source/port-applied.diff`](../02-package-analysis/source/port-applied.diff).
 
 Each version lives in one of two places:
 - `06-port/patches/orig/<patch>`: as it came from VSCodium;

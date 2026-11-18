@@ -238,7 +238,7 @@ mod tests {
         let inside = Path::new("/nonexistent/project/target/../01-app/x");
         assert_eq!(evidence_folder(project, inside).as_deref(), Some("01-app"));
         assert_eq!(
-            evidence_folder(project, Path::new("/nonexistent/project/09-analises")),
+            evidence_folder(project, Path::new("/nonexistent/project/09-findings")),
             None
         );
         assert_eq!(

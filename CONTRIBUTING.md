@@ -1,34 +1,34 @@
 # Contributing to rustode
 
-Thanks for helping. rustode holds two kinds of work: the study of the App (VSCodium 1.147.0, in `09-analises/` and `docs/`) and the rustode editor (Rust, in `crates/` and `xtask/`). Before you start:
+Thanks for helping. rustode holds two kinds of work: the study of the App (VSCodium 1.147.0, in `09-findings/` and `docs/`) and the rustode editor (Rust, in `crates/` and `xtask/`). Before you start:
 
 1. **Read [`AGENTS.md`](AGENTS.md).** Two rules outweigh all the others:
-   - the folders `01-app/` to `08-testes-do-build/` are read-only evidence (§0.1);
+   - the folders `01-app/` to `08-build-tests/` are read-only evidence (§0.1);
    - every claim cites its evidence or is marked as a hypothesis (§0.3).
 
    Editor work also follows §11.
 2. **Choose what to work on.**
-   - For the study, start with [`ROADMAP.md`](ROADMAP.md) and [`docs/lacunas.md`](docs/lacunas.md).
+   - For the study, start with [`ROADMAP.md`](ROADMAP.md) and [`docs/gaps.md`](docs/gaps.md).
    - For the editor, start with the ROADMAP's "Editor: Phase 1 milestones" and "Gap Analysis against VS Code", and with the ADR of the component you touch ([`docs/adr/`](docs/adr/)).
 3. **Record things in the right place.**
-   - Findings, including benchmark reports, go in [`09-analises/`](09-analises/).
+   - Findings, including benchmark reports, go in [`09-findings/`](09-findings/).
    - Decisions go in [`docs/adr/`](docs/adr/).
    - Open questions go in the gaps.
    - Behavior studied in VS Code and new dependencies go in [`ATTRIBUTION.md`](ATTRIBUTION.md).
 
-   The templates are in [`docs/modelos/`](docs/modelos/). Write every document in English.
+   The templates are in [`docs/templates/`](docs/templates/). Write every document in English.
 
 More reading:
 - [`AGENTS.md`](AGENTS.md) §5–9 and §11: work sequence, tools, skills, where to record, editor rules;
 - [`docs/README.md`](docs/README.md): index;
-- [`docs/arquitetura.md`](docs/arquitetura.md);
+- [`docs/architecture.md`](docs/architecture.md);
 - [`06-port/PORT-NOTES.md`](06-port/PORT-NOTES.md).
 
 ## Editor code: how the work is done
 
 - **Tests first, at the highest seam** ([ADR 0019](docs/adr/0019-tests-at-three-seams.md)). The seams are the workspace API (`crates/workspace/tests/`), input to frame per frontend (snapshots, from M2 on) and the CLI process (`crates/cli/tests/`, `xtask/tests/`). Tests assert on behavior, not internals. They are deterministic and use no network, real home directory or real profile.
 - **Frontends go through the workspace** ([ADR 0013](docs/adr/0013-crates-and-workspace-api.md), [ADR 0014](docs/adr/0014-in-process-frontends.md)). The CLI, TUI and GUI depend on no rustode crate other than `rustode-workspace`, and `xtask/tests/frontend_deps.rs` fails otherwise. They hold no business logic.
-- **Behavior studied in VS Code is reimplemented, never translated** ([ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md)). Study it in the source tree (`02-engenharia-reversa/fonte/arvore/`), then credit it in three places: a row of the `ATTRIBUTION.md` table "Behavior studied and reimplemented by the editor", the doc comment of the file that implements it, and the component's ADR.
+- **Behavior studied in VS Code is reimplemented, never translated** ([ADR 0009](docs/adr/0009-mit-and-reimplemented-behavior.md)). Study it in the source tree (`02-package-analysis/source/tree/`), then credit it in three places: a row of the `ATTRIBUTION.md` table "Behavior studied and reimplemented by the editor", the doc comment of the file that implements it, and the component's ADR.
 - **Dependencies** ([ADR 0010](docs/adr/0010-ecosystem-crates-allowed.md)). Declare them once in `[workspace.dependencies]`. Each one needs a license that `deny.toml` allows and a row in `ATTRIBUTION.md`, "Editor dependencies".
 - **Numbers** ([`AGENTS.md`](AGENTS.md) §11.6). A measured number comes with its command, folder, commit, build profile and date. An estimated one says where it came from.
 - **Benchmarks against the App** ([`AGENTS.md`](AGENTS.md) §11.5, [ADR 0024](docs/adr/0024-comparison-with-the-app.md)). Run one editor instance at a time, under the memory guard, and always on a verified temporary copy of the App, never in place.

@@ -1,6 +1,6 @@
 # Components
 
-One document per studied subsystem, `<area>.md`, following the [`../modelos/componente.md`](../modelos/componente.md) template. The list of processes and bundles, for choosing where to start, is in [`../arquitetura.md`](../arquitetura.md).
+One document per studied subsystem, `<area>.md`, following the [`../templates/component.md`](../templates/component.md) template. The list of processes and bundles, for choosing where to start, is in [`../architecture.md`](../architecture.md).
 
 No components are documented yet. Candidates, in suggested order (gap G1):
 

@@ -18,7 +18,7 @@
 </p>
 
 > [!NOTE]
-> This repository holds two things: the **rustode editor** (`crates/`, `xtask/`) and the **study** of the VSCodium build it is measured against (`01-app/` to `09-analises/`). Everything in `01-app/` to `08-testes-do-build/` is a **real, read-only copy**, rebuilt by [`montar.sh`](montar.sh). The rules for both are in [`AGENTS.md`](AGENTS.md); the editor's are in its §11. rustode is not VS Code or VSCodium, and is not affiliated with either.
+> This repository holds two things: the **rustode editor** (`crates/`, `xtask/`) and the **study** of the VSCodium build it is measured against (`01-app/` to `09-findings/`). Everything in `01-app/` to `08-build-tests/` is a **real, read-only copy**, rebuilt by [`assemble.sh`](assemble.sh). The rules for both are in [`AGENTS.md`](AGENTS.md); the editor's are in its §11. rustode is not VS Code or VSCodium, and is not affiliated with either.
 
 <p align="center">
   <a href="#edit">Edit</a> · <a href="#find-and-search">Search</a> · <a href="#syntax">Syntax</a> · <a href="#language-servers">Language servers</a> · <a href="#extensions">Extensions</a> · <a href="#two-frontends-one-workspace">Frontends</a> · <a href="#everything-is-a-command">Commands</a> · <a href="#the-study">The study</a> · <a href="#get-started">Get started</a> · <a href="#documentation">Docs</a> · <a href="#status">Status</a>
@@ -133,19 +133,19 @@ rustode is measured against a local build of **VSCodium 1.147.0**:
 - the VSCodium `ca7f7b44b5e5` patches, ported from 1.143.1;
 - Electron 43.8.6 (Chromium 150, Node 24.22.1), as a `codium` binary for Linux x64.
 
-The repository keeps the built app, **the exact source tree that produced it**, the patches and the QA runs. The source tree is the reference for every behavior rustode reimplements ([ADR 0004](docs/adr/0004-arvore-fonte-e-a-referencia.md)).
+The repository keeps the built app, **the exact source tree that produced it**, the patches and the QA runs. The source tree is the reference for every behavior rustode reimplements ([ADR 0004](docs/adr/0004-source-tree-is-the-reference.md)).
 
 **What the study found so far:**
 
 | Finding | Evidence |
 |---|---|
-| No Microsoft service is contacted. The only hosts are Open VSX, the Eclipse Foundation's malicious-extension list (GitHub) and Electron's spell-checker dictionary (Google) | [`09-analises/0001`](09-analises/0001-trafego-de-rede.md) |
+| No Microsoft service is contacted. The only hosts are Open VSX, the Eclipse Foundation's malicious-extension list (GitHub) and Electron's spell-checker dictionary (Google) | [`09-findings/0001`](09-findings/0001-network-traffic.md) |
 | AI ships turned off (`chat.disableAIFeatures: true`), which also hides the MCP commands | patch `00-copilot-fix-action-condition` |
-| Without a recorded commit, the agent host looks for modules in `node_modules` instead of `node_modules.asar.unpacked` | [`docs/aprendizado/0001`](docs/aprendizado/0001-commit-muda-caminho-dos-modulos.md) |
-| Keystrokes can be injected on the virtual display through libei or `org_kde_kwin_fake_input`; `zwp_virtual_keyboard_v1` is not offered | [`09-analises/0002`](09-analises/0002-entrada-virtual-wayland.md) |
-| The built app starts faster than the 1.138 reference: workbench ready at p50 1905 ms against 2232 ms (10 repetitions, same virtual display) | [`08-testes-do-build/`](08-testes-do-build/RESUMO.md) |
+| Without a recorded commit, the agent host looks for modules in `node_modules` instead of `node_modules.asar.unpacked` | [`docs/learnings/0001`](docs/learnings/0001-commit-changes-module-paths.md) |
+| Keystrokes can be injected on the virtual display through libei or `org_kde_kwin_fake_input`; `zwp_virtual_keyboard_v1` is not offered | [`09-findings/0002`](09-findings/0002-virtual-wayland-input.md) |
+| The built app starts faster than the 1.138 reference: workbench ready at p50 1905 ms against 2232 ms (10 repetitions, same virtual display) | [`08-build-tests/`](08-build-tests/SUMMARY.md) |
 
-**Patches:** 55 applied: 32 VSCodium patches unchanged, 19 adapted to 1.147, and 4 exclusive to the port (96 to 99). Another 6 were skipped because they only serve other architectures ([`docs/patches.md`](docs/patches.md), [`06-port/PORT-NOTES.md`](06-port/PORT-NOTES.md)). **Processes and bundles:** [`docs/arquitetura.md`](docs/arquitetura.md). **How the build was made:** `06-port/` runs `apply.sh` → `install.sh` → `finish.sh` → `build.sh`, under a memory cap ([`docs/build.md`](docs/build.md)).
+**Patches:** 55 applied: 32 VSCodium patches unchanged, 19 adapted to 1.147, and 4 exclusive to the port (96 to 99). Another 6 were skipped because they only serve other architectures ([`docs/patches.md`](docs/patches.md), [`06-port/PORT-NOTES.md`](06-port/PORT-NOTES.md)). **Processes and bundles:** [`docs/architecture.md`](docs/architecture.md). **How the build was made:** `06-port/` runs `apply.sh` → `install.sh` → `finish.sh` → `build.sh`, under a memory cap ([`docs/build.md`](docs/build.md)).
 
 <details>
 <summary><strong>Folders of the study</strong></summary>
@@ -153,13 +153,13 @@ The repository keeps the built app, **the exact source tree that produced it**, 
 | Folder | Contents |
 |---|---|
 | `01-app/VSCode-linux-x64/` | the packaged app: the `codium` binary and `resources/app` (`out/`, `node_modules.asar`, 93 extensions) |
-| `03-documentos/` | QA documents, port notes, VSCodium documentation and network reports |
-| `04-fotos/` | every test screenshot |
+| `03-documents/` | QA documents, port notes, VSCodium documentation and network reports |
+| `04-screenshots/` | every test screenshot |
 | `05-qa/` | the QA project: `docs/`, `suite/`, `results/` and its git history |
 | `06-port/` | the port scripts, original and adapted patches, and the logs |
-| `07-vscodium-origem/` | the VSCodium the port started from |
-| `08-testes-do-build/` | the test runs on the built app (from 2026-11-16 on), with `RESUMO.md` |
-| `09-analises/` | **this project's findings**, the only study folder written here |
+| `07-vscodium-source/` | the VSCodium the port started from |
+| `08-build-tests/` | the test runs on the built app (from 2026-11-16 on), with `SUMMARY.md` |
+| `09-findings/` | **this project's findings**, the only study folder written here |
 
 Every file in 01 to 08 is a real copy, with no symbolic or hard links. What each artifact is for is in [`AGENTS.md`](AGENTS.md) §10.
 
@@ -188,10 +188,10 @@ Settings live in `$XDG_CONFIG_HOME/rustode/User/` (override with `RUSTODE_USER_D
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | commits, branches and checks; what runs when; the review checklist |
 | [`ROADMAP.md`](ROADMAP.md) | milestones M0–M9, key numbers, the Gap Analysis against VS Code, the progress log |
 | [`docs/adr/`](docs/adr/) | decisions: the study's (0001–0006) and the editor's (0007 on) |
-| [`docs/arquitetura.md`](docs/arquitetura.md) · [`docs/fonte-vs-pacote.md`](docs/fonte-vs-pacote.md) | the app's processes and layers · the origin of each packaged file |
+| [`docs/architecture.md`](docs/architecture.md) · [`docs/source-vs-package.md`](docs/source-vs-package.md) | the app's processes and layers · the origin of each packaged file |
 | [`docs/build.md`](docs/build.md) · [`docs/patches.md`](docs/patches.md) · [`docs/qa.md`](docs/qa.md) | how the app was built · every patch · test results |
-| [`docs/lacunas.md`](docs/lacunas.md) · [`docs/glossario.md`](docs/glossario.md) | open questions (G1…) · project terms |
-| [`docs/modelos/`](docs/modelos/) · [`docs/aprendizado/`](docs/aprendizado/) | document templates · reusable lessons |
+| [`docs/gaps.md`](docs/gaps.md) · [`docs/glossary.md`](docs/glossary.md) | open questions (G1…) · project terms |
+| [`docs/templates/`](docs/templates/) · [`docs/learnings/`](docs/learnings/) | document templates · reusable lessons |
 | [`ATTRIBUTION.md`](ATTRIBUTION.md) · [`NOTICE`](NOTICE) | provenance, the behavior studied and reimplemented, the editor's dependencies |
 
 ## Status

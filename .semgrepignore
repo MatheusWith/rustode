@@ -2,13 +2,13 @@
 .semgrep/
 # evidence and generated folders (never scanned, never versioned)
 /01-app/
-/02-engenharia-reversa/
-/03-documentos/
-/04-fotos/
+/02-package-analysis/
+/03-documents/
+/04-screenshots/
 /05-qa/
 /06-port/
-/07-vscodium-origem/
-/08-testes-do-build/
+/07-vscodium-source/
+/08-build-tests/
 /target/
 /.codegraph/
 /.scratch/
