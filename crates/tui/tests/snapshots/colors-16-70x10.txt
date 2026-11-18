@@ -5,10 +5,20 @@
  1|   1 fn main() {
      0-4   Reset/Reset BOLD
      5-6   Reset/Blue NONE
-     7-69  Reset/Reset NONE
+     7-7   Reset/Reset NONE
+     8-11  Yellow/Reset NONE
+    12-69  Reset/Reset NONE
  2|   2     println!("héllo 日本");
      0-4   DarkGray/Reset NONE
-     5-69  Reset/Reset NONE
+     5-8   Reset/Reset NONE
+     9-16  Yellow/Reset NONE
+    17-17  Reset/Reset NONE
+    18-25  LightRed/Reset NONE
+    26-26  Reset/Reset NONE
+    27-27  LightRed/Reset NONE
+    28-28  Reset/Reset NONE
+    29-29  LightRed/Reset NONE
+    30-69  Reset/Reset NONE
  3|   3 }
      0-4   DarkGray/Reset NONE
      5-69  Reset/Reset NONE

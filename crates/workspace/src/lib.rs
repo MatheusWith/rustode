@@ -19,7 +19,7 @@ pub use config::{
 };
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
-pub use document::{Document, DocumentId};
+pub use document::{Document, DocumentId, Highlight};
 pub use explorer::{Explorer, ExplorerRow};
 pub use extensions::{
     ExtensionError, ExtensionEvent, ExtensionOperation, ExtensionSearch, ExtensionSummary,
@@ -32,6 +32,9 @@ pub use lsp::{Marker, MarkerSeverity, Problem, ProblemCounts, ServerState, Serve
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
+/// What a highlighted run of text is; [`TokenKind::dark_modern`] gives its
+/// color in Dark Modern.
+pub use rustode_syntax::TokenKind;
 /// Shared tracing and metrics setup, re-exported so frontends depend on the
 /// workspace alone: call `trace::init_from_env()` at startup and record
 /// input-to-frame latency with `trace::LatencyRecorder`.
@@ -683,12 +686,25 @@ impl Workspace {
         Ok(())
     }
 
+    /// After an edit: brings the syntax tree in step with the text, then
+    /// reports the change.
     fn changed(&mut self, id: DocumentId, changed: bool) {
+        if let Ok(document) = self.document_mut(id) {
+            document.sync_syntax();
+        }
         if changed {
             self.events.push(Event::DocumentChanged { id });
             self.lsp_changed(id);
         }
     }
+}
+
+/// The S-expression of a fresh parse of `text` as language `language_id`
+/// (`rust`), with no earlier tree reused; `None` for languages without a
+/// grammar. [`Document::syntax_tree`] gives a document's own tree.
+#[must_use]
+pub fn syntax_tree_of(language_id: &str, text: &str) -> Option<String> {
+    rustode_syntax::sexp_of(language_id, text)
 }
 
 /// A count setting such as `editor.tabSize`: a whole number from 1 to 100,

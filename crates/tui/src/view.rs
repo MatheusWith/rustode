@@ -6,7 +6,8 @@
 //! `:1199-1209`): C0 controls as control pictures (U+2400 + code), DEL as ␡,
 //! and bidirectional formatting characters as `[U+XXXX]`. Unicode line and
 //! paragraph separators and NEL, which do not end lines, are shown the same
-//! way so they cannot hide in a terminal.
+//! way so they cannot hide in a terminal. Syntax highlights are asked of the
+//! workspace for the visible lines only.
 //!
 //! Diagnostics are underlined over the range the workspace gives (an empty
 //! one at a line's end takes one cell), and the gutter shows the line's most
@@ -21,7 +22,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use rustode_workspace::{
-    Document, DocumentId, Eol, Marker, MarkerSeverity, Position, Selection, ServerState,
+    Document, DocumentId, Eol, Highlight, Marker, MarkerSeverity, Position, Selection, ServerState,
 };
 use std::collections::HashMap;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -542,8 +543,9 @@ struct RowContext<'a> {
     tab_size: usize,
     left: usize,
     width: usize,
-    selection: Style,
-    secondary_cursor: Style,
+    theme: Theme,
+    /// The highlights of the visible lines, sorted.
+    highlights: Vec<Highlight>,
     /// The diagnostics touching the visible lines, with their underline.
     markers: Vec<(Marker, Style)>,
 }
@@ -656,8 +658,8 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         tab_size,
         left: view.left,
         width,
-        selection: app.theme.selection,
-        secondary_cursor: app.theme.secondary_cursor,
+        theme: app.theme,
+        highlights: document.highlights(view.top..view.top + height),
         markers,
     };
     let buffer = frame.buffer_mut();
@@ -740,8 +742,18 @@ fn marker_style(context: &RowContext<'_>, offset: usize) -> Option<Style> {
         .map(|(_, style)| *style)
 }
 
-/// Selected text and secondary cursors get the theme's styles; the primary
-/// cursor is the terminal's own cursor.
+/// The token style of the char at `offset`, plain outside highlights.
+fn token_at(context: &RowContext<'_>, offset: usize) -> Style {
+    let highlights = &context.highlights;
+    let index = highlights.partition_point(|h| h.range.end <= offset);
+    match highlights.get(index) {
+        Some(h) if h.range.start <= offset => context.theme.token(h.kind),
+        _ => Style::new(),
+    }
+}
+
+/// Text takes its token style; selected text and secondary cursors get the
+/// theme's styles; the primary cursor is the terminal's own cursor.
 fn style_at(context: &RowContext<'_>, offset: usize) -> Style {
     let selected = context.selections.iter().any(|s| {
         let range = s.range();
@@ -751,12 +763,13 @@ fn style_at(context: &RowContext<'_>, offset: usize) -> Style {
         .selections
         .iter()
         .any(|s| s.is_empty() && s.head == offset && *s != context.primary);
+    let token = token_at(context, offset);
     if secondary_cursor {
-        context.secondary_cursor
+        context.theme.secondary_cursor
     } else if selected {
-        context.selection
+        context.theme.selected(token)
     } else {
-        Style::new()
+        token
     }
 }
 
@@ -773,9 +786,9 @@ fn end_style(context: &RowContext<'_>, end: usize, breaks: bool) -> Option<Style
         .iter()
         .any(|s| s.is_empty() && s.head == end && *s != context.primary);
     if cursor {
-        Some(context.secondary_cursor)
+        Some(context.theme.secondary_cursor)
     } else {
-        break_selected.then_some(context.selection)
+        break_selected.then_some(context.theme.selection)
     }
 }
 

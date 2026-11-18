@@ -9,7 +9,7 @@
 //! the next occurrence follows `editor.action.addSelectionToNextFindMatch`
 //! (`src/vs/editor/contrib/multicursor/browser/multicursor.ts:355-410`, `:592-620`).
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, ByteEdit};
 use crate::history::{Change, EditKind, History, Step};
 use crate::selection::{Position, Selection, Selections};
 use std::fmt;
@@ -121,6 +121,9 @@ pub struct Editor {
     /// vertical moves, even across shorter lines (VS Code keeps the same
     /// information as `leftoverVisibleColumns`).
     goal_columns: Option<Vec<usize>>,
+    /// Every change to the text since the last [`Editor::take_byte_edits`],
+    /// once [`Editor::record_byte_edits`] turned the log on.
+    byte_edits: Option<Vec<ByteEdit>>,
 }
 
 impl Editor {
@@ -137,6 +140,29 @@ impl Editor {
     #[must_use]
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    /// Starts logging every change to the text in bytes (edits, undo and
+    /// redo alike), for an incremental parser to replay with
+    /// [`Editor::take_byte_edits`].
+    pub fn record_byte_edits(&mut self) {
+        self.byte_edits.get_or_insert_with(Vec::new);
+    }
+
+    /// The changes logged since the last call, oldest first; empty when the
+    /// log is off.
+    pub fn take_byte_edits(&mut self) -> Vec<ByteEdit> {
+        self.byte_edits
+            .as_mut()
+            .map_or_else(Default::default, std::mem::take)
+    }
+
+    /// Replaces `range` with `text`, logging the change if the log is on.
+    fn splice(&mut self, range: Range, text: &str) {
+        let edit = self.buffer.splice(range, text);
+        if let Some(log) = self.byte_edits.as_mut() {
+            log.push(edit);
+        }
     }
 
     /// All selections, sorted by position and never overlapping.
@@ -419,11 +445,11 @@ impl Editor {
             return false;
         };
         for change in step.changes.iter().rev() {
-            self.buffer.remove(Range::new(
+            let inserted = Range::new(
                 change.offset,
                 change.offset + change.inserted.chars().count(),
-            ));
-            self.buffer.insert(change.offset, &change.removed);
+            );
+            self.splice(inserted, &change.removed);
         }
         self.restore(step, true);
         true
@@ -435,11 +461,11 @@ impl Editor {
             return false;
         };
         for change in &step.changes {
-            self.buffer.remove(Range::new(
+            let removed = Range::new(
                 change.offset,
                 change.offset + change.removed.chars().count(),
-            ));
-            self.buffer.insert(change.offset, &change.inserted);
+            );
+            self.splice(removed, &change.inserted);
         }
         self.restore(step, false);
         true
@@ -585,8 +611,7 @@ impl Editor {
     /// Builds the change replacing `range` with `text`, and applies it.
     fn change(&mut self, range: Range, text: &str) -> Change {
         let removed = self.buffer.slice(range);
-        self.buffer.remove(range);
-        self.buffer.insert(range.start, text);
+        self.splice(range, text);
         Change {
             offset: range.start,
             removed,
@@ -611,8 +636,7 @@ impl Editor {
             rest = split_chars(tail, range.len()).1;
             at = range.end;
         }
-        self.buffer.remove(span);
-        self.buffer.insert(span.start, &inserted);
+        self.splice(span, &inserted);
         Change {
             offset: span.start,
             removed,
@@ -684,6 +708,27 @@ mod tests {
         editor.set_cursor(1).expect("cursor");
         assert!(editor.delete_right());
         assert_eq!(editor.buffer().text(), "ab");
+    }
+
+    #[test]
+    fn the_byte_edit_log_replays_edits_undo_and_redo() {
+        let mut editor = Editor::new("aé");
+        assert!(editor.take_byte_edits().is_empty(), "off by default");
+        editor.type_text("x");
+        assert!(editor.take_byte_edits().is_empty(), "still off");
+        editor.record_byte_edits();
+        editor.set_cursor(3).expect("cursor");
+        editor.type_text("\n");
+        assert!(editor.undo());
+        assert!(editor.redo());
+        let edits = editor.take_byte_edits();
+        let spans: Vec<_> = edits
+            .iter()
+            .map(|e| (e.start.offset, e.old_end.offset, e.new_end.offset))
+            .collect();
+        assert_eq!(spans, [(4, 4, 5), (4, 5, 4), (4, 4, 5)]);
+        assert_eq!((edits[0].new_end.line, edits[0].new_end.column), (1, 0));
+        assert!(editor.take_byte_edits().is_empty(), "taken");
     }
 
     #[test]

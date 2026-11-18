@@ -13,6 +13,10 @@
 //! (`src/vs/platform/theme/common/colors/editorColors.ts:121-123`,
 //! `src/vs/editor/common/core/editorColorRegistry.ts:22`).
 //!
+//! Syntax highlights are asked of the workspace for the visible lines only,
+//! and each line is laid out in colored sections, with Dark Modern's token
+//! colors (`TokenKind::dark_modern`).
+//!
 //! Diagnostics are squiggled under their range, an empty one one char
 //! wide, in their severity's color (see `crate::problems`).
 //!
@@ -27,7 +31,9 @@ use eframe::egui::{
     emath::TSTransform,
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
-use rustode_workspace::{Document, DocumentId, Marker, Position, Selection, Workspace};
+use rustode_workspace::{
+    Document, DocumentId, Highlight, Marker, Position, Selection, TokenKind, Workspace,
+};
 use std::sync::Arc;
 
 /// Font size of the text, in points.
@@ -415,15 +421,61 @@ fn reveal(ui: &Ui, doc: &Document, layout: &Layout, view: &mut View) {
     }
 }
 
-/// The lines in view, read from the workspace one by one.
+/// The color of text of token kind `kind`.
+fn token_color(kind: TokenKind) -> Color32 {
+    let [_, r, g, b] = kind.dark_modern().to_be_bytes();
+    Color32::from_rgb(r, g, b)
+}
+
+/// A line laid out in colored sections: `highlights` are the document's,
+/// sorted, and `start` is the line's first char.
+fn layout_row(
+    ui: &Ui,
+    display: &DisplayLine,
+    layout: &Layout,
+    highlights: &[Highlight],
+    start: usize,
+) -> Arc<Galley> {
+    let format = |color| TextFormat::simple(layout.font.clone(), color);
+    let mut job = LayoutJob {
+        break_on_newline: false,
+        ..LayoutJob::default()
+    };
+    let mut done = 0;
+    let first = highlights.partition_point(|h| h.range.end <= start);
+    for highlight in &highlights[first..] {
+        let from = display.byte_index(highlight.range.start.saturating_sub(start));
+        let to = display.byte_index(highlight.range.end - start);
+        if from >= display.text.len() {
+            break;
+        }
+        job.append(&display.text[done..from], 0.0, format(FOREGROUND));
+        job.append(
+            &display.text[from..to],
+            0.0,
+            format(token_color(highlight.kind)),
+        );
+        done = to;
+    }
+    job.append(&display.text[done..], 0.0, format(FOREGROUND));
+    if display.truncated {
+        job.append("…", 0.0, format(FOREGROUND));
+    }
+    ui.painter().layout_job(job)
+}
+
+/// The lines in view, read from the workspace one by one, with their
+/// highlights.
 fn rows(ui: &Ui, doc: &Document, layout: &Layout, view: &View) -> Vec<Row> {
     let visible = lines_covering(layout.text.height() + view.offset);
     let end = (view.top + visible).min(doc.line_count());
+    let highlights = doc.highlights(view.top..end);
     (view.top..end)
         .map(|line| {
             let text = doc.line(line);
             let display = DisplayLine::new(&text, layout.tab_size);
-            let galley = layout_line(ui, &display, layout);
+            let start = doc.offset_of(Position::new(line, 0));
+            let galley = layout_row(ui, &display, layout, &highlights, start);
             Row {
                 line,
                 top: Row::top_of(layout, view, line),
