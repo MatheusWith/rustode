@@ -18,6 +18,8 @@ pub(crate) struct DisplayLine {
     pub(crate) text: String,
     /// Where each drawn column starts in `text` (in chars), plus the end.
     starts: Vec<usize>,
+    /// The same in bytes, for colored sections of the text.
+    byte_starts: Vec<usize>,
     /// Whether chars past the limit were left out.
     pub(crate) truncated: bool,
 }
@@ -27,6 +29,7 @@ impl DisplayLine {
         let tab_size = tab_size.max(1);
         let mut text = String::with_capacity(line.len());
         let mut starts = Vec::with_capacity(line.len().min(RENDER_LIMIT) + 1);
+        let mut byte_starts = Vec::with_capacity(starts.capacity());
         let mut width = 0;
         let mut truncated = false;
         for (column, ch) in line.chars().enumerate() {
@@ -35,6 +38,7 @@ impl DisplayLine {
                 break;
             }
             starts.push(width);
+            byte_starts.push(text.len());
             if ch == '\t' {
                 let stop = width + tab_size - width % tab_size;
                 text.extend(std::iter::repeat_n(' ', stop - width));
@@ -45,9 +49,11 @@ impl DisplayLine {
             }
         }
         starts.push(width);
+        byte_starts.push(text.len());
         Self {
             text,
             starts,
+            byte_starts,
             truncated,
         }
     }
@@ -60,6 +66,12 @@ impl DisplayLine {
     /// Where `column` starts in [`Self::text`]; past the cut, the end.
     pub(crate) fn display_index(&self, column: usize) -> usize {
         self.starts[column.min(self.columns())]
+    }
+
+    /// The byte where `column` starts in [`Self::text`]; past the cut, the
+    /// end.
+    pub(crate) fn byte_index(&self, column: usize) -> usize {
+        self.byte_starts[column.min(self.columns())]
     }
 
     /// The column nearest to `index` in [`Self::text`]: inside a tab, the
@@ -101,6 +113,10 @@ mod tests {
         assert_eq!(line.display_index(2), 4, "b starts at the tab stop");
         assert_eq!(line.display_index(5), 8);
         assert_eq!(line.display_index(99), 9, "past the end: the end");
+        let wide = DisplayLine::new("é\tx", 4);
+        assert_eq!(wide.text, "é   x");
+        assert_eq!((wide.byte_index(1), wide.byte_index(2)), (2, 5));
+        assert_eq!(wide.byte_index(9), 6);
         assert_eq!(status_column("a\tbc\td", 2, 4), 5);
     }
 

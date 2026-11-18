@@ -8,5 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+rustode-core.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+
 [lints]
 workspace = true

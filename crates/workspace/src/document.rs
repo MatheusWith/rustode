@@ -1,8 +1,20 @@
-//! One open document: its text and how it is stored on disk.
+//! One open document: its text, how it is stored on disk, and its syntax
+//! tree.
+//!
+//! A Rust document keeps a Tree-sitter tree in step with every change to
+//! its text, whatever made it: typing, deleting, replacing, several
+//! cursors, undo and redo, a reload from disk or a line-ending change all
+//! go through the editor's byte-edit log. As in VS Code, a file too large
+//! for tokenization when opened (over 20 MB or 300,000 lines) is never
+//! highlighted, even if it shrinks later
+//! (`src/vs/editor/common/model/textModel.ts:189-190`, `:334-343`; studied
+//! and reimplemented, see `ATTRIBUTION.md`). VS Code counts UTF-16 code
+//! units; rustode counts chars.
 
 use crate::language::{self, Language};
 use rustode_core::{EditError, Editor, Position, Range, Selection};
 use rustode_fs::{EncodeError, Encoding, Eol};
+use rustode_syntax::{Syntax, TokenKind};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -55,7 +67,26 @@ pub struct Document {
     /// reload, so undo and redo restore it (VS Code's `pushEOL` is undoable).
     eol_at: HashMap<u64, (Eol, bool)>,
     language: &'static Language,
+    /// The syntax tree, for languages with a grammar and files not too
+    /// large for it.
+    syntax: Option<Syntax>,
 }
+
+/// A run of highlighted text: char offsets and what the text is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Highlight {
+    /// The chars of the run.
+    pub range: Range,
+    /// What the text is.
+    pub kind: TokenKind,
+}
+
+/// More chars than this and the document is never highlighted (VS Code's
+/// `LARGE_FILE_SIZE_THRESHOLD`, `textModel.ts:189`).
+const TOKENIZATION_CHAR_LIMIT: usize = 20 * 1024 * 1024;
+/// More lines than this and the document is never highlighted
+/// (`LARGE_FILE_LINE_COUNT_THRESHOLD`, `textModel.ts:190`).
+const TOKENIZATION_LINE_LIMIT: usize = 300 * 1000;
 
 impl Document {
     /// Decodes a file's bytes, without copying valid UTF-8 (large files).
@@ -74,12 +105,16 @@ impl Document {
         let name = path
             .file_name()
             .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
+        let language = language::detect(&name);
+        let mut editor = Editor::new(&text);
+        let syntax = syntax_for(language.id, &mut editor);
         Self {
-            language: language::detect(&name),
+            language,
+            syntax,
             eol: (info.dominant, info.mixed),
             eol_at: HashMap::new(),
             path,
-            editor: Editor::new(&text),
+            editor,
             encoding,
             bom,
             saved_version: 0,
@@ -318,4 +353,56 @@ impl Document {
     pub fn language_name(&self) -> &'static str {
         self.language.name
     }
+
+    /// The highlighted runs of `lines` (zero-based, end excluded), sorted
+    /// and never overlapping; text in no run, and every document without a
+    /// syntax tree, is plain. Only those lines are queried, so a frontend
+    /// asks for the ones it shows.
+    #[must_use]
+    pub fn highlights(&self, lines: std::ops::Range<usize>) -> Vec<Highlight> {
+        let Some(syntax) = &self.syntax else {
+            return Vec::new();
+        };
+        let buffer = self.editor.buffer();
+        let byte = |line| buffer.char_to_byte(self.offset_of(Position::new(line, 0)));
+        syntax
+            .highlights(buffer, byte(lines.start)..byte(lines.end))
+            .into_iter()
+            .map(|span| Highlight {
+                range: Range::new(
+                    buffer.byte_to_char(span.start),
+                    buffer.byte_to_char(span.end),
+                ),
+                kind: span.kind,
+            })
+            .collect()
+    }
+
+    /// The syntax tree as an S-expression, if the document has one.
+    #[must_use]
+    pub fn syntax_tree(&self) -> Option<String> {
+        self.syntax.as_ref().map(Syntax::sexp)
+    }
+
+    /// Replays the text's changes since the last call on the syntax tree.
+    pub(crate) fn sync_syntax(&mut self) {
+        if let Some(syntax) = self.syntax.as_mut() {
+            let edits = self.editor.take_byte_edits();
+            syntax.edit(&edits, self.editor.buffer());
+        }
+    }
+}
+
+/// A syntax tree for a new document's text, logging the editor's changes
+/// so the tree can follow them; `None` when the language has no grammar or
+/// the text is too large.
+fn syntax_for(language_id: &str, editor: &mut Editor) -> Option<Syntax> {
+    let buffer = editor.buffer();
+    if buffer.len_chars() > TOKENIZATION_CHAR_LIMIT || buffer.len_lines() > TOKENIZATION_LINE_LIMIT
+    {
+        return None;
+    }
+    let syntax = Syntax::new(language_id, buffer)?;
+    editor.record_byte_edits();
+    Some(syntax)
 }

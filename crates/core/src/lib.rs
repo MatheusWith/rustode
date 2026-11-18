@@ -5,7 +5,7 @@ mod editor;
 mod history;
 mod selection;
 
-pub use buffer::Buffer;
+pub use buffer::{Buffer, ByteEdit, BytePosition};
 pub use editor::{EditError, Editor, Movement, Range};
 pub use history::EditKind;
 pub use selection::{Position, Selection};
