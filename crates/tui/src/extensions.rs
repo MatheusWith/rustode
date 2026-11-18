@@ -79,6 +79,7 @@ impl App {
             return;
         }
         self.extensions.shown = true;
+        self.search.shown = false;
         self.extensions.selected = None;
         self.focus = Focus::Extensions;
         if let Err(err) = self.workspace.refresh_extensions() {

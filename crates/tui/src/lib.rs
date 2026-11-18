@@ -11,6 +11,7 @@ mod extensions;
 mod find;
 mod keys;
 mod problems;
+mod search;
 mod theme;
 mod view;
 

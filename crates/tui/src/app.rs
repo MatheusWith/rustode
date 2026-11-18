@@ -22,6 +22,8 @@ use std::time::{Duration, Instant};
 
 /// How often the idle event loop checks the disk for external changes.
 const DISK_POLL: Duration = Duration::from_millis(250);
+/// How often it takes search results while a search runs.
+const SEARCH_POLL: Duration = Duration::from_millis(30);
 
 /// Which part of the screen receives keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,8 @@ pub(crate) enum Focus {
     /// The Extensions view in the sidebar.
     Extensions,
     Problems,
+    /// The Search view in the sidebar.
+    Search,
 }
 
 /// Where a document's view is scrolled to.
@@ -66,6 +70,8 @@ pub(crate) struct Hits {
     pub problems: Option<(Rect, Vec<Option<usize>>)>,
     /// The status bar's problem counts: row, first and one-past-last column.
     pub problems_status: Option<(u16, u16, u16)>,
+    /// The Search view's result rows.
+    pub search: Option<Rect>,
 }
 
 /// Lines one wheel notch scrolls.
@@ -126,6 +132,8 @@ pub struct App {
     pub(crate) extensions: crate::extensions::ExtensionsView,
     /// The problems panel.
     pub(crate) problems: crate::problems::ProblemsPanel,
+    /// The Search view's state.
+    pub(crate) search: crate::search::SearchView,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -178,6 +186,7 @@ impl App {
             find_visible: false,
             extensions: crate::extensions::ExtensionsView::default(),
             problems: crate::problems::ProblemsPanel::default(),
+            search: crate::search::SearchView::default(),
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
@@ -203,10 +212,11 @@ impl App {
     }
 
     /// Takes the results of background work (extension searches,
-    /// installs, uninstalls). Returns whether anything changed, so the
-    /// screen needs drawing.
+    /// installs, uninstalls, search results). Returns whether anything
+    /// changed, so the screen needs drawing.
     pub fn poll(&mut self) -> bool {
         self.workspace.poll_extensions();
+        self.workspace.poll_search();
         self.take_events()
     }
 
@@ -262,13 +272,19 @@ impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         terminal.draw(|frame| self.draw(frame))?;
         while !self.quit {
-            if event::poll(DISK_POLL)? {
+            let wait = if self.workspace.search_results().is_running() {
+                SEARCH_POLL
+            } else {
+                DISK_POLL
+            };
+            if event::poll(wait)? {
                 let event = event::read()?;
                 self.step(terminal, &event)?;
             } else {
                 self.workspace.poll_external_changes();
                 self.workspace.poll_extensions();
                 let servers = self.poll_language_servers();
+                self.workspace.poll_search();
                 let config_changed = !self.workspace.reload_config().is_empty();
                 if config_changed {
                     self.report_config_problems();
@@ -304,6 +320,7 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.key(*key),
             Event::Mouse(mouse) => self.mouse(*mouse),
             Event::Paste(text) if self.focus == Focus::Extensions => self.extensions_paste(text),
+            Event::Paste(text) if self.focus == Focus::Search => self.search_paste(text),
             Event::Paste(text) if self.focus == Focus::Editor => {
                 self.confirm_quit = false;
                 self.message = None;
@@ -346,6 +363,7 @@ impl App {
                 }
             }
             Focus::Extensions => self.extensions_key(key),
+            Focus::Search => self.search_key(key),
         }
     }
 
@@ -469,6 +487,7 @@ impl App {
             Command::FocusExplorer => self.focus_explorer(),
             Command::FocusNextPart => self.focus_next_part(),
             Command::ShowExtensions => self.show_extensions(),
+            Command::ShowSearch => self.show_search(),
             Command::Reload => self.reload(),
             Command::QuickOpen => self.open_quick(""),
             Command::ShowCommands => self.open_quick(">"),
@@ -597,6 +616,7 @@ impl App {
         }
         self.focus = Focus::Explorer;
         self.extensions.shown = false;
+        self.search.shown = false;
         let active = self
             .document()
             .and_then(|id| self.workspace.document(id))
@@ -610,10 +630,12 @@ impl App {
     fn focus_next_part(&mut self) {
         match self.focus {
             Focus::Editor => self.focus_explorer(),
-            Focus::Explorer | Focus::Extensions | Focus::Problems if self.document().is_some() => {
+            Focus::Explorer | Focus::Extensions | Focus::Problems | Focus::Search
+                if self.document().is_some() =>
+            {
                 self.focus = Focus::Editor;
             }
-            Focus::Explorer | Focus::Extensions | Focus::Problems => {}
+            Focus::Explorer | Focus::Extensions | Focus::Problems | Focus::Search => {}
         }
     }
 
@@ -879,6 +901,10 @@ impl App {
             } else {
                 self.focus = Focus::Problems;
             }
+            return;
+        }
+        if let Some(area) = self.hits.search.filter(|&a| inside(a)) {
+            self.search_click(usize::from(row - area.y));
             return;
         }
         if let Some(area) = self.hits.explorer.filter(|&a| inside(a)) {

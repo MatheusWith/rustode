@@ -416,7 +416,7 @@ fn paint(
 }
 
 /// VS Code's twistie: a chevron pointing right, or down when expanded.
-fn chevron(painter: &egui::Painter, center: Pos2, expanded: bool) {
+pub(crate) fn chevron(painter: &egui::Painter, center: Pos2, expanded: bool) {
     let points = if expanded {
         vec![
             center + Vec2::new(-4.0, -2.0),

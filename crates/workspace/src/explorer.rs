@@ -124,7 +124,7 @@ impl Explorer {
 
 /// File names compared with digit runs as numbers and case ignored first;
 /// ties go to lowercase, then to the shorter name (`file1` before `file01`).
-fn compare_names(left: &str, right: &str) -> Ordering {
+pub(crate) fn compare_names(left: &str, right: &str) -> Ordering {
     let mut lhs = left.chars().peekable();
     let mut rhs = right.chars().peekable();
     loop {

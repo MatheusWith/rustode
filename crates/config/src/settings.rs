@@ -79,7 +79,14 @@ impl Schema {
     ///   `:256`, `:268`, `:282`. `files.encoding` accepts any string here; VS Code restricts it
     ///   to its list of encodings;
     /// - `rustode.languageServers`, rustode's own (VS Code has no built-in setting for language
-    ///   servers): an object of server entries by language id, which the workspace checks.
+    ///   servers): an object of server entries by language id, which the workspace checks;
+    /// - `files.exclude`: `src/vs/workbench/contrib/files/browser/files.contribution.ts:154-160`
+    ///   (the desktop defaults);
+    /// - `search.exclude`, `search.useIgnoreFiles`, `search.useGlobalIgnoreFiles`,
+    ///   `search.useParentIgnoreFiles`, `search.followSymlinks`, `search.maxResults`:
+    ///   `src/vs/workbench/contrib/search/browser/search.common.contribution.ts:26-95`, with
+    ///   `DEFAULT_MAX_SEARCH_RESULTS` from `src/vs/workbench/services/search/common/search.ts:32`.
+    ///   `search.maxResults` is a number or `null` in VS Code; any value is accepted here.
     #[must_use]
     pub fn builtin() -> Self {
         let mut schema = Self::empty();
@@ -87,6 +94,13 @@ impl Schema {
         let enumeration =
             |values: &[&str]| SettingType::Enum(values.iter().map(|v| (*v).to_owned()).collect());
         let text = |s: &str| Value::String(s.to_owned());
+        let globs = |keys: &[&str]| {
+            Value::Object(
+                keys.iter()
+                    .map(|key| ((*key).to_owned(), Value::Bool(true)))
+                    .collect(),
+            )
+        };
         for (key, kind, default) in [
             (
                 "editor.tabSize",
@@ -133,6 +147,48 @@ impl Schema {
                 "rustode.languageServers",
                 SettingType::Object,
                 Value::Object(BTreeMap::new()),
+            ),
+            (
+                "files.exclude",
+                SettingType::Object,
+                globs(&[
+                    "**/.git",
+                    "**/.svn",
+                    "**/.hg",
+                    "**/.jj",
+                    "**/.DS_Store",
+                    "**/Thumbs.db",
+                ]),
+            ),
+            (
+                "search.exclude",
+                SettingType::Object,
+                globs(&["**/node_modules", "**/bower_components", "**/*.code-search"]),
+            ),
+            (
+                "search.useIgnoreFiles",
+                SettingType::Boolean,
+                Value::Bool(true),
+            ),
+            (
+                "search.useGlobalIgnoreFiles",
+                SettingType::Boolean,
+                Value::Bool(false),
+            ),
+            (
+                "search.useParentIgnoreFiles",
+                SettingType::Boolean,
+                Value::Bool(false),
+            ),
+            (
+                "search.followSymlinks",
+                SettingType::Boolean,
+                Value::Bool(true),
+            ),
+            (
+                "search.maxResults",
+                SettingType::Any,
+                Value::Number(20_000.0),
             ),
         ] {
             schema.register(SettingSchema {

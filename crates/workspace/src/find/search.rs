@@ -58,6 +58,121 @@ pub(super) fn each_match<T>(
     })
 }
 
+/// Calls `f` with the byte range of every match of `query` in `text`, a
+/// whole file, in order, until it breaks: the matches [`each_match`] finds
+/// in a buffer holding `text`. A query that cannot match a line break runs
+/// on each line; `candidates`, when given, finds the lines that may hold a
+/// match first (see [`line_candidates`]), so the other lines are skipped.
+pub(super) fn each_match_in_text(
+    text: &str,
+    query: &FindQuery,
+    candidates: Option<&Regex>,
+    f: &mut dyn FnMut(std::ops::Range<usize>) -> ControlFlow<()>,
+) {
+    let Some(mut scanner) = Scanner::for_query(query, false) else {
+        return;
+    };
+    // The scanner's offsets are byte offsets in `text` here.
+    let mut emit = |hit: &Hit| f(hit.range.start..hit.range.end);
+    if query.multiline {
+        if !text.contains('\r') {
+            let _ = scanner.hits(text, |byte| byte, &mut emit);
+            return;
+        }
+        let (joined, crlf) = joined_text(text);
+        let _ = scanner.hits(
+            &joined,
+            |byte| byte + crlf.partition_point(|&lf| lf < byte),
+            &mut emit,
+        );
+        return;
+    }
+    let mut from = 0;
+    loop {
+        let start = match candidates {
+            Some(regex) => match regex.find_at(text, from) {
+                Some(found) => line_start_before(text, from, found.start()),
+                None => return,
+            },
+            None => from,
+        };
+        let (line, eol) = split_line(&text[start..]);
+        if scanner
+            .hits(line, |byte| start + byte, &mut emit)
+            .is_break()
+            || eol == 0
+        {
+            return;
+        }
+        from = start + line.len() + eol;
+    }
+}
+
+/// A regex that finds, in a whole text, a match on every line where the
+/// query matches per line (and maybe on others): the query's regex with
+/// `^` and `$` at line breaks. `None` when that does not hold, for a regex
+/// with `\A`, `\z` or inline flags.
+pub(super) fn line_candidates(query: &FindQuery) -> Option<Regex> {
+    if query.multiline || query.regex.is_none() {
+        return None;
+    }
+    let pattern = &query.pattern;
+    if query.options.regex {
+        let inline_flags = pattern
+            .match_indices("(?")
+            .any(|(at, _)| !matches!(pattern.as_bytes().get(at + 2), Some(b':' | b'P' | b'<')));
+        if inline_flags || pattern.contains("\\A") || pattern.contains("\\z") {
+            return None;
+        }
+    }
+    let source = if query.options.regex {
+        pattern.clone()
+    } else {
+        regex::escape(pattern)
+    };
+    regex::RegexBuilder::new(&source)
+        .case_insensitive(!query.options.match_case)
+        .multi_line(true)
+        .crlf(true)
+        .build()
+        .ok()
+}
+
+/// The byte offset where the line holding `at` starts, not before `from`.
+fn line_start_before(text: &str, from: usize, at: usize) -> usize {
+    let bytes = text.as_bytes();
+    // A match at the LF of a CRLF belongs to the line before the break.
+    let end = if at > from && bytes.get(at) == Some(&b'\n') && bytes[at - 1] == b'\r' {
+        at - 1
+    } else {
+        at
+    };
+    bytes[from..end]
+        .iter()
+        .rposition(|&b| b == b'\n' || b == b'\r')
+        .map_or(from, |break_at| from + break_at + 1)
+}
+
+/// `text` with every line break as one LF, and the byte offsets in it of
+/// the LFs that stand for a CRLF, as [`Joined`] makes for a buffer.
+fn joined_text(text: &str) -> (String, Vec<usize>) {
+    let mut joined = String::with_capacity(text.len());
+    let mut crlf = Vec::new();
+    let mut rest = text;
+    loop {
+        let (line, eol) = split_line(rest);
+        joined.push_str(line);
+        if eol == 2 {
+            crlf.push(joined.len());
+        }
+        if eol == 0 {
+            return (joined, crlf);
+        }
+        joined.push('\n');
+        rest = &rest[line.len() + eol..];
+    }
+}
+
 /// The first match starting at or after `from`, or else the first match:
 /// VS Code's `matchAfterPosition` over the matches it highlights
 /// (`src/vs/editor/contrib/find/browser/findDecorations.ts:251-271`).

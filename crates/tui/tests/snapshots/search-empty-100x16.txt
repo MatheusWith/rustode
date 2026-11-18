@@ -1,0 +1,16 @@
+ SEARCH                                    │ notes.txt │
+ Search                           Aa ab .* │   1 hello
+ files to include                          │   2
+ files to exclude                          │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+ notes.txt                                                       Ln 1, Col 1  UTF-8  LF  Plain Text
