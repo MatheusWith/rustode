@@ -11,6 +11,7 @@ mod fuzzy;
 mod language;
 mod lsp;
 mod quick_open;
+mod search;
 mod tabs;
 
 pub use config::{
@@ -40,6 +41,10 @@ pub use rustode_syntax::TokenKind;
 /// workspace alone: call `trace::init_from_env()` at startup and record
 /// input-to-frame latency with `trace::LatencyRecorder`.
 pub use rustode_trace as trace;
+pub use search::{
+    FileResult, MAX_RESULTS, MatchPreview, SearchError, SearchEvent, SearchMatch, SearchQuery,
+    SearchResults, SearchRow, SearchState,
+};
 pub use tabs::EditorGroup;
 
 use rustode_core::Editor;
@@ -126,6 +131,9 @@ pub enum Event {
         /// What it does now.
         state: ServerState,
     },
+    /// Search results arrived, or the search ended
+    /// ([`Workspace::poll_search`]).
+    Search(SearchEvent),
 }
 
 impl fmt::Display for Error {
@@ -167,6 +175,8 @@ pub struct Workspace {
     extensions: extensions::Extensions,
     /// The language servers and their diagnostics.
     lsp: lsp::LanguageServers,
+    /// Search across the folder: the running search and its results.
+    search: search::Searches,
 }
 
 impl Workspace {

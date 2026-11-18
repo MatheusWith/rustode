@@ -151,6 +151,30 @@ impl fmt::Display for PatternError {
 
 impl std::error::Error for PatternError {}
 
+/// A [`FindQuery`] as the matcher of a search across files: it finds what
+/// find in a document would find in the file's text.
+pub(crate) struct TextSearch {
+    query: FindQuery,
+    candidates: Option<Regex>,
+}
+
+impl TextSearch {
+    pub(crate) fn new(query: FindQuery) -> Self {
+        let candidates = search::line_candidates(&query);
+        Self { query, candidates }
+    }
+}
+
+impl rustode_fs::TextMatcher for TextSearch {
+    fn find_matches(
+        &self,
+        text: &str,
+        found: &mut dyn FnMut(std::ops::Range<usize>) -> std::ops::ControlFlow<()>,
+    ) {
+        search::each_match_in_text(text, &self.query, self.candidates.as_ref(), found);
+    }
+}
+
 /// The text of a document, for searching.
 fn editor_buffer(workspace: &Workspace, id: DocumentId) -> Result<&Buffer, Error> {
     let document = workspace.document(id).ok_or(Error::UnknownDocument(id))?;

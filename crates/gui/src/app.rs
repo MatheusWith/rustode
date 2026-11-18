@@ -1,5 +1,6 @@
-//! The window: the sidebar on the left (the explorer, or the Extensions
-//! view after Ctrl+Shift+X, see `extensions.rs`), the tab strip and the
+//! The window: the sidebar on the left (the explorer, the Extensions view
+//! after Ctrl+Shift+X, see `extensions.rs`, or the Search view after
+//! Ctrl+Shift+F, see `search.rs`), the tab strip and the
 //! editor on the right, the status bar along the bottom, and the title.
 //! Everything is drawn from the workspace's state; the window keeps only
 //! what is on screen (scroll positions, the selected explorer row, focus).
@@ -31,7 +32,7 @@ use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::status::STATUS_BAR_HEIGHT;
 use crate::tabs::{self, TAB_HEIGHT};
-use crate::{editor, explorer, extensions, problems, status};
+use crate::{editor, explorer, extensions, problems, search, status};
 use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, UiBuilder, Vec2, ViewportCommand,
 };
@@ -82,6 +83,8 @@ pub struct EditorApp {
     /// Whether the editor takes focus on the next frame: after going to a
     /// problem with Enter, so the key does not reach the editor too.
     focus_editor_next: bool,
+    /// The Search view, shown in the sidebar instead of the explorer.
+    search: search::Panel,
 }
 
 /// Where each part goes this frame.
@@ -127,7 +130,7 @@ fn file_name(document: &Document) -> String {
 fn sidebar_has_focus(ctx: &Context) -> bool {
     ctx.memory(|memory| {
         memory.has_focus(explorer::id()) || memory.has_focus(extensions::search_id())
-    })
+    }) || search::has_focus(ctx)
 }
 
 /// Gives keyboard focus to `id`, and draws once more so the widget can lock
@@ -191,6 +194,7 @@ impl EditorApp {
             latency: None,
             extensions: extensions::Panel::default(),
             waker_set: false,
+            search: search::Panel::default(),
             problems: problems::Panel::default(),
             focus_editor_next: false,
         }
@@ -406,6 +410,11 @@ impl EditorApp {
             Workbench::FocusNextPart => self.focus_next_part(ctx),
             Workbench::ShowExtensions => self.show_extensions(ctx),
             Workbench::ToggleProblems => self.toggle_problems(ctx),
+            Workbench::ShowSearch => {
+                self.sidebar = true;
+                self.extensions.shown = false;
+                self.search.show_search(&self.workspace);
+            }
         }
     }
 
@@ -465,6 +474,7 @@ impl EditorApp {
     /// its search box, or, from the search box, goes back to the editor.
     fn show_extensions(&mut self, ctx: &Context) {
         self.sidebar = true;
+        self.search.shown = false;
         self.notice = self.extensions.toggle(ctx, &mut self.workspace);
     }
 
@@ -473,6 +483,7 @@ impl EditorApp {
     fn focus_explorer(&mut self, ctx: &Context) {
         self.sidebar = true;
         self.extensions.shown = false;
+        self.search.shown = false;
         if self.workspace.explorer().is_none() {
             self.message = Some("No folder opened".to_owned());
             return;
@@ -492,6 +503,9 @@ impl EditorApp {
     fn focus_next_part(&mut self, ctx: &Context) {
         if sidebar_has_focus(ctx) {
             self.focus_editor(ctx);
+        } else if self.sidebar && self.search.shown {
+            self.search.focus();
+            ctx.request_repaint();
         } else if self.sidebar && self.extensions.shown {
             focus(ctx, extensions::search_id());
         } else if self.sidebar {
@@ -512,6 +526,24 @@ impl EditorApp {
     }
 
     fn show_sidebar(&mut self, ui: &mut egui::Ui, rect: Rect) -> bool {
+        if self.search.shown {
+            let outcome = ui
+                .scope_builder(
+                    UiBuilder::new().max_rect(rect).id_salt("rustode-sidebar"),
+                    |ui| {
+                        ui.set_clip_rect(rect);
+                        search::show(ui, &mut self.workspace, &mut self.search)
+                    },
+                )
+                .inner;
+            if let Some(message) = outcome.message {
+                self.message = Some(message);
+            }
+            if outcome.focus_editor {
+                self.focus_editor(ui.ctx());
+            }
+            return false;
+        }
         if self.extensions.shown {
             let refused = ui
                 .scope_builder(
@@ -616,6 +648,7 @@ impl eframe::App for EditorApp {
         self.workspace.poll_external_changes();
         self.workspace.poll_extensions();
         self.workspace.poll_language_servers();
+        self.workspace.poll_search();
         self.note();
         let mut changed = self.workbench_keys(&ctx);
         self.default_focus(&ctx);

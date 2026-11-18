@@ -105,16 +105,20 @@ impl Drop for LanguageServers {
 
 impl Workspace {
     /// Sets the callback the workspace's background work calls, from its
-    /// own thread, when something arrived: a message from a language server
-    /// or an extension result. A frontend uses it to wake its event loop (the
-    /// GUI requests a repaint), then calls
+    /// own thread, when something arrived: a message from a language server,
+    /// an extension result or search results. A frontend uses it to wake its
+    /// event loop (the GUI requests a repaint), then calls
     /// [`poll_language_servers`](Self::poll_language_servers) and
-    /// [`poll_extensions`](Self::poll_extensions). It covers
-    /// [`set_extensions_waker`](Self::set_extensions_waker) too.
+    /// [`poll_extensions`](Self::poll_extensions), and
+    /// [`poll_search`](Self::poll_search). It covers
+    /// [`set_extensions_waker`](Self::set_extensions_waker) and
+    /// [`set_search_waker`](Self::set_search_waker) too.
     pub fn set_waker(&mut self, wake: impl Fn() + Send + Sync + 'static) {
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         self.lsp.waker.set(Arc::clone(&wake));
-        self.set_extensions_waker(move || wake());
+        let extensions = Arc::clone(&wake);
+        self.set_extensions_waker(move || extensions());
+        self.set_search_waker(move || wake());
     }
 
     /// Processes what the language servers sent since the last call:

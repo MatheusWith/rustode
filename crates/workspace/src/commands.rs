@@ -13,7 +13,10 @@
 //! "View: Show Extensions" on Ctrl+Shift+X
 //! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:116-123`,
 //! titled "Show {0}" in the View category by
-//! `src/vs/workbench/services/views/browser/viewsService.ts:404-421`).
+//! `src/vs/workbench/services/views/browser/viewsService.ts:404-421`),
+//! "Search: Find in Files" on Ctrl+Shift+F
+//! (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:203-242`,
+//! in the Search category of `searchActionsBase.ts:25`).
 //! Commands that take an argument ([`Workspace::execute_with`]) are not
 //! listed in the palette, as in VS Code.
 //! "View: Toggle Problems" on Ctrl+Shift+M
@@ -108,6 +111,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         "View: Show Extensions",
         Workbench,
         Some("Ctrl+Shift+X"),
+    ),
+    command(
+        "workbench.action.findInFiles",
+        "Search: Find in Files",
+        Workbench,
+        Some("Ctrl+Shift+F"),
     ),
     command(
         "workbench.action.focusNextPart",

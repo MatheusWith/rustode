@@ -20,6 +20,8 @@
 //! - **Diagnostics** from language servers are squiggled in the editor,
 //!   counted in the status bar and listed in the problems panel
 //!   (Ctrl+Shift+M); see `problems.rs`.
+//! - **Search view** in the sidebar on Ctrl+Shift+F: a search across the
+//!   folder whose results stream into a list (`search.rs`).
 //!
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
@@ -34,6 +36,7 @@ mod keys;
 pub mod latency;
 mod problems;
 mod run;
+mod search;
 mod status;
 mod tabs;
 mod text;

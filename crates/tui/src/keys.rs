@@ -9,7 +9,9 @@
 //! (`src/vs/workbench/browser/parts/editor/editorActions.ts:1277`, `:1325`)
 //! and Ctrl+W closes one (`src/vs/workbench/browser/parts/editor/editorCommands.ts:841`).
 //! Ctrl+Shift+X shows the Extensions view
-//! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:121`).
+//! (`src/vs/workbench/contrib/extensions/browser/extensions.contribution.ts:121`),
+//! Ctrl+Shift+F the Search view
+//! (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:239-242`).
 //! Ctrl+P opens quick open, Ctrl+Shift+P or F1 the command palette,
 //! Ctrl+G go to line and Ctrl+Shift+M toggles the problems panel (see
 //! `rustode_workspace`'s command registry). Terminals without an extended
@@ -44,6 +46,7 @@ pub(crate) enum Command {
     FocusExplorer,
     FocusNextPart,
     ShowExtensions,
+    ShowSearch,
     NextTab,
     PreviousTab,
     CloseTab,
@@ -92,6 +95,7 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
             ('e', true) => Some(Command::FocusExplorer),
             ('x', true) => Some(Command::ShowExtensions),
             ('m', true) => Some(Command::ToggleProblems),
+            ('f', true) => Some(Command::ShowSearch),
             ('p', false) => Some(Command::QuickOpen),
             ('p', true) => Some(Command::ShowCommands),
             ('g', false) => Some(Command::GotoLine),
@@ -142,6 +146,7 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::FocusExplorer => "workbench.view.explorer",
         Command::FocusNextPart => "workbench.action.focusNextPart",
         Command::ShowExtensions => "workbench.view.extensions",
+        Command::ShowSearch => "workbench.action.findInFiles",
         Command::QuickOpen => "workbench.action.quickOpen",
         Command::ShowCommands => "workbench.action.showCommands",
         Command::GotoLine => "workbench.action.gotoLine",
@@ -214,6 +219,7 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::FocusExplorer,
         Command::FocusNextPart,
         Command::ShowExtensions,
+        Command::ShowSearch,
         Command::QuickOpen,
         Command::ShowCommands,
         Command::GotoLine,

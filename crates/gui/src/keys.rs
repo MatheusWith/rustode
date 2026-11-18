@@ -29,6 +29,8 @@
 //!   (`src/vs/workbench/browser/actions/navigationActions.ts:362-367`);
 //! - Ctrl+Shift+M toggles the problems panel
 //!   (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`).
+//! - Ctrl+Shift+F shows the Search view
+//!   (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:239-242`).
 //!
 //! In the explorer, as in VS Code's lists
 //! (`src/vs/workbench/browser/actions/listCommands.ts:336-365`, `:461-464`,
@@ -147,6 +149,8 @@ pub(crate) enum Workbench {
     ShowExtensions,
     /// Ctrl+Shift+M: the problems panel.
     ToggleProblems,
+    /// Ctrl+Shift+F: the Search view in the sidebar.
+    ShowSearch,
 }
 
 /// The workbench command for one input event, if it is a workbench key.
@@ -172,6 +176,7 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::E, true, true, false) => Workbench::FocusExplorer,
         (Key::X, true, true, false) => Workbench::ShowExtensions,
         (Key::M, true, true, false) => Workbench::ToggleProblems,
+        (Key::F, true, true, false) => Workbench::ShowSearch,
         (Key::F6, false, false, false) => Workbench::FocusNextPart,
         _ => return None,
     })

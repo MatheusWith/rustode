@@ -10,6 +10,7 @@
 mod editor;
 mod extensions;
 mod lsp;
+mod search;
 mod workbench;
 
 use eframe::egui::{Key, Modifiers, Vec2, accesskit::Role};

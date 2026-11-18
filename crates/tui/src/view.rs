@@ -80,8 +80,13 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
     app.hits = Hits::default();
     let screen = frame.area();
     frame.buffer_mut().set_style(screen, theme.editor);
-    let sidebar_focused = matches!(app.focus, Focus::Explorer | Focus::Extensions);
-    let sidebar_width = if app.extensions.shown {
+    let sidebar_focused = matches!(
+        app.focus,
+        Focus::Explorer | Focus::Extensions | Focus::Search
+    );
+    let sidebar_width = if app.search.shown {
+        crate::search::WIDTH
+    } else if app.extensions.shown {
         crate::extensions::WIDTH
     } else {
         SIDEBAR_WIDTH
@@ -92,7 +97,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
     };
     if let Some(sidebar) = areas.sidebar {
         frame.buffer_mut().set_style(sidebar, theme.sidebar);
-        if app.extensions.shown {
+        if app.search.shown {
+            crate::search::draw(app, frame, sidebar);
+        } else if app.extensions.shown {
             crate::extensions::draw(app, frame, sidebar);
         } else {
             draw_sidebar(app, frame, sidebar);

@@ -1,0 +1,16 @@
+ SEARCH                                    │ notes.txt │
+ Search: Needle                   Aa ab .* │   1 hello
+ files to include: main.rs                 │   2
+ files to exclude                          │
+ 1 result in 1 file                        │
+ ▾ main.rs  src                          1 │
+     fn main() { needle(); }               │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+ notes.txt                                                       Ln 1, Col 1  UTF-8  LF  Plain Text
