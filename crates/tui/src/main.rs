@@ -6,7 +6,8 @@
 //! key-to-frame latency is logged at `info`.
 //!
 //! Extensions live in rustode's own folder (`RUSTODE_EXTENSIONS_DIR`, else
-//! `rustode/extensions` under the XDG data folder).
+//! `rustode/extensions` under the XDG data folder), and which are disabled
+//! in `globalStorage/state.json` in the user folder.
 
 use ratatui::crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -35,6 +36,9 @@ fn main() -> ExitCode {
     app.load_user_config(&user_dir());
     if let Some(dir) = rustode_workspace::default_extensions_dir(|key| std::env::var_os(key)) {
         app.workspace_mut().set_extensions_location(&dir);
+    }
+    if let Some(dir) = rustode_workspace::default_global_storage_dir(|key| std::env::var_os(key)) {
+        app.workspace_mut().set_global_storage_location(&dir);
     }
     let mut terminal = ratatui::init();
     let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableMouseCapture);

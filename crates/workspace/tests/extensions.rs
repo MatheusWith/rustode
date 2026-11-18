@@ -1,13 +1,15 @@
 //! Workspace seam: extension management against a local Open VSX stand-in
-//! on 127.0.0.1 — search, install, uninstall and the installed list, the
-//! storage layout VS Code uses, and the refusals (Microsoft Marketplace,
-//! unchecked downloads, paths that leave the extension folder). No test
-//! touches the network or a real profile.
+//! on 127.0.0.1 — search, install, uninstall, enable, disable and the
+//! installed list, the storage layout and manifest checks VS Code uses, and
+//! the refusals (Microsoft Marketplace, unchecked downloads, paths that
+//! leave the extension folder). No test touches the network or a real
+//! profile.
 
 use rustode_workspace::extensions::stand_in::{Fixture, Reply, StandIn, sha256_hex, vsix};
 use rustode_workspace::{
-    Event, ExtensionError, ExtensionEvent, ExtensionOperation, ExtensionSearch, NOT_LOADED,
-    Workspace, default_extensions_dir,
+    EnablementState, Event, ExtensionError, ExtensionEvent, ExtensionManifest, ExtensionOperation,
+    ExtensionSearch, ManifestProblem, NOT_LOADED, Severity, Workspace, default_extensions_dir,
+    default_global_storage_dir,
 };
 use serde_json::Value;
 use std::ffi::OsString;
@@ -23,14 +25,31 @@ fn temp(name: &str) -> PathBuf {
     dir
 }
 
-/// A workspace whose extensions live in a fresh temp folder and whose
-/// registry is the stand-in.
+/// A workspace whose extensions live in a fresh temp folder, next to its
+/// global storage folder ([`storage`]), and whose registry is the stand-in.
 fn workspace(name: &str, stand_in: &StandIn) -> (Workspace, PathBuf) {
     let dir = temp(name).join("extensions");
-    let mut ws = Workspace::new();
-    ws.set_extensions_location(&dir);
-    ws.set_extension_registry(stand_in.url()).expect("registry");
+    let ws = reopen(&dir, stand_in);
     (ws, dir)
+}
+
+/// Another workspace on the same folders, as after a restart.
+fn reopen(dir: &Path, stand_in: &StandIn) -> Workspace {
+    let mut ws = Workspace::new();
+    ws.set_extensions_location(dir);
+    ws.set_global_storage_location(&storage(dir));
+    ws.set_extension_registry(stand_in.url()).expect("registry");
+    ws
+}
+
+/// The global storage folder next to the extensions folder `dir`.
+fn storage(dir: &Path) -> PathBuf {
+    dir.parent().expect("parent").join("globalStorage")
+}
+
+/// The text of the global state file, if there is one.
+fn state(dir: &Path) -> Option<String> {
+    std::fs::read_to_string(storage(dir).join("state.json")).ok()
 }
 
 /// Polls until no extension work is under way; returns the extension events.
@@ -658,13 +677,26 @@ fn an_index_written_by_vs_code_is_listed() {
     ws.refresh_extensions().expect("refresh");
     settle(&mut ws);
     let installed = ws.installed_extensions();
-    assert_eq!(
-        installed.len(),
-        1,
-        "a missing folder is skipped: {installed:?}"
-    );
+    assert_eq!(installed.len(), 2, "{installed:?}");
     assert_eq!(installed[0].display_name, "Localized Name");
     assert_eq!(installed[0].description, "Localized description");
+    // A missing folder is listed as invalid, with a manifest made up from
+    // the index, as VS Code lists it; it can still be uninstalled.
+    let vanished = &installed[1];
+    assert_eq!(vanished.id, "acme.vanished");
+    assert_eq!(vanished.display_name, "vanished");
+    assert_eq!(vanished.enablement, EnablementState::Invalid);
+    assert!(
+        vanished
+            .first_error()
+            .is_some_and(|e| e.contains("cannot read") && e.contains("package.json")),
+        "{vanished:?}"
+    );
+    assert_eq!(vanished.manifest.publisher(), Some("acme"));
+    assert_eq!(vanished.manifest.version(), Some("1.0.0"));
+    ws.uninstall_extension("acme.vanished").expect("uninstall");
+    settle(&mut ws);
+    assert_eq!(ws.installed_extensions().len(), 1);
 }
 
 #[test]
@@ -803,4 +835,706 @@ fn the_default_folder_is_rustodes_own() {
     assert_eq!(ws.extensions_location(), None);
     ws.set_extensions_location(Path::new("/x"));
     assert_eq!(ws.extensions_location(), Some(Path::new("/x")));
+}
+
+/// The installed extension `id`'s enablement, as last listed.
+fn enablement(ws: &Workspace, id: &str) -> EnablementState {
+    ws.installed_extension(id)
+        .unwrap_or_else(|| panic!("{id} is not installed: {:?}", ws.installed_extensions()))
+        .enablement
+}
+
+/// A workspace with `acme.hello` 1.0.0 installed.
+fn with_hello(name: &str, stand_in: &StandIn) -> (Workspace, PathBuf) {
+    stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
+    let (mut ws, dir) = workspace(name, stand_in);
+    ws.install_extension("acme.hello").expect("install");
+    settle(&mut ws);
+    (ws, dir)
+}
+
+#[test]
+fn disabling_is_kept_as_vs_code_keeps_it_and_survives_a_restart() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = with_hello("disable", &stand_in);
+    assert_eq!(enablement(&ws, "acme.hello"), EnablementState::Enabled);
+    assert_eq!(
+        state(&dir),
+        None,
+        "nothing is written until something changes"
+    );
+
+    ws.disable_extension("Acme.Hello").expect("disable");
+    assert_eq!(
+        ws.extension_operation("acme.hello"),
+        Some(ExtensionOperation::Disabling)
+    );
+    let events = settle(&mut ws);
+    assert!(
+        events.contains(&ExtensionEvent::Disabled {
+            id: "acme.hello".into()
+        }),
+        "{events:?}"
+    );
+    assert_eq!(
+        enablement(&ws, "acme.hello"),
+        EnablementState::DisabledGlobally
+    );
+    // VS Code's storage row: the key and the JSON text of the identifiers.
+    assert_eq!(
+        state(&dir).as_deref(),
+        Some(r#"{"extensionsIdentifiers/disabled":"[{\"id\":\"acme.hello\"}]"}"#)
+    );
+    let installed = ws.installed_extension("acme.hello").expect("installed");
+    assert!(!installed.is_enabled());
+    assert!(!installed.is_loaded(), "nothing loads in Phase 1");
+    assert_eq!(installed.notice(), NOT_LOADED);
+}
+
+#[test]
+fn a_disabled_extension_stays_disabled_after_a_restart_until_enabled() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = with_hello("restart", &stand_in);
+    ws.disable_extension("acme.hello").expect("disable");
+    settle(&mut ws);
+    drop(ws);
+
+    let mut restarted = reopen(&dir, &stand_in);
+    restarted.refresh_extensions().expect("refresh");
+    settle(&mut restarted);
+    assert_eq!(
+        enablement(&restarted, "acme.hello"),
+        EnablementState::DisabledGlobally
+    );
+
+    restarted.enable_extension("acme.hello").expect("enable");
+    assert_eq!(
+        restarted.extension_operation("acme.hello"),
+        Some(ExtensionOperation::Enabling)
+    );
+    let events = settle(&mut restarted);
+    assert!(
+        events.contains(&ExtensionEvent::Enabled {
+            id: "acme.hello".into()
+        }),
+        "{events:?}"
+    );
+    assert_eq!(
+        enablement(&restarted, "acme.hello"),
+        EnablementState::Enabled
+    );
+    assert_eq!(
+        state(&dir).as_deref(),
+        Some("{}"),
+        "an empty list removes the key, as VS Code does"
+    );
+    assert!(
+        !restarted
+            .installed_extension("acme.hello")
+            .expect("installed")
+            .is_loaded(),
+        "enabling still loads nothing"
+    );
+}
+
+#[test]
+fn enabling_an_enabled_extension_changes_nothing() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = with_hello("enable-twice", &stand_in);
+    ws.enable_extension("acme.hello").expect("enable");
+    let events = settle(&mut ws);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ExtensionEvent::Enabled { .. })),
+        "{events:?}"
+    );
+    assert_eq!(state(&dir), None);
+    ws.disable_extension("acme.hello").expect("disable");
+    settle(&mut ws);
+    ws.disable_extension("acme.hello").expect("disable again");
+    let events = settle(&mut ws);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ExtensionEvent::Disabled { .. })),
+        "{events:?}"
+    );
+    assert_eq!(
+        enablement(&ws, "acme.hello"),
+        EnablementState::DisabledGlobally
+    );
+}
+
+#[test]
+fn enable_and_disable_run_by_command_id() {
+    let stand_in = StandIn::start();
+    let (mut ws, _) = with_hello("enable-commands", &stand_in);
+    assert_eq!(
+        ws.execute_with("workbench.extensions.disableExtension", "acme.hello"),
+        Ok(true)
+    );
+    settle(&mut ws);
+    assert_eq!(
+        enablement(&ws, "acme.hello"),
+        EnablementState::DisabledGlobally
+    );
+    assert_eq!(
+        ws.execute_with("workbench.extensions.enableExtension", "acme.hello"),
+        Ok(true)
+    );
+    settle(&mut ws);
+    assert_eq!(enablement(&ws, "acme.hello"), EnablementState::Enabled);
+    assert!(matches!(
+        ws.execute_with("workbench.extensions.enableExtension", "nope"),
+        Err(ExtensionError::InvalidId(_))
+    ));
+}
+
+#[test]
+fn enabling_an_extension_that_is_not_installed_fails() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = workspace("enable-missing", &stand_in);
+    ws.enable_extension("acme.hello").expect("queued");
+    let message = failure(&settle(&mut ws));
+    assert!(message.contains("not installed"), "{message}");
+    ws.disable_extension("acme.hello").expect("queued");
+    let message = failure(&settle(&mut ws));
+    assert!(message.contains("not installed"), "{message}");
+    assert_eq!(state(&dir), None);
+}
+
+#[test]
+fn a_new_version_stays_disabled_and_uninstalling_forgets_it() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = with_hello("disabled-update", &stand_in);
+    ws.disable_extension("acme.hello").expect("disable");
+    settle(&mut ws);
+    stand_in.publish(&Fixture::new("acme", "hello", "1.1.0"));
+    ws.install_extension("acme.hello").expect("update");
+    settle(&mut ws);
+    assert_eq!(ws.installed_extensions()[0].version, "1.1.0");
+    assert_eq!(
+        enablement(&ws, "acme.hello"),
+        EnablementState::DisabledGlobally,
+        "VS Code keeps enablement by id, not by version"
+    );
+
+    ws.uninstall_extension("acme.hello").expect("uninstall");
+    settle(&mut ws);
+    assert_eq!(state(&dir).as_deref(), Some("{}"), "uninstalling resets it");
+    ws.install_extension("acme.hello").expect("install again");
+    settle(&mut ws);
+    assert_eq!(enablement(&ws, "acme.hello"), EnablementState::Enabled);
+}
+
+/// Writes an extension folder and a VS Code-format index entry for it.
+fn write_extension(dir: &Path, id: &str, version: &str, manifest: &serde_json::Value) -> PathBuf {
+    let key = format!("{id}-{version}");
+    let folder = dir.join(&key);
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(folder.join("package.json"), manifest.to_string()).expect("manifest");
+    let mut entries = if dir.join("extensions.json").exists() {
+        index(dir)
+    } else {
+        Vec::new()
+    };
+    entries.push(serde_json::json!({
+        "identifier": {"id": id},
+        "version": version,
+        "location": {"$mid": 1, "path": folder.to_string_lossy(), "scheme": "file"},
+        "relativeLocation": key,
+    }));
+    std::fs::write(
+        dir.join("extensions.json"),
+        serde_json::Value::Array(entries).to_string(),
+    )
+    .expect("index");
+    folder
+}
+
+#[test]
+fn an_invalid_extension_is_listed_as_invalid_and_its_enablement_cannot_change() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = workspace("invalid", &stand_in);
+    write_extension(
+        &dir,
+        "acme.broken",
+        "1.0.0",
+        &serde_json::json!({"name": "broken", "publisher": "acme", "version": "1.0.0", "main": "x.js"}),
+    );
+    ws.refresh_extensions().expect("refresh");
+    settle(&mut ws);
+    let broken = ws.installed_extension("acme.broken").expect("listed");
+    assert_eq!(broken.enablement, EnablementState::Invalid);
+    assert!(!broken.is_valid() && !broken.is_enabled());
+    assert_eq!(broken.problems.len(), 1, "{:?}", broken.problems);
+    assert_eq!(broken.problems[0].severity, Severity::Error);
+    assert!(
+        broken.problems[0].message.contains("`engines`"),
+        "{:?}",
+        broken.problems
+    );
+    assert_eq!(broken.notice(), NOT_LOADED);
+
+    for disable in [true, false] {
+        let started = if disable {
+            ws.disable_extension("acme.broken")
+        } else {
+            ws.enable_extension("acme.broken")
+        };
+        started.expect("queued");
+        let message = failure(&settle(&mut ws));
+        assert!(message.contains("invalid"), "{message}");
+        assert!(message.contains("`engines`"), "{message}");
+    }
+    assert_eq!(state(&dir), None);
+}
+
+#[test]
+fn an_extension_disabled_before_it_became_invalid_stays_disabled_and_can_be_enabled() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = workspace("invalid-disabled", &stand_in);
+    write_extension(
+        &dir,
+        "acme.old",
+        "1.0.0",
+        &serde_json::json!({"name": "old", "publisher": "acme", "version": "1.0.0",
+            "engines": {"vscode": "^1.999.0"}, "main": "x.js"}),
+    );
+    std::fs::create_dir_all(storage(&dir)).expect("storage");
+    std::fs::write(
+        storage(&dir).join("state.json"),
+        r#"{"extensionsIdentifiers/disabled":"[{\"id\":\"acme.old\"}]"}"#,
+    )
+    .expect("state");
+    ws.refresh_extensions().expect("refresh");
+    settle(&mut ws);
+    let old = ws.installed_extension("acme.old").expect("listed");
+    assert_eq!(old.enablement, EnablementState::DisabledGlobally);
+    assert!(!old.is_valid());
+    assert!(
+        old.problems[0].message.contains("1.147.0"),
+        "{:?}",
+        old.problems
+    );
+    ws.enable_extension("acme.old").expect("enable");
+    let events = settle(&mut ws);
+    assert!(events.contains(&ExtensionEvent::Enabled {
+        id: "acme.old".into()
+    }));
+    assert_eq!(enablement(&ws, "acme.old"), EnablementState::Invalid);
+}
+
+#[test]
+fn an_installed_extension_for_a_newer_vs_code_is_invalid() {
+    let stand_in = StandIn::start();
+    let mut fixture = Fixture::new("acme", "future", "1.0.0");
+    fixture.engine = "^1.200.0".into();
+    stand_in.publish(&fixture);
+    let (mut ws, _) = workspace("future-engine", &stand_in);
+    ws.install_extension("acme.future").expect("install");
+    let events = settle(&mut ws);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, ExtensionEvent::Installed { .. })),
+        "VS Code installs it too, and lists it as invalid: {events:?}"
+    );
+    let future = ws.installed_extension("acme.future").expect("listed");
+    assert_eq!(future.enablement, EnablementState::Invalid);
+    assert!(
+        future.problems[0].message.contains("^1.200.0"),
+        "{:?}",
+        future.problems
+    );
+}
+
+#[test]
+fn state_written_by_vs_code_is_read_and_its_other_rows_are_kept() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = with_hello("vs-code-state", &stand_in);
+    std::fs::create_dir_all(storage(&dir)).expect("storage");
+    std::fs::write(
+        storage(&dir).join("state.json"),
+        r#"{"other.key":"kept","extensionsIdentifiers/disabled":"[{\"id\":\"ACME.Hello\",\"uuid\":\"1234\"},{\"id\":\"acme.gone\"}]"}"#,
+    )
+    .expect("state");
+    ws.refresh_extensions().expect("refresh");
+    settle(&mut ws);
+    assert_eq!(
+        enablement(&ws, "acme.hello"),
+        EnablementState::DisabledGlobally,
+        "ids compare without case"
+    );
+    ws.enable_extension("acme.hello").expect("enable");
+    settle(&mut ws);
+    assert_eq!(
+        state(&dir).as_deref(),
+        Some(r#"{"other.key":"kept","extensionsIdentifiers/disabled":"[{\"id\":\"acme.gone\"}]"}"#)
+    );
+}
+
+#[test]
+fn an_unreadable_state_file_is_reported_and_never_overwritten() {
+    let stand_in = StandIn::start();
+    let (mut ws, dir) = with_hello("bad-state", &stand_in);
+    std::fs::create_dir_all(storage(&dir)).expect("storage");
+    for bad in [
+        "{ not json",
+        r#"{"extensionsIdentifiers/disabled":"[{\"uuid\":\"1\"}]"}"#,
+        r#"{"extensionsIdentifiers/disabled":"nope"}"#,
+        r#"{"extensionsIdentifiers/disabled":[]}"#,
+    ] {
+        std::fs::write(storage(&dir).join("state.json"), bad).expect("state");
+        ws.refresh_extensions().expect("refresh");
+        let events = settle(&mut ws);
+        assert!(
+            events.iter().any(|e| matches!(e, ExtensionEvent::StateFailed { message } if message.contains("left unchanged"))),
+            "{bad}: {events:?}"
+        );
+        assert_eq!(
+            enablement(&ws, "acme.hello"),
+            EnablementState::Enabled,
+            "listed as VS Code does with empty storage"
+        );
+        ws.disable_extension("acme.hello").expect("disable");
+        let message = failure(&settle(&mut ws));
+        assert!(message.contains("left unchanged"), "{message}");
+        assert_eq!(state(&dir).as_deref(), Some(bad));
+    }
+}
+
+#[test]
+fn enablement_needs_a_global_storage_folder() {
+    let stand_in = StandIn::start();
+    let dir = temp("no-storage").join("extensions");
+    let mut ws = Workspace::new();
+    ws.set_extensions_location(&dir);
+    assert_eq!(ws.global_storage_location(), None);
+    assert_eq!(
+        ws.disable_extension("acme.hello"),
+        Err(ExtensionError::NoStorageLocation)
+    );
+    assert_eq!(
+        ws.enable_extension("acme.hello"),
+        Err(ExtensionError::NoStorageLocation)
+    );
+    assert!(
+        ExtensionError::NoStorageLocation
+            .to_string()
+            .contains("storage")
+    );
+    // Without one, everything lists as enabled.
+    ws.set_extension_registry(stand_in.url()).expect("registry");
+    stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
+    ws.install_extension("acme.hello").expect("install");
+    settle(&mut ws);
+    assert_eq!(enablement(&ws, "acme.hello"), EnablementState::Enabled);
+    ws.set_global_storage_location(Path::new("/x/globalStorage"));
+    assert_eq!(
+        ws.global_storage_location(),
+        Some(Path::new("/x/globalStorage"))
+    );
+}
+
+#[test]
+fn enable_and_disable_wait_for_an_install_of_the_same_extension() {
+    let stand_in = StandIn::start();
+    stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
+    stand_in.hold();
+    let (mut ws, _) = workspace("busy-enable", &stand_in);
+    ws.install_extension("acme.hello").expect("install");
+    assert_eq!(
+        ws.disable_extension("acme.hello"),
+        Err(ExtensionError::Busy("acme.hello".into()))
+    );
+    assert_eq!(
+        ws.enable_extension("ACME.hello"),
+        Err(ExtensionError::Busy("acme.hello".into()))
+    );
+    stand_in.release();
+    settle(&mut ws);
+}
+
+#[test]
+fn the_default_global_storage_is_rustodes_own() {
+    let env = |vars: &'static [(&'static str, &'static str)]| {
+        move |key: &str| {
+            vars.iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| OsString::from(v))
+        }
+    };
+    assert_eq!(
+        default_global_storage_dir(env(&[("RUSTODE_USER_DIR", "/u"), ("HOME", "/home/u")])),
+        Some(PathBuf::from("/u/globalStorage"))
+    );
+    assert_eq!(
+        default_global_storage_dir(env(&[("XDG_CONFIG_HOME", "/cfg"), ("HOME", "/home/u")])),
+        Some(PathBuf::from("/cfg/rustode/User/globalStorage"))
+    );
+    assert_eq!(
+        default_global_storage_dir(env(&[("XDG_CONFIG_HOME", "rel"), ("HOME", "/home/u")])),
+        Some(PathBuf::from("/home/u/.config/rustode/User/globalStorage"))
+    );
+    assert_eq!(default_global_storage_dir(env(&[])), None);
+}
+
+/// The keys of a JSON object, in their order (`serde_json` keeps the order:
+/// the workspace enables its `preserve_order` feature).
+fn keys(value: &Value) -> Vec<&str> {
+    value
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
+/// `acme.hello` 1.2.3, whose package.json has three more fields after the
+/// usual ones, installed.
+fn with_extra_fields(name: &str, stand_in: &StandIn) -> (Workspace, PathBuf) {
+    let mut fixture = Fixture::new("acme", "hello", "1.2.3");
+    fixture.manifest_fields = vec![
+        ("zebra".into(), serde_json::json!({"z": 1, "a": [2, 1]})),
+        (
+            "contributes".into(),
+            serde_json::json!({"commands": [{"title": "T", "command": "c"}]}),
+        ),
+        ("alpha".into(), serde_json::json!(null)),
+    ];
+    stand_in.publish(&fixture);
+    let (mut ws, dir) = workspace(name, stand_in);
+    ws.install_extension("acme.hello").expect("install");
+    settle(&mut ws);
+    (ws, dir)
+}
+
+#[test]
+fn extensions_json_is_written_in_vs_codes_key_order() {
+    let stand_in = StandIn::start();
+    let (_, dir) = with_extra_fields("index-order", &stand_in);
+    let text = std::fs::read_to_string(dir.join("extensions.json")).expect("index");
+    let entries: Value = serde_json::from_str(&text).expect("json");
+    let entry = &entries[0];
+    assert_eq!(
+        keys(entry),
+        [
+            "identifier",
+            "version",
+            "location",
+            "relativeLocation",
+            "metadata"
+        ]
+    );
+    assert_eq!(keys(&entry["location"]), ["$mid", "path", "scheme"]);
+    assert_eq!(
+        keys(&entry["metadata"]),
+        [
+            "installedTimestamp",
+            "source",
+            "publisherDisplayName",
+            "targetPlatform",
+            "updated",
+            "private",
+            "isPreReleaseVersion",
+            "hasPreReleaseVersion",
+            "preRelease"
+        ]
+    );
+}
+
+#[test]
+fn package_json_keeps_its_field_order_and_gets_metadata_last() {
+    let stand_in = StandIn::start();
+    let (ws, dir) = with_extra_fields("manifest-order", &stand_in);
+    // Indented with tabs, as `JSON.stringify(manifest, null, '\t')` does.
+    let folder = dir.join("acme.hello-1.2.3-universal");
+    let text = std::fs::read_to_string(folder.join("package.json")).expect("manifest");
+    let manifest: Value = serde_json::from_str(&text).expect("json");
+    assert_eq!(
+        keys(&manifest),
+        [
+            "name",
+            "publisher",
+            "version",
+            "displayName",
+            "description",
+            "engines",
+            "main",
+            "zebra",
+            "contributes",
+            "alpha",
+            "__metadata"
+        ]
+    );
+    assert_eq!(keys(&manifest["zebra"]), ["z", "a"]);
+    assert_eq!(
+        keys(&manifest["__metadata"]),
+        ["installedTimestamp", "targetPlatform", "size"]
+    );
+    assert!(
+        text.starts_with("{\n\t\"name\": \"hello\",\n\t\"publisher\": \"acme\",\n"),
+        "{text}"
+    );
+    assert!(text.contains("\n\t\"alpha\": null,\n"), "{text}");
+    assert!(
+        text.contains("\"zebra\": {\n\t\t\"z\": 1,\n\t\t\"a\": [\n\t\t\t2,\n\t\t\t1\n\t\t]\n\t}"),
+        "{text}"
+    );
+    assert!(!text.ends_with('\n'), "JSON.stringify adds no newline");
+    // The listed manifest model holds every field.
+    let installed = ws.installed_extension("acme.hello").expect("installed");
+    let unknown: Vec<&str> = installed
+        .manifest
+        .unknown_fields()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(unknown, ["zebra", "alpha", "__metadata"]);
+}
+
+/// A manifest with every field the model reads, some of another type,
+/// and two it does not know.
+const FULL_MANIFEST: &str = r#"{
+    "name": "hello", "publisher": "acme", "version": "1.0.0",
+    "engines": {"vscode": "^1.80.0", "node": ">=18"},
+    "displayName": "%name%", "description": 7,
+    "main": "./out/main.js", "browser": "./web/main.js",
+    "activationEvents": ["onStartupFinished", "onCommand:x"],
+    "contributes": {"commands": []},
+    "extensionDependencies": ["acme.base"], "extensionPack": ["acme.a", "acme.b"],
+    "extensionKind": "workspace", "icon": "icon.png", "x-custom": {"deep": [1]}
+}"#;
+
+#[test]
+fn the_manifest_model_reads_vs_codes_fields() {
+    let manifest = ExtensionManifest::parse(FULL_MANIFEST).expect("manifest");
+    assert_eq!(manifest.name(), Some("hello"));
+    assert_eq!(manifest.publisher(), Some("acme"));
+    assert_eq!(manifest.version(), Some("1.0.0"));
+    assert_eq!(manifest.engine(), Some("^1.80.0"));
+    assert_eq!(manifest.display_name(), Some("%name%"));
+    assert_eq!(manifest.main(), Some("./out/main.js"));
+    assert_eq!(manifest.browser(), Some("./web/main.js"));
+    assert_eq!(
+        manifest.activation_events(),
+        Some(vec!["onStartupFinished", "onCommand:x"])
+    );
+    assert_eq!(
+        manifest.contributes(),
+        Some(&serde_json::json!({"commands": []}))
+    );
+    assert_eq!(manifest.extension_dependencies(), Some(vec!["acme.base"]));
+    assert_eq!(manifest.extension_pack(), Some(vec!["acme.a", "acme.b"]));
+    assert_eq!(manifest.extension_kind(), Some(vec!["workspace"]));
+    let kinds =
+        ExtensionManifest::parse(r#"{"extensionKind": ["ui", "workspace"]}"#).expect("kinds");
+    assert_eq!(kinds.extension_kind(), Some(vec!["ui", "workspace"]));
+    assert_eq!(kinds.name(), None);
+}
+
+#[test]
+fn the_manifest_model_keeps_every_field() {
+    let manifest = ExtensionManifest::parse(FULL_MANIFEST).expect("manifest");
+    assert_eq!(manifest.description(), None, "not a string");
+    assert_eq!(
+        manifest.get("description"),
+        Some(&serde_json::json!(7)),
+        "but kept"
+    );
+    let unknown: Vec<&str> = manifest.unknown_fields().map(|(k, _)| k).collect();
+    assert_eq!(unknown, ["icon", "x-custom"]);
+    assert_eq!(manifest.fields().len(), 15, "nothing is dropped");
+    assert_eq!(manifest.fields()["engines"]["node"], ">=18");
+    assert_eq!(
+        ExtensionManifest::from_fields(manifest.fields().clone()),
+        manifest
+    );
+    for bad in ["[1]", "\"x\"", "{ nope"] {
+        assert!(ExtensionManifest::parse(bad).is_err(), "{bad}");
+    }
+}
+
+/// The first error validation finds in `manifest`, if any.
+fn first_error(manifest: &Value) -> Option<String> {
+    ExtensionManifest::parse(&manifest.to_string())
+        .expect("object")
+        .validate(Path::new("/ext/acme.x-1.0.0"))
+        .into_iter()
+        .find(ManifestProblem::is_error)
+        .map(|p| p.message)
+}
+
+#[test]
+fn manifests_are_validated_as_vs_codes_scanner_does() {
+    use serde_json::json;
+    let valid = json!({"name": "x", "publisher": "acme", "version": "1.0.0",
+        "engines": {"vscode": "^1.80.0"}, "main": "./out/main.js"});
+    assert_eq!(first_error(&valid), None);
+    let with = |key: &str, value: Value| {
+        let mut manifest = valid.clone();
+        manifest[key] = value;
+        manifest
+    };
+    let without = |key: &str| {
+        let mut manifest = valid.clone();
+        manifest.as_object_mut().expect("object").remove(key);
+        manifest
+    };
+    // Each case breaks one rule; the expected text names the property.
+    let cases = [
+        (with("publisher", json!(5)), "`publisher`"),
+        (without("name"), "`name`"),
+        (with("name", json!(["x"])), "`name`"),
+        (without("version"), "`version`"),
+        (without("engines"), "`engines`"),
+        (with("engines", json!("^1.80.0")), "`engines.vscode`"),
+        (with("engines", json!({"vscode": 1})), "`engines.vscode`"),
+        (
+            with("extensionDependencies", json!("acme.y")),
+            "`extensionDependencies`",
+        ),
+        (with("extensionAffinity", json!([1])), "`extensionAffinity`"),
+        (with("activationEvents", json!(null)), "`activationEvents`"),
+        (with("main", json!(1)), "`main`"),
+        (with("browser", json!(false)), "`browser`"),
+        (with("version", json!("1.0")), "semver"),
+        (
+            with("engines", json!({"vscode": "*"})),
+            "not specific enough",
+        ),
+        (with("engines", json!({"vscode": "^2.0.0"})), "1.147.0"),
+    ];
+    for (manifest, expected) in &cases {
+        let error = first_error(manifest).unwrap_or_else(|| panic!("valid: {manifest}"));
+        assert!(error.contains(expected), "{manifest}: {error}");
+    }
+    let no_code = json!({"name": "x", "version": "1.0.0", "engines": {"vscode": "^9.0.0"},
+        "activationEvents": ["*"]});
+    assert!(
+        first_error(&no_code).is_some_and(|e| e.contains("`activationEvents`")),
+        "activation events need code"
+    );
+    // A declarative extension (no main, no browser) skips the engine check,
+    // an empty publisher reads as undefined_publisher, and these are
+    // warnings only.
+    let declarative = json!({"name": "x", "publisher": "", "version": "1.0.0",
+        "engines": {"vscode": "^9.0.0"}, "extensionKind": ["ui"]});
+    assert_eq!(first_error(&declarative), None);
+    let outside = with("main", json!("../../elsewhere/main.js"));
+    let problems = ExtensionManifest::parse(&outside.to_string())
+        .expect("object")
+        .validate(Path::new("/ext/acme.x-1.0.0"));
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].severity, Severity::Warning);
+    assert!(problems[0].message.contains("`main`"), "{problems:?}");
+    let kind = ExtensionManifest::parse(&declarative.to_string())
+        .expect("object")
+        .validate(Path::new("/ext/x"));
+    assert!(
+        kind.iter()
+            .any(|p| !p.is_error() && p.message.contains("`extensionKind`")),
+        "{kind:?}"
+    );
 }
