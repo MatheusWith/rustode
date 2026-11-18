@@ -29,11 +29,14 @@
 //!   color registry's list selection colors and focus outline
 //!   (`src/vs/platform/theme/common/colors/listColors.ts:25-27`, `:33-39`,
 //!   `:45-47`; `focusBorder`, `dark_modern.json:48`).
+//!
+//! The tree is one Tab stop: Tab and Shift+Tab leave it for the next and
+//! the previous part (`focus.rs`).
 
 use crate::keys::{self, ExplorerKey};
 use eframe::egui::{
     self, Align, Color32, EventFilter, FontId, Id, Label, Layout, Pos2, Rect, RichText, Sense,
-    Shape, Stroke, StrokeKind, Ui, UiBuilder, Vec2, accesskit, pos2,
+    Shape, Stroke, Ui, UiBuilder, Vec2, accesskit, pos2,
 };
 use rustode_workspace::{ExplorerRow, Workspace};
 use std::path::Path;
@@ -58,7 +61,6 @@ const FOREGROUND: Color32 = Color32::from_rgb(0xcc, 0xcc, 0xcc);
 const SELECTION: Color32 = Color32::from_rgb(0x04, 0x39, 0x5e);
 const SELECTION_FOREGROUND: Color32 = Color32::from_rgb(0xff, 0xff, 0xff);
 const INACTIVE_SELECTION: Color32 = Color32::from_rgb(0x37, 0x37, 0x3d);
-const FOCUS_OUTLINE: Color32 = Color32::from_rgb(0x00, 0x78, 0xd4);
 
 /// The tree's widget id: it takes keyboard focus.
 pub(crate) fn id() -> Id {
@@ -139,8 +141,12 @@ fn rows(workspace: &Workspace) -> Vec<ExplorerRow> {
 pub(crate) fn show(ui: &mut Ui, workspace: &mut Workspace, view: &mut View) -> Outcome {
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0.0, BACKGROUND);
-    ui.painter()
-        .vline(rect.right() - 0.5, rect.y_range(), Stroke::new(1.0, BORDER));
+    let hairline = crate::focus::hairline(ui.pixels_per_point());
+    ui.painter().vline(
+        rect.right() - 0.5,
+        rect.y_range(),
+        Stroke::new(hairline, BORDER),
+    );
     let title = Rect::from_min_size(rect.min, Vec2::new(rect.width(), TITLE_HEIGHT));
     text(ui, title, "EXPLORER", TITLE_SIZE, 20.0);
     let header = Rect::from_min_size(
@@ -233,7 +239,7 @@ fn keyboard(
         memory.set_focus_lock_filter(
             id(),
             EventFilter {
-                tab: true,
+                tab: false,
                 horizontal_arrows: true,
                 vertical_arrows: true,
                 escape: true,
@@ -390,12 +396,7 @@ fn paint(
         if index == selected {
             if focused {
                 painter.rect_filled(place, 0.0, SELECTION);
-                painter.rect_stroke(
-                    place,
-                    0.0,
-                    Stroke::new(1.0, FOCUS_OUTLINE),
-                    StrokeKind::Inside,
-                );
+                crate::focus::outline(&painter, place);
                 color = SELECTION_FOREGROUND;
             } else {
                 painter.rect_filled(place, 0.0, INACTIVE_SELECTION);

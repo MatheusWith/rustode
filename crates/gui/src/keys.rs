@@ -25,10 +25,12 @@
 //!   (`src/vs/workbench/browser/actions/layoutActions.ts:308-311`);
 //! - Ctrl+Shift+E focuses the explorer
 //!   (`src/vs/workbench/contrib/files/browser/explorerViewlet.ts:271`);
-//! - F6 moves focus to the next part
-//!   (`src/vs/workbench/browser/actions/navigationActions.ts:362-367`);
+//! - F6 and Shift+F6 move focus to the next and the previous part
+//!   (`src/vs/workbench/browser/actions/navigationActions.ts:358-388`);
+//! - Ctrl+M turns "Tab Moves Focus" on and off
+//!   (`src/vs/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode.ts:15-43`);
 //! - Ctrl+Shift+M toggles the problems panel
-//!   (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`).
+//!   (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`);
 //! - Ctrl+Shift+F shows the Search view
 //!   (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:239-242`).
 //!
@@ -145,6 +147,9 @@ pub(crate) enum Workbench {
     ToggleSidebar,
     FocusExplorer,
     FocusNextPart,
+    FocusPreviousPart,
+    /// Ctrl+M: whether Tab moves focus instead of indenting.
+    ToggleTabMovesFocus,
     /// Ctrl+Shift+X: the Extensions view in the sidebar.
     ShowExtensions,
     /// Ctrl+Shift+M: the problems panel.
@@ -178,6 +183,8 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::M, true, true, false) => Workbench::ToggleProblems,
         (Key::F, true, true, false) => Workbench::ShowSearch,
         (Key::F6, false, false, false) => Workbench::FocusNextPart,
+        (Key::F6, false, true, false) => Workbench::FocusPreviousPart,
+        (Key::M, true, false, false) => Workbench::ToggleTabMovesFocus,
         _ => return None,
     })
 }

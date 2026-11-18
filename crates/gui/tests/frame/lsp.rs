@@ -5,7 +5,7 @@
 //! `ERROR` and `WARN`. Going to a problem opens or activates its file's tab.
 
 use super::{press, status};
-use eframe::egui::{Key, Modifiers, ViewportId, accesskit::Role};
+use eframe::egui::{self, Key, Modifiers, ViewportId, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use rustode_gui::EditorApp;
@@ -201,4 +201,79 @@ fn a_click_on_the_counts_toggles_the_panel_and_a_row_click_goes_to_it() {
         "the problem's tab is active: {}",
         harness.state().window_title()
     );
+}
+
+/// The label or value of what has keyboard focus.
+fn focused(harness: &Harness<'_, EditorApp>) -> String {
+    let node = harness
+        .query_all(egui_kittest::kittest::by())
+        .find(egui_kittest::Node::is_focused)
+        .expect("something has focus");
+    let data = node.accesskit_node();
+    format!(
+        "{:?} {}",
+        data.role(),
+        data.label().or_else(|| data.value()).unwrap_or_default()
+    )
+}
+
+#[test]
+fn f6_goes_through_the_problems_panel_between_the_editor_and_the_status_bar() {
+    let mut harness = open("f6");
+    wait(&mut harness, |h| {
+        counts(h).is_some_and(|c| c.starts_with("Errors"))
+    });
+    press(&mut harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::M);
+    assert!(
+        focused(&harness).contains("ERROR found"),
+        "{}",
+        focused(&harness)
+    );
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert_eq!(focused(&harness), "Status ", "panel, then status bar");
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert!(
+        focused(&harness).starts_with("TreeItem"),
+        "then the sidebar"
+    );
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert!(focused(&harness).starts_with("MultilineTextInput"));
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert!(
+        focused(&harness).contains("ERROR found"),
+        "the editor goes on to the panel: {}",
+        focused(&harness)
+    );
+    press(&mut harness, Modifiers::SHIFT, Key::F6);
+    assert!(focused(&harness).starts_with("MultilineTextInput"));
+}
+
+#[test]
+fn enter_on_the_counts_in_the_status_bar_shows_the_panel() {
+    let mut harness = open("counts-key");
+    wait(&mut harness, |h| {
+        counts(h).is_some_and(|c| c.starts_with("Errors"))
+    });
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert_eq!(focused(&harness), "Status ");
+    press(&mut harness, Modifiers::NONE, Key::Home);
+    assert_eq!(rows(&harness).len(), 0, "no panel yet");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert_eq!(rows(&harness).len(), 2, "Enter on the counts shows it");
+    assert!(
+        focused(&harness).contains("ERROR found"),
+        "and focuses its first row: {}",
+        focused(&harness)
+    );
+}
+
+#[test]
+fn the_counts_drop_out_of_a_status_bar_too_narrow_for_them() {
+    let mut harness = open("counts-narrow");
+    wait(&mut harness, |h| {
+        counts(h).is_some_and(|c| c.starts_with("Errors"))
+    });
+    harness.set_size(egui::Vec2::new(30.0, 360.0));
+    harness.run();
+    assert!(counts(&harness).is_none(), "{:?}", counts(&harness));
 }

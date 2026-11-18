@@ -25,9 +25,18 @@
 //!   (`extensions/theme-defaults/themes/dark_modern.json:37-39`, `:104-112`).
 //!
 //! The strip scrolls sideways just enough to keep the active tab in view.
+//!
+//! **Keyboard**, as in VS Code: only the active tab and its close button
+//! are Tab stops; on the active tab, Left/Up and Right/Down activate the
+//! previous and the next tab and Home and End the first and the last,
+//! keeping the focus on the strip, while Enter or Space moves it to the
+//! editor (`src/vs/workbench/browser/parts/editor/multiEditorTabsControl.ts:1223-1257`,
+//! `:1909-1910`). A focused tab or close button shows the focus outline.
 
+use crate::focus;
 use eframe::egui::{
-    Color32, FontId, Id, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, accesskit, pos2,
+    Color32, EventFilter, FontId, Id, Key, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
+    accesskit, pos2,
 };
 use rustode_workspace::{DocumentId, Workspace};
 
@@ -56,10 +65,13 @@ pub(crate) struct Strip {
     scroll: f32,
 }
 
-/// What a click on the strip asks for.
+/// What a click or a key on the strip asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Action {
+    /// Activate the tab and focus the editor.
     Activate(DocumentId),
+    /// Activate the tab and keep the focus on the strip.
+    Select(DocumentId),
     Close(DocumentId),
 }
 
@@ -82,7 +94,7 @@ pub(crate) fn show(ui: &mut Ui, workspace: &Workspace, strip: &mut Strip) -> Opt
     painter.hline(
         rect.x_range(),
         rect.bottom() - 0.5,
-        Stroke::new(1.0, BORDER),
+        Stroke::new(focus::hairline(ui.pixels_per_point()), BORDER),
     );
     let tabs = measure(ui, workspace);
     strip.reveal(&tabs, rect.width());
@@ -99,7 +111,51 @@ pub(crate) fn show(ui: &mut Ui, workspace: &Workspace, strip: &mut Strip) -> Opt
             action = Some(clicked);
         }
     }
+    if ui.memory(|memory| memory.has_focus(tab_id_of(workspace.active_document()))) {
+        action = keyboard(ui, &tabs).or(action);
+    }
     action
+}
+
+/// The active tab's keys: the tab they activate, keeping the focus here.
+fn keyboard(ui: &Ui, tabs: &[Tab]) -> Option<Action> {
+    let active = tabs.iter().position(|tab| tab.active)?;
+    ui.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            tab_id(tabs[active].id),
+            EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                ..EventFilter::default()
+            },
+        );
+    });
+    let target = ui.input(|input| {
+        let mut target = active;
+        for event in &input.events {
+            let eframe::egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            if modifiers.any() {
+                continue;
+            }
+            target = match key {
+                Key::ArrowLeft | Key::ArrowUp => target.saturating_sub(1),
+                Key::ArrowRight | Key::ArrowDown => (target + 1).min(tabs.len() - 1),
+                Key::Home => 0,
+                Key::End => tabs.len() - 1,
+                _ => target,
+            };
+        }
+        target
+    });
+    (target != active).then(|| Action::Select(tabs[target].id))
 }
 
 fn font() -> FontId {
@@ -154,14 +210,26 @@ impl Strip {
     }
 }
 
-fn tab_id(id: DocumentId) -> Id {
+/// The widget id of `id`'s tab.
+pub(crate) fn tab_id(id: DocumentId) -> Id {
     Id::new(("rustode-tab", id))
 }
 
+/// The widget id of the active tab, if any.
+fn tab_id_of(id: Option<DocumentId>) -> Id {
+    id.map_or(Id::NULL, tab_id)
+}
+
 /// Draws one tab and its close button, exposes them, and returns a click.
+/// Only the active tab and its close button take focus.
 fn show_tab(ui: &mut Ui, tab: &Tab, place: Rect) -> Option<Action> {
     let id = tab_id(tab.id);
-    let response = ui.interact(place, id, Sense::CLICK);
+    let sense = if tab.active {
+        Sense::click()
+    } else {
+        Sense::CLICK
+    };
+    let response = ui.interact(place, id, sense);
     // The tab's node first: the close button's node is its child.
     expose(ui, id, place, |node| {
         node.set_role(accesskit::Role::Tab);
@@ -183,7 +251,7 @@ fn show_tab(ui: &mut Ui, tab: &Tab, place: Rect) -> Option<Action> {
                 .id_salt(close_id)
                 .accessibility_parent(id),
             |ui| {
-                let close = ui.interact(slot, close_id, Sense::CLICK);
+                let close = ui.interact(slot, close_id, sense);
                 expose(ui, close_id, slot, |node| {
                     node.set_role(accesskit::Role::Button);
                     node.set_label("Close");
@@ -199,6 +267,12 @@ fn show_tab(ui: &mut Ui, tab: &Tab, place: Rect) -> Option<Action> {
         response.hovered() || close.hovered(),
         close.hovered(),
     );
+    let painter = ui.painter_at(ui.clip_rect().intersect(place));
+    if response.has_focus() {
+        focus::outline(&painter, place);
+    } else if close.has_focus() {
+        focus::outline(&painter, slot.shrink(4.0));
+    }
     if close.clicked() {
         Some(Action::Close(tab.id))
     } else if response.clicked() {
@@ -225,23 +299,24 @@ fn paint(ui: &Ui, tab: &Tab, place: Rect, hovered: bool, close_hovered: bool) {
         (STRIP, INACTIVE_FOREGROUND)
     };
     painter.rect_filled(place, 0.0, background);
+    let hairline = focus::hairline(ui.pixels_per_point());
     if tab.active {
         painter.hline(
             place.x_range(),
             place.top() + 0.5,
-            Stroke::new(1.0, ACTIVE_BORDER_TOP),
+            Stroke::new(hairline, ACTIVE_BORDER_TOP),
         );
     } else {
         painter.hline(
             place.x_range(),
             place.bottom() - 0.5,
-            Stroke::new(1.0, BORDER),
+            Stroke::new(hairline, BORDER),
         );
     }
     painter.vline(
         place.right() - 0.5,
         place.y_range(),
-        Stroke::new(1.0, BORDER),
+        Stroke::new(hairline, BORDER),
     );
     painter.text(
         pos2(place.left() + PADDING, place.center().y),

@@ -192,3 +192,25 @@ fn escape_gives_focus_back_to_the_editor() {
     assert!(harness.get_by_role(Role::MultilineTextInput).is_focused());
     assert_label(&harness, "SEARCH");
 }
+
+#[test]
+fn f6_leaves_the_search_view_for_the_editor_and_comes_back_to_it() {
+    let (mut harness, _root) = open("f6");
+    ctrl_shift_f(&mut harness);
+    let search_box = focused_input(&harness).expect("the search box has focus");
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert!(focused_input(&harness).is_none(), "the editor");
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert!(focused_input(&harness).is_none(), "the status bar");
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert_eq!(
+        focused_input(&harness),
+        Some(search_box),
+        "F6 from the status bar goes to the sidebar's search box"
+    );
+    press(&mut harness, Modifiers::SHIFT, Key::F6);
+    assert!(
+        focused_input(&harness).is_none(),
+        "Shift+F6: the status bar"
+    );
+}
