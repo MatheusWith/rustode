@@ -18,11 +18,12 @@ use crate::theme::Theme;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use rustode_workspace::{
-    Document, DocumentId, Eol, Highlight, Marker, MarkerSeverity, Position, Selection, ServerState,
+    DebugState, Document, DocumentId, Eol, Highlight, Marker, MarkerSeverity, Position, Selection,
+    ServerState,
 };
 use std::collections::HashMap;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -407,6 +408,21 @@ fn draw_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
     }
 }
 
+/// The debug session for the status bar: its state while there is one, or
+/// why the last one ended.
+fn debug_label(workspace: &rustode_workspace::Workspace) -> String {
+    let status = workspace.debug_status();
+    match (status.state, &status.configuration, &status.message) {
+        (DebugState::Inactive, _, Some(message)) => format!("  Debug: {message}"),
+        (DebugState::Inactive, _, None) => String::new(),
+        (state, name, _) => format!(
+            "  Debug: {} ({})",
+            state.label(),
+            name.as_deref().unwrap_or_default()
+        ),
+    }
+}
+
 fn draw_status(app: &mut App, frame: &mut Frame, area: Rect) {
     let document = app.document().and_then(|id| app.workspace.document(id));
     let server = app
@@ -445,6 +461,7 @@ fn draw_status(app: &mut App, frame: &mut Frame, area: Rect) {
         let dirty = if document.is_dirty() { " ●" } else { "" };
         format!(" {}{dirty}", file_name(document))
     }));
+    left.push_str(&debug_label(&app.workspace));
     if let Some(message) = &app.message {
         left = format!("{left}  {message}");
     }
@@ -605,6 +622,7 @@ fn visible_markers(
 fn gutter_spans(
     theme: &Theme,
     letter: Option<MarkerSeverity>,
+    debug: Option<Mark>,
     line: usize,
     gutter: usize,
     active: bool,
@@ -614,6 +632,18 @@ fn gutter_spans(
     } else {
         theme.gutter
     };
+    if let Some(mark) = debug
+        && gutter >= 3
+    {
+        let (glyph, color) = match mark {
+            Mark::Stopped => ("▶", Color::Yellow),
+            Mark::Breakpoint => ("●", Color::Red),
+        };
+        return vec![
+            Span::styled(glyph, Style::default().fg(color)),
+            Span::styled(format!("{:>w$} ", line + 1, w = gutter - 2), style),
+        ];
+    }
     match letter {
         Some(severity) if gutter >= 3 => {
             let (letter, letter_style) = theme.letter(severity);
@@ -627,6 +657,14 @@ fn gutter_spans(
             style,
         )],
     }
+}
+
+/// What the debugger puts in a line's gutter: the stop wins over a
+/// breakpoint, which wins over a problem's letter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Breakpoint,
+    Stopped,
 }
 
 /// The most severe problem starting on each line, hints left out.
@@ -688,10 +726,17 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         highlights: document.highlights(view.top..view.top + height),
         markers,
     };
+    let breakpoints = app.workspace.breakpoints(id);
+    let stopped = app.workspace.stopped_line(id);
     let buffer = frame.buffer_mut();
     for (row, line) in (view.top..lines).take(height).enumerate() {
         let letter = letters.get(&line).copied();
-        let mut spans = gutter_spans(&app.theme, letter, line, gutter, line == cursor.line);
+        let debug = if stopped == Some(line) {
+            Some(Mark::Stopped)
+        } else {
+            breakpoints.contains(&line).then_some(Mark::Breakpoint)
+        };
+        let mut spans = gutter_spans(&app.theme, letter, debug, line, gutter, line == cursor.line);
         spans.extend(row_spans(&context, line));
         buffer.set_line(area.x, area.y + to_u16(row), &Line::from(spans), area.width);
     }
