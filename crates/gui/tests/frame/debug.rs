@@ -4,10 +4,10 @@
 //! F5 continues it to the end and Shift+F5 stops it. The adapter is
 //! `rustode-test-dap`, whose program is a text file.
 
-use super::{press, quiet, status};
+use super::{press, quiet, status, type_text};
 use eframe::egui::{Event, Key, Modifiers, PointerButton, Pos2, accesskit::Role};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use rustode_gui::{EditorApp, LINE_HEIGHT};
 use rustode_workspace::{DebugState, Workspace};
 use std::path::PathBuf;
@@ -42,13 +42,28 @@ fn adapter() -> PathBuf {
 /// A window on the program in an opened folder with a `launch.json`, then
 /// settings that name the test adapter.
 fn open(name: &str) -> Harness<'static, EditorApp> {
+    open_program(
+        name,
+        "print one\nprint two\nprint three\n",
+        [640.0, 360.0],
+        &[],
+    )
+}
+
+/// As [`open`], on this program, in a window of this size.
+fn open_program(
+    name: &str,
+    program: &str,
+    size: [f32; 2],
+    breakpoints: &[usize],
+) -> Harness<'static, EditorApp> {
     let base = std::env::temp_dir().join(format!("rustode-gui-dap-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let dir = base.join("project");
     std::fs::create_dir_all(dir.join(".vscode")).expect("temp dir");
     std::fs::create_dir_all(base.join("user")).expect("temp dir");
     let file = dir.join("program.txt");
-    std::fs::write(&file, "print one\nprint two\nprint three\n").expect("program");
+    std::fs::write(&file, program).expect("program");
     std::fs::write(
         dir.join(".vscode/launch.json"),
         r#"{ "configurations": [ { "name": "Run program", "type": "test", "request": "launch",
@@ -61,14 +76,15 @@ fn open(name: &str) -> Harness<'static, EditorApp> {
     std::fs::write(base.join("user/settings.json"), settings).expect("settings");
     let mut workspace = Workspace::new();
     workspace.open_folder(&dir).expect("folder");
-    workspace.open(&file).expect("open");
+    let id = workspace.open(&file).expect("open");
+    for line in breakpoints {
+        workspace.toggle_breakpoint(id, *line).expect("breakpoint");
+    }
     let app = EditorApp::new(workspace);
-    let mut harness = Harness::builder()
-        .with_size([640.0, 360.0])
-        .build_eframe(move |cc| {
-            rustode_gui::fonts::install(&cc.egui_ctx);
-            app
-        });
+    let mut harness = Harness::builder().with_size(size).build_eframe(move |cc| {
+        rustode_gui::fonts::install(&cc.egui_ctx);
+        app
+    });
     quiet(&mut harness);
     harness.state_mut().load_user_config(&base.join("user"));
     harness
@@ -164,4 +180,133 @@ fn shift_f5_stops_the_session_and_f9_toggles_at_the_caret() {
     wait(&mut harness, |h| {
         h.state().workspace().debug_status().state == DebugState::Inactive
     });
+}
+
+// ---- ticket 38: stepping, call stack, variables, watch and console ----
+
+const NESTED: &str = "print starting\nglobal g 9\nvar a 1\nobj p k=v\nenter outer\nvar b 2\n\
+obj o x=1 inner=@p\nprint in outer\nleave\nprint done\n";
+
+fn state(harness: &Harness<'_, EditorApp>) -> DebugState {
+    harness.state().workspace().debug_status().state
+}
+
+/// Stopped on the line of `print in outer` with the views loaded.
+fn stopped_in_outer(name: &str) -> Harness<'static, EditorApp> {
+    let mut harness = open_program(name, NESTED, [900.0, 520.0], &[7]);
+    press(&mut harness, Modifiers::NONE, Key::F5);
+    wait(&mut harness, |h| {
+        let ws = h.state().workspace();
+        let rows = ws.debug_rows(rustode_workspace::DebugTree::Variables);
+        state(h) == DebugState::Stopped
+            && ws.debug_frames().len() == 2
+            && rows.len() > 2
+            && rows.iter().all(|r| !r.loading)
+    });
+    harness
+}
+
+#[test]
+fn the_stopped_state_shows_call_stack_variables_watch_and_console() {
+    let mut harness = stopped_in_outer("views");
+    harness.snapshot("debug_views_stopped");
+    // The panel is on screen: its rows are buttons a screen reader finds.
+    harness.get_by_label("outer program.txt:8");
+    harness.get_by_label("main program.txt:5");
+    harness.get_by_label("b, value 2");
+    harness.get_by_label("o, value Object");
+
+    // Watch: the palette focuses the field; Enter adds the expression.
+    press(&mut harness, Modifiers::NONE, Key::F1);
+    type_text(&mut harness, "focus on watch");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, "b");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    wait(&mut harness, |h| {
+        h.state()
+            .workspace()
+            .debug_rows(rustode_workspace::DebugTree::Watch)
+            .first()
+            .is_some_and(|r| r.value == "2")
+    });
+    // Console: evaluate an object, then open `o` in Variables with a click.
+    press(&mut harness, Modifiers::NONE, Key::F1);
+    type_text(&mut harness, "focus on debug console");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, "o");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    wait(&mut harness, |h| {
+        h.state()
+            .workspace()
+            .debug_console()
+            .iter()
+            .any(|l| l.text == "Object")
+    });
+    harness.get_by_label("o, value Object").click();
+    quiet(&mut harness);
+    wait(&mut harness, |h| {
+        h.state()
+            .workspace()
+            .debug_rows(rustode_workspace::DebugTree::Variables)
+            .len()
+            > 5
+    });
+    harness.get_by_label("x, value 1");
+    harness.snapshot("debug_views_inspected");
+}
+
+#[test]
+fn f10_f11_and_shift_f11_step_and_a_click_on_a_frame_moves_the_editor() {
+    let mut harness = stopped_in_outer("steps");
+    let id = harness.state().workspace().tabs()[0];
+    let line = |h: &Harness<'_, EditorApp>| h.state().workspace().stopped_line(id);
+    assert_eq!(line(&harness), Some(7));
+    press(&mut harness, Modifiers::NONE, Key::F10);
+    wait(&mut harness, |h| {
+        state(h) == DebugState::Stopped && line(h) == Some(8)
+    });
+    wait(&mut harness, |h| {
+        h.state().workspace().debug_frames().len() == 2
+    });
+    // Back to the caller by clicking its frame: the editor goes there.
+    harness.get_by_label("main program.txt:5").click();
+    quiet(&mut harness);
+    assert_eq!(harness.state().workspace().debug_selected_frame(), 1);
+    assert_eq!(line(&harness), Some(4));
+    let cursor = harness
+        .state()
+        .workspace()
+        .document(id)
+        .expect("document")
+        .cursor_position();
+    assert_eq!(cursor.line, 4);
+
+    press(&mut harness, Modifiers::SHIFT, Key::F11);
+    wait(&mut harness, |h| {
+        state(h) == DebugState::Stopped && line(h) == Some(9)
+    });
+    press(&mut harness, Modifiers::NONE, Key::F11);
+    wait(&mut harness, |h| state(h) == DebugState::Inactive);
+}
+
+#[test]
+fn f6_pauses_while_the_program_runs_and_moves_the_focus_otherwise() {
+    let mut harness = open_program("f6", "print a\nWAIT\nprint b\n", [900.0, 520.0], &[]);
+    press(&mut harness, Modifiers::NONE, Key::F5);
+    wait(&mut harness, |h| state(h) == DebugState::Running);
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    wait(&mut harness, |h| state(h) == DebugState::Stopped);
+    assert_eq!(
+        harness.state().workspace().debug_status().reason.as_deref(),
+        Some("pause")
+    );
+    let focused = |h: &Harness<'_, EditorApp>| {
+        h.query_all_by_role(Role::TextInput)
+            .any(|node| node.accesskit_node().is_focused())
+    };
+    assert!(!focused(&harness), "the key paused, it did not move focus");
+    // Stopped: F6 is "focus the next part", and the debug panel is one.
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    assert_eq!(state(&harness), DebugState::Stopped);
+    assert!(focused(&harness), "the panel's console took the focus");
 }

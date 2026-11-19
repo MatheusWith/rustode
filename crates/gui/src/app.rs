@@ -36,7 +36,7 @@ use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::quick_input::QuickInput;
 use crate::{
-    editor, explorer, extensions, find, focus, language, layout, navigate, problems, search,
+    debug, editor, explorer, extensions, find, focus, language, layout, navigate, problems, search,
     status, tabs,
 };
 use eframe::egui::{
@@ -101,6 +101,10 @@ pub struct EditorApp {
     waker_set: bool,
     /// The problems panel below the editor.
     problems: problems::Panel,
+    /// The debug panel below the editor.
+    debug: debug::Panel,
+    /// Where the debug panel was drawn last frame.
+    debug_area: Option<Rect>,
     /// Whether the editor takes focus on the next frame: after going to a
     /// problem with Enter, so the key does not reach the editor too.
     focus_editor_next: bool,
@@ -200,6 +204,8 @@ impl EditorApp {
             language: language::Picker::default(),
             navigator: navigate::Navigator::default(),
             problems: problems::Panel::default(),
+            debug: debug::Panel::default(),
+            debug_area: None,
             focus_editor_next: false,
             quick: None,
             find: find::Find::default(),
@@ -355,6 +361,27 @@ impl EditorApp {
         }
     }
 
+    /// The debug panel below the editor, if shown; returns the rest.
+    fn show_debug(&mut self, ui: &mut egui::Ui, rect: Rect) -> Rect {
+        if !debug::visible(&self.debug, &self.workspace) {
+            self.debug_area = None;
+            return rect;
+        }
+        let height = debug::PANEL_HEIGHT.min(rect.height() / 2.0);
+        let (above, lower) = rect.split_top_bottom_at_y(rect.bottom() - height);
+        self.debug_area = Some(lower);
+        let outcome = ui
+            .scope_builder(
+                UiBuilder::new().max_rect(lower).id_salt("rustode-debug"),
+                |ui| debug::show(ui, &mut self.workspace, &mut self.debug),
+            )
+            .inner;
+        if let Some(error) = outcome.error {
+            self.message = Some(error);
+        }
+        above
+    }
+
     /// The panel below the editor, if shown; returns the editor's rect.
     fn show_problems(&mut self, ui: &mut egui::Ui, rect: Rect) -> Rect {
         if !self.problems.visible {
@@ -440,6 +467,13 @@ impl EditorApp {
             }
             Workbench::ToggleSidebar => self.toggle_sidebar(ctx),
             Workbench::FocusExplorer => self.focus_explorer(ctx),
+            Workbench::FocusNextPart
+                if self
+                    .workspace
+                    .command_applies(rustode_workspace::PAUSE_COMMAND) =>
+            {
+                self.debug_key(ctx, rustode_workspace::PAUSE_COMMAND);
+            }
             Workbench::FocusNextPart => self.focus_part(ctx, true),
             Workbench::FocusPreviousPart => self.focus_part(ctx, false),
             Workbench::ToggleTabMovesFocus => focus::toggle_tab_moves_focus(ctx),
@@ -487,6 +521,20 @@ impl EditorApp {
                 self.run_command(ctx, id);
             }
             Workbench::DebugStop => self.run_command(ctx, "workbench.action.debug.stop"),
+            // F6 pauses while the program runs: `debugState == 'running'`
+            // wins over moving the focus, as in VS Code.
+            Workbench::StepOver => self.debug_key(ctx, rustode_workspace::STEP_OVER_COMMAND),
+            Workbench::StepInto => self.debug_key(ctx, rustode_workspace::STEP_INTO_COMMAND),
+            Workbench::StepOut => self.debug_key(ctx, rustode_workspace::STEP_OUT_COMMAND),
+            Workbench::FocusCallStack => self.debug.focus(debug::Column::CallStack),
+            Workbench::FocusVariables => self.debug.focus(debug::Column::Variables),
+            Workbench::FocusWatch => self.debug.focus(debug::Column::Watch),
+            Workbench::FocusConsole => self.debug.focus(debug::Column::Console),
+            Workbench::RemoveWatch => {
+                if !self.debug.remove_focused_watch(&mut self.workspace) {
+                    self.message = Some("Select a watch expression first".to_owned());
+                }
+            }
             Workbench::ToggleBreakpoint => {
                 self.run_command(ctx, "editor.debug.action.toggleBreakpoint");
             }
@@ -494,6 +542,13 @@ impl EditorApp {
             | Workbench::Replace
             | Workbench::FindNext
             | Workbench::FindPrevious => self.run_find(ctx, command),
+        }
+    }
+
+    /// A debug key whose `when` clause decides if it means anything now.
+    fn debug_key(&mut self, ctx: &Context, id: &str) {
+        if self.workspace.command_applies(id) {
+            self.run_command(ctx, id);
         }
     }
 
@@ -612,9 +667,15 @@ impl EditorApp {
     fn focus_part(&mut self, ctx: &Context, next: bool) {
         let sidebar = self.sidebar.visible()
             && (self.extensions.shown || self.search.shown || self.workspace.explorer().is_some());
-        let panel = self.problems.visible && !self.workspace.problems().is_empty();
+        let debug = debug::visible(&self.debug, &self.workspace);
+        let problems = self.problems.visible && !self.workspace.problems().is_empty();
+        let panel = problems || debug;
+        let panels = match (self.problems_area, self.debug_area) {
+            (Some(a), Some(b)) => Some(a.union(b)),
+            (a, b) => a.or(b),
+        };
         let status = ctx.content_rect().height() >= layout::STATUS_BAR_BREAKPOINT;
-        let target = match focus::focused_part(ctx, self.sidebar_area, self.problems_area) {
+        let target = match focus::focused_part(ctx, self.sidebar_area, panels) {
             Some(part) => focus::neighbour(part, next, |part| match part {
                 Part::Sidebar => sidebar,
                 Part::Panel => panel,
@@ -625,7 +686,8 @@ impl EditorApp {
         };
         match target {
             Part::Editor => self.focus_editor(ctx),
-            Part::Panel => focus(ctx, problems::first_row_id()),
+            Part::Panel if problems => focus(ctx, problems::first_row_id()),
+            Part::Panel => focus(ctx, debug::console_id()),
             Part::StatusBar => focus(ctx, status::id()),
             Part::Sidebar if self.search.shown => {
                 self.search.focus();
@@ -814,7 +876,8 @@ impl eframe::App for EditorApp {
             changed |= self.show_sidebar(ui, sidebar);
         }
         changed |= self.show_tabs(ui, areas.tabs);
-        let editor = self.show_problems(ui, areas.editor);
+        let above = self.show_debug(ui, areas.editor);
+        let editor = self.show_problems(ui, above);
         changed |= self.show_editor(ui, editor);
         if self.find.is_stale(&self.workspace) {
             // The editor changed the text after the matches were found.

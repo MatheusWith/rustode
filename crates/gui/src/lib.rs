@@ -53,6 +53,7 @@
 
 mod a11y;
 mod app;
+mod debug;
 mod editor;
 mod explorer;
 mod extensions;
