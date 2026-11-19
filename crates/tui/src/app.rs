@@ -134,6 +134,8 @@ pub struct App {
     pub(crate) problems: crate::problems::ProblemsPanel,
     /// The Search view's state.
     pub(crate) search: crate::search::SearchView,
+    /// The hover and suggest popups' keys.
+    pub(crate) suggest: crate::suggest::State,
     confirm_quit: bool,
     confirm_close: Option<DocumentId>,
     quit: bool,
@@ -187,6 +189,7 @@ impl App {
             extensions: crate::extensions::ExtensionsView::default(),
             problems: crate::problems::ProblemsPanel::default(),
             search: crate::search::SearchView::default(),
+            suggest: crate::suggest::State::default(),
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
@@ -342,6 +345,9 @@ impl App {
         if let Some(id) = self.user_binding(key) {
             self.message = None;
             self.run_id(&id);
+            return;
+        }
+        if self.focus == Focus::Editor && self.suggest_key(key) {
             return;
         }
         match self.focus {

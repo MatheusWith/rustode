@@ -12,6 +12,7 @@ mod find;
 mod keys;
 mod problems;
 mod search;
+mod suggest;
 mod theme;
 mod view;
 
