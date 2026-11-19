@@ -74,18 +74,44 @@ impl Drop for Dir {
 struct Session {
     ws: Workspace,
     woken: Receiver<()>,
+    /// The folder of the user's `settings.json`, if one was written.
+    _user: Dir,
+}
+
+/// A TypeScript 6 package to point `rustode.typescript.tsdk` at, from
+/// `RUSTODE_TEST_TYPESCRIPT`. Without it the workspace's own resolution
+/// decides (a local or global TypeScript 6); where it finds none the server
+/// is refused and the test skips itself, saying why. This machine's global
+/// TypeScript is 7, so it needs the variable.
+fn tsdk_from_env() -> Option<PathBuf> {
+    std::env::var_os("RUSTODE_TEST_TYPESCRIPT").map(|p| PathBuf::from(p).join("lib"))
 }
 
 impl Session {
-    fn new(folder: &Path) -> Self {
+    fn new(folder: &Path, tsdk: Option<&Path>) -> Self {
         let mut ws = Workspace::new();
+        let user = Dir::new("user");
+        if let Some(tsdk) = tsdk {
+            user.file(
+                "settings.json",
+                &serde_json::json!({"rustode.typescript.tsdk": tsdk}).to_string(),
+            );
+            ws.load_config(
+                &user.0.join("settings.json"),
+                &user.0.join("keybindings.json"),
+            );
+        }
         let (tx, woken) = mpsc::channel();
         ws.set_waker(move || {
             let _ = tx.send(());
         });
         ws.open_folder(folder).expect("folder");
         ws.use_default_language_servers(&search_path());
-        Self { ws, woken }
+        Self {
+            ws,
+            woken,
+            _user: user,
+        }
     }
 
     /// Polls until `done`, waking when a server speaks; fails after
@@ -258,24 +284,8 @@ const sum = add(p.x, p.y);
 console.log(text, sum, broken);
 "#;
 
-/// A TypeScript package with `lib/tsserver.js`, which typescript-language-server
-/// needs: `RUSTODE_TEST_TYPESCRIPT` (a package folder), else the global one.
-/// TypeScript 7 ships no `tsserver.js`, so a machine with only that one
-/// cannot run this test (and typescript-language-server cannot run there
-/// either, outside a project that has its own TypeScript 6).
-fn typescript_package() -> Option<PathBuf> {
-    let explicit = std::env::var_os("RUSTODE_TEST_TYPESCRIPT").map(PathBuf::from);
-    explicit
-        .into_iter()
-        .chain([PathBuf::from("/usr/lib/node_modules/typescript")])
-        .find(|dir| dir.join("lib/tsserver.js").is_file())
-}
-
-fn ts_fixture(typescript: &Path) -> Dir {
+fn ts_fixture() -> Dir {
     let dir = Dir::new("ts");
-    // The workspace's own TypeScript, as a project that installed it has.
-    std::fs::create_dir_all(dir.0.join("node_modules")).expect("folder");
-    std::os::unix::fs::symlink(typescript, dir.0.join("node_modules/typescript")).expect("link");
     dir.file(
         "tsconfig.json",
         r#"{"compilerOptions": {"strict": true, "target": "es2020", "module": "commonjs"}, "include": ["src"]}"#,
@@ -315,23 +325,30 @@ const REQUEST: Duration = Duration::from_secs(30);
 
 /// Opens `file`, waits for the server to run and for the diagnostic over
 /// `"x"`; returns the document, the time to Running and the time to that
-/// diagnostic.
+/// diagnostic. `None` when the workspace refused to start the TypeScript
+/// server for want of a TypeScript 6 (it says so, and the test skips).
 #[track_caller]
-fn start(s: &mut Session, file: &Path) -> (DocumentId, Duration, Duration) {
+fn start(s: &mut Session, file: &Path) -> Option<(DocumentId, Duration, Duration)> {
     let started = Instant::now();
     let id = s.ws.open(file).expect("open");
-    s.wait("the server to run", START, |ws| {
+    s.wait("the server to run or be refused", START, |ws| {
         ws.language_server(id)
-            .is_some_and(|st| st.state == ServerState::Running)
+            .is_some_and(|st| matches!(st.state, ServerState::Running | ServerState::Crashed))
     });
+    let status = s.ws.language_server(id).expect("a server");
+    if status.state == ServerState::Crashed {
+        let why = status.message.unwrap_or_default();
+        assert!(why.contains("needs TypeScript 6"), "crashed: {why}");
+        eprintln!("SKIPPED: {why} (set RUSTODE_TEST_TYPESCRIPT to a TypeScript 6 package)");
+        return None;
+    }
     let running = started.elapsed();
-    let first = s.wait("the diagnostic over \"x\"", START, |ws| {
+    s.wait("the diagnostic over \"x\"", START, |ws| {
         ws.markers(id)
             .iter()
             .any(|m| m.severity == MarkerSeverity::Error)
     });
-    let _ = first;
-    (id, running, started.elapsed())
+    Some((id, running, started.elapsed()))
 }
 
 #[test]
@@ -342,8 +359,9 @@ fn real_rust_analyzer_on_a_fixture_crate() {
         return;
     }
     let dir = rust_fixture();
-    let mut s = Session::new(&dir.0);
-    let (id, running, diagnostic) = start(&mut s, &dir.0.join("src/main.rs"));
+    let mut s = Session::new(&dir.0, None);
+    let (id, running, diagnostic) =
+        start(&mut s, &dir.0.join("src/main.rs")).expect("rust-analyzer runs");
     eprintln!("MEASURED fixture crate: running={running:?} first error={diagnostic:?}");
 
     // Diagnostics: the error is over `"x"`, after an emoji, so UTF-16 columns
@@ -414,13 +432,11 @@ fn real_typescript_language_server_on_a_fixture() {
         eprintln!("SKIPPED: typescript-language-server or tsc is not on PATH");
         return;
     }
-    let Some(typescript) = typescript_package() else {
-        eprintln!("SKIPPED: no TypeScript with lib/tsserver.js (set RUSTODE_TEST_TYPESCRIPT)");
+    let dir = ts_fixture();
+    let mut s = Session::new(&dir.0, tsdk_from_env().as_deref());
+    let Some((id, running, diagnostic)) = start(&mut s, &dir.0.join("src/main.ts")) else {
         return;
     };
-    let dir = ts_fixture(&typescript);
-    let mut s = Session::new(&dir.0);
-    let (id, running, diagnostic) = start(&mut s, &dir.0.join("src/main.ts"));
     eprintln!("MEASURED fixture: running={running:?} first error={diagnostic:?}");
     let broken =
         s.ws.markers(id)
@@ -461,7 +477,7 @@ fn real_rust_analyzer_on_the_rustode_workspace() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let root = root.canonicalize().expect("workspace root");
-    let mut s = Session::new(&root);
+    let mut s = Session::new(&root, None);
     let file = root.join("crates/core/src/editor.rs");
     let started = Instant::now();
     let id = s.ws.open(&file).expect("open");
@@ -492,15 +508,17 @@ fn real_rust_analyzer_on_the_rustode_workspace() {
     assert!(place.is_some());
 }
 
-fn latency(fixture: &Dir, file: &str, probe: &Probe) {
+fn latency(fixture: &Dir, file: &str, probe: &Probe, tsdk: Option<&Path>) {
     let startups = reps(3);
     let requests = reps(15);
     let mut running = Vec::new();
     let mut first_error = Vec::new();
     let (mut hovers, mut completions, mut definitions) = (Vec::new(), Vec::new(), Vec::new());
     for _ in 0..startups {
-        let mut s = Session::new(&fixture.0);
-        let (id, up, error) = start(&mut s, &fixture.0.join(file));
+        let mut s = Session::new(&fixture.0, tsdk);
+        let Some((id, up, error)) = start(&mut s, &fixture.0.join(file)) else {
+            return;
+        };
         running.push(up);
         first_error.push(error);
         // Let indexing finish before timing requests.
@@ -553,6 +571,7 @@ fn real_latency_rust_analyzer() {
             hover: "fn add",
             dot: "let n = p.",
         },
+        None,
     );
 }
 
@@ -563,17 +582,14 @@ fn real_latency_typescript_language_server() {
         eprintln!("SKIPPED: typescript-language-server or tsc is not on PATH");
         return;
     }
-    let Some(typescript) = typescript_package() else {
-        eprintln!("SKIPPED: no TypeScript with lib/tsserver.js (set RUSTODE_TEST_TYPESCRIPT)");
-        return;
-    };
     latency(
-        &ts_fixture(&typescript),
+        &ts_fixture(),
         "src/main.ts",
         &Probe {
             call: "add(p.x",
             hover: "function add",
             dot: "add(p.",
         },
+        tsdk_from_env().as_deref(),
     );
 }

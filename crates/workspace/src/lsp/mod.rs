@@ -32,6 +32,7 @@ mod server;
 mod settings;
 mod suggest;
 mod sync;
+mod tsserver;
 mod uri;
 
 pub use hover::Hover;
@@ -430,7 +431,18 @@ impl Workspace {
     pub(crate) fn lsp_config_changed(&mut self) {
         let (mut configs, problems) = settings::parse(self.config.value(settings::KEY));
         if let Some(search_path) = &self.lsp.default_search_path {
-            settings::add_defaults(&mut configs, self.config.value(settings::KEY), search_path);
+            let tsdk = match self.config.value(tsserver::TSDK_KEY) {
+                Some(rustode_config::Value::String(folder)) if !folder.is_empty() => {
+                    Some(folder.as_str())
+                }
+                _ => None,
+            };
+            settings::add_defaults(
+                &mut configs,
+                self.config.value(settings::KEY),
+                tsdk,
+                search_path,
+            );
         }
         for problem in &problems {
             tracing::warn!(%problem, "language server settings");

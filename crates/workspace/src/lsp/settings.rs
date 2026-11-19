@@ -21,6 +21,7 @@
 //! have no entry for that language. The user's entry always wins, whatever it
 //! holds.
 
+use super::tsserver::{self, TypeScriptRule};
 use rustode_config::Value;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -35,6 +36,9 @@ pub(crate) struct ServerConfig {
     pub command: String,
     pub args: Vec<String>,
     pub initialization_options: Option<serde_json::Value>,
+    /// Set on the built-in typescript-language-server only: it starts on a
+    /// TypeScript 6 `tsserver.js` that [`super::tsserver::resolve`] finds.
+    pub typescript: Option<TypeScriptRule>,
 }
 
 /// The servers rustode starts without settings: language ids, program and
@@ -61,6 +65,7 @@ pub(crate) const DEFAULTS: &[(&str, &str, &[&str])] = &[
 pub(crate) fn add_defaults(
     configs: &mut BTreeMap<String, ServerConfig>,
     value: Option<&Value>,
+    tsdk: Option<&str>,
     search_path: &OsStr,
 ) {
     for &(language, command, args) in DEFAULTS {
@@ -72,9 +77,14 @@ pub(crate) fn add_defaults(
         let Some(program) = on_path(command, search_path) else {
             continue;
         };
+        let typescript = (command == "typescript-language-server").then(|| TypeScriptRule {
+            tsdk: tsdk.map(str::to_owned),
+            discovered: tsserver::discover(&program),
+        });
         configs.insert(
             language.to_owned(),
             ServerConfig {
+                typescript,
                 command: program.display().to_string(),
                 args: args.iter().map(|a| (*a).to_owned()).collect(),
                 initialization_options: None,
@@ -170,6 +180,7 @@ fn parse_entry(entry: &Value, report: &mut impl FnMut(String)) -> Option<ServerC
         command,
         args,
         initialization_options: fields.get("initializationOptions").map(to_json),
+        typescript: None,
     })
 }
 
@@ -238,7 +249,7 @@ mod tests {
         let path = std::env::join_paths([&dir, Path::new("relative/bin")]).expect("path");
 
         let mut configs = BTreeMap::new();
-        add_defaults(&mut configs, None, &path);
+        add_defaults(&mut configs, None, None, &path);
         let ts = &configs["typescript"];
         assert_eq!(ts.command, program.display().to_string());
         assert_eq!(ts.args, ["--stdio"]);
@@ -247,7 +258,7 @@ mod tests {
         let mut mentioned = BTreeMap::new();
         mentioned.insert("javascript".to_owned(), Value::Null);
         let mut configs = BTreeMap::new();
-        add_defaults(&mut configs, Some(&Value::Object(mentioned)), &path);
+        add_defaults(&mut configs, Some(&Value::Object(mentioned)), None, &path);
         assert!(!configs.contains_key("javascript"), "null switches it off");
         assert!(configs.contains_key("typescriptreact"));
         let _ = std::fs::remove_dir_all(&dir);

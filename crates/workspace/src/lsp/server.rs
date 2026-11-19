@@ -250,6 +250,14 @@ impl Server {
     pub(crate) fn start(&mut self, waker: &Waker) {
         self.capabilities = Capabilities::default();
         self.features = Features::default();
+        let options = match self.initialization_options() {
+            Ok(options) => options,
+            Err(why) => {
+                self.state = ServerState::Crashed;
+                self.message = Some(why);
+                return;
+            }
+        };
         match Process::spawn(
             &self.config.command,
             &self.config.args,
@@ -264,7 +272,7 @@ impl Server {
                     "jsonrpc": "2.0",
                     "id": id,
                     "method": "initialize",
-                    "params": self.initialize_params(),
+                    "params": self.initialize_params(options.as_ref()),
                 }));
                 self.process = Some(process);
                 self.initialize = Some(id);
@@ -277,7 +285,24 @@ impl Server {
         }
     }
 
-    fn initialize_params(&self) -> Value {
+    /// The `initializationOptions` to send: the configured ones, and for the
+    /// built-in TypeScript server the `tsserver.path` it must run on.
+    fn initialization_options(&self) -> Result<Option<Value>, String> {
+        let Some(rule) = &self.config.typescript else {
+            return Ok(self.config.initialization_options.clone());
+        };
+        let path = super::tsserver::resolve(&self.root, rule)?;
+        let mut options = self
+            .config
+            .initialization_options
+            .clone()
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        options["tsserver"] = json!({"path": path.display().to_string()});
+        Ok(Some(options))
+    }
+
+    fn initialize_params(&self, options: Option<&Value>) -> Value {
         let root = uri::from_path(&self.root);
         let folder = self
             .root
@@ -289,7 +314,7 @@ impl Server {
             "rootUri": root,
             "rootPath": self.root.display().to_string(),
             "workspaceFolders": [{"uri": root, "name": folder}],
-            "initializationOptions": self.config.initialization_options,
+            "initializationOptions": options,
             "capabilities": {
                 "general": {"positionEncodings": encoding::OFFERED},
                 "textDocument": {
@@ -446,6 +471,7 @@ mod tests {
             command: "/usr/bin/x".into(),
             args: vec![],
             initialization_options: None,
+            typescript: None,
         };
         let mut server = Server::new(ServerId(1), "rust", PathBuf::from("/"), config);
         let start = Instant::now();

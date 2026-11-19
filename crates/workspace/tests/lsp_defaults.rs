@@ -55,6 +55,14 @@ impl Fixture {
     /// Puts a program named `name` in the fake `PATH`.
     fn install(&self, name: &str) {
         std::os::unix::fs::symlink(server(), self.dir.join("bin").join(name)).expect("link");
+        if name == "typescript-language-server" {
+            // It needs a TypeScript 6 `tsserver.js` (see `lsp_typescript.rs`).
+            let package = self.dir.join("node_modules/typescript");
+            std::fs::create_dir_all(package.join("lib")).expect("lib");
+            std::fs::write(package.join("lib/tsserver.js"), "").expect("tsserver.js");
+            std::fs::write(package.join("package.json"), r#"{"version": "6.0.3"}"#)
+                .expect("version");
+        }
     }
 
     fn search_path(&self) -> OsString {
