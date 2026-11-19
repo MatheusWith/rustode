@@ -363,7 +363,7 @@ fn rename_edits_open_and_closed_files_and_each_document_undoes_alone() {
     assert!(ws.rename_symbol(a, "assist").expect("request"));
     assert_eq!(
         fx.notice(&mut ws),
-        "Renamed 'helper' to 'assist': 3 edit(s) in 2 file(s)"
+        "Renamed to 'assist': 3 edit(s) in 2 file(s)"
     );
     assert_eq!(
         text(&ws, a),
@@ -421,7 +421,7 @@ fn the_old_changes_shape_works_and_names_are_validated() {
     assert!(ws.rename_symbol(a, "go").expect("request"));
     assert_eq!(
         fx.notice(&mut ws),
-        "Renamed 'helper' to 'go': 2 edit(s) in 1 file(s)"
+        "Renamed to 'go': 2 edit(s) in 1 file(s)"
     );
     assert_eq!(text(&ws, a), "fn go() {}\nfn main() {\n    go();   \n}\n");
     assert_eq!(

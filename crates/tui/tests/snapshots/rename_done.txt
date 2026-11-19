@@ -1,0 +1,14 @@
+ main.rs ● │ other.rs ● │
+   1 fn assist() {}
+   2 fn main() {
+   3     assist();
+   4 }
+   5
+
+
+
+
+
+
+
+ E 0 W 0  main.rs ●  Renamed to 'assist': 3 edit(s) in 2 file(s)        Ln 3, Col 7  UTF-8  LF  rustode-test-lsp  Rust

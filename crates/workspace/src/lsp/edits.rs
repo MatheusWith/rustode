@@ -312,8 +312,8 @@ impl Workspace {
             (Ok((_, 0)), Kind::Format) => self.notice("Nothing to format".to_owned()),
             (Ok(_), Kind::Format) => self.notice("Formatted the document".to_owned()),
             (Ok((files, edits)), _) => self.notice(format!(
-                "Renamed '{}' to '{}': {edits} edit(s) in {files} file(s)",
-                op.word, op.name
+                "Renamed to '{}': {edits} edit(s) in {files} file(s)",
+                op.name
             )),
         }
     }

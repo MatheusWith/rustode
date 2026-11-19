@@ -181,7 +181,11 @@ fn f2_asks_for_the_new_name_and_enter_renames_in_every_file() {
     draw(&mut app, &mut terminal);
     assert!(screen(&terminal).contains("rename to 'assist'"));
     send(&mut app, &mut terminal, &[press(KeyCode::Enter)]);
-    wait_for(&mut app, &mut terminal, "Renamed 'helper' to 'assist'");
+    wait_for(
+        &mut app,
+        &mut terminal,
+        "Renamed to 'assist': 3 edit(s) in 2 file(s)",
+    );
     assert_snapshot("rename_done", &screen(&terminal));
     assert_eq!(
         text(&app),
