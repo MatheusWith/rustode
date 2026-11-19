@@ -31,8 +31,10 @@ pub use extensions::{
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
-pub use languages::LanguagePick;
-pub use lsp::{Marker, MarkerSeverity, Problem, ProblemCounts, ServerState, ServerStatus};
+pub use lsp::{
+    CompletionKind, CompletionList, CompletionMove, CompletionRow, Hover, Marker, MarkerSeverity,
+    Problem, ProblemCounts, ServerState, ServerStatus,
+};
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
@@ -144,6 +146,11 @@ pub enum Event {
     /// Search results arrived, or the search ended
     /// ([`Workspace::poll_search`]).
     Search(SearchEvent),
+    /// A hover arrived or went away ([`Workspace::hover`]).
+    HoverChanged,
+    /// The suggest list opened, changed or closed
+    /// ([`Workspace::completion_list`]).
+    CompletionChanged,
 }
 
 impl fmt::Display for Error {
@@ -502,7 +509,9 @@ impl Workspace {
         self.edit(id, |editor| {
             editor.type_text(&text);
             Ok(!text.is_empty())
-        })
+        })?;
+        self.lsp_typed(id, &text);
+        Ok(())
     }
 
     /// Moves every cursor of a document; with `select`, extends the
@@ -719,6 +728,7 @@ impl Workspace {
         if changed {
             self.events.push(Event::DocumentChanged { id });
             self.lsp_changed(id);
+            self.lsp_edited(id);
         }
     }
 }

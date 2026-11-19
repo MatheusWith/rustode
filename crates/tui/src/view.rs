@@ -124,6 +124,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
         frame.buffer_mut().set_style(status, theme.status);
         draw_status(app, frame, status);
     }
+    crate::suggest::draw(app, frame);
     if app.quick.is_some() {
         draw_quick(app, frame);
     }
@@ -294,7 +295,7 @@ fn shift(positions: &[usize]) -> Vec<usize> {
 }
 
 /// `text` with the chars at `positions` highlighted.
-fn highlighted(text: &str, positions: &[usize], highlight: Style) -> Vec<Span<'static>> {
+pub(crate) fn highlighted(text: &str, positions: &[usize], highlight: Style) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (index, c) in text.chars().enumerate() {
         let style = if positions.contains(&index) {
@@ -332,7 +333,7 @@ fn file_name(document: &Document) -> String {
         .map_or_else(Default::default, |name| name.to_string_lossy().into_owned())
 }
 
-fn to_u16(value: usize) -> u16 {
+pub(crate) fn to_u16(value: usize) -> u16 {
     u16::try_from(value).unwrap_or(u16::MAX)
 }
 
@@ -464,7 +465,7 @@ fn draw_status(app: &mut App, frame: &mut Frame, area: Rect) {
 }
 
 /// `text` cut to at most `width` columns.
-fn truncate(text: &str, width: usize) -> String {
+pub(crate) fn truncate(text: &str, width: usize) -> String {
     let mut out = String::new();
     let mut used = 0;
     for c in text.chars() {
@@ -856,7 +857,7 @@ pub(crate) fn column_at(text: &str, display: usize, tab_size: usize) -> usize {
 }
 
 /// Columns taken by `chars` from the start of a line.
-fn display_width(chars: impl Iterator<Item = char>, tab_size: usize) -> usize {
+pub(crate) fn display_width(chars: impl Iterator<Item = char>, tab_size: usize) -> usize {
     chars.fold(0, |column, c| column + glyph(c, column, tab_size).1)
 }
 

@@ -7,7 +7,8 @@
 //! and exits abruptly on `CRASH`.
 
 use rustode_workspace::{
-    DocumentId, Event, MarkerSeverity, Position, Problem, Range, ServerState, Workspace,
+    CompletionKind, CompletionMove, DocumentId, Event, MarkerSeverity, Position, Problem, Range,
+    ServerState, Workspace,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -576,4 +577,415 @@ fn the_commands_are_registered_with_vs_code_keys() {
     assert_eq!(problems[0].keybinding.as_deref(), Some("Ctrl+Shift+M"));
     let restart = ws.commands("restart language");
     assert_eq!(restart[0].command.id, "rustode.restartLanguageServer");
+}
+
+// ---- hover and completion ----
+
+const CODE: &str = "fn main() {\n    let point = 1;\n    pri\n}\n";
+
+/// A workspace with a running server on `src/main.rs`, and the document.
+fn session(fx: &Fixture, args: &[&str]) -> (Workspace, DocumentId) {
+    let path = fx.file("src/main.rs", CODE);
+    let mut ws = fx.workspace(args);
+    ws.open_folder(&fx.dir).expect("folder");
+    let id = ws.open(&path).expect("open");
+    wait(&mut ws, "the server", running);
+    (ws, id)
+}
+
+/// The offset after the `pri` on the last line of code.
+fn end_of_pri() -> usize {
+    CODE.find("pri").expect("pri") + 3
+}
+
+fn requests(fx: &Fixture, method: &str) -> Vec<serde_json::Value> {
+    fx.log()
+        .into_iter()
+        .filter(|m| m["method"] == method)
+        .collect()
+}
+
+fn labels(ws: &Workspace) -> Vec<String> {
+    ws.completion_list(20).map_or_else(Vec::new, |list| {
+        list.rows.into_iter().map(|row| row.label).collect()
+    })
+}
+
+fn text(ws: &Workspace, id: DocumentId) -> String {
+    ws.document(id).expect("doc").text()
+}
+
+#[test]
+fn hover_shows_what_the_server_says_about_the_word() {
+    let fx = Fixture::new("hover");
+    let (mut ws, id) = session(&fx, &[]);
+    let at = CODE.find("point").expect("word") + 2;
+    assert!(ws.request_hover(id, at).expect("request"));
+    assert!(ws.hover_pending());
+    assert!(ws.hover().is_none(), "nothing before the answer");
+    wait(&mut ws, "a hover", |ws| ws.hover().is_some());
+    let hover = ws.hover().expect("hover").clone();
+    assert_eq!(hover.text, "point\n\nlet point", "markdown as plain text");
+    assert_eq!(hover.range, Some(Range::new(at - 2, at + 3)));
+    assert_eq!(hover.anchor(), at - 2);
+    assert_eq!(hover.offset, at);
+    assert!(!ws.hover_pending());
+    assert!(
+        ws.take_events().contains(&Event::HoverChanged),
+        "the frontend is told"
+    );
+    // The same place again asks nothing more.
+    assert!(ws.request_hover(id, at).expect("again"));
+    assert_eq!(requests(&fx, "textDocument/hover").len(), 1);
+    ws.hide_hover();
+    assert!(ws.hover().is_none());
+}
+
+#[test]
+fn hover_over_nothing_shows_nothing() {
+    let fx = Fixture::new("hover-none");
+    let (mut ws, id) = session(&fx, &[]);
+    let blank = CODE.find("    let").expect("indent") + 1;
+    assert!(ws.request_hover(id, blank).expect("request"));
+    wait(&mut ws, "the answer", |ws| !ws.hover_pending());
+    assert!(ws.hover().is_none(), "a null answer is no hover");
+}
+
+#[test]
+fn a_server_without_hover_is_not_asked() {
+    let fx = Fixture::new("hover-off");
+    let (mut ws, id) = session(&fx, &["--no-hover", "--no-completion"]);
+    assert!(!ws.request_hover(id, 5).expect("request"));
+    assert!(!ws.request_completion(id).expect("request"));
+    assert_eq!(requests(&fx, "textDocument/hover").len(), 0);
+    assert_eq!(requests(&fx, "textDocument/completion").len(), 0);
+}
+
+#[test]
+fn asking_for_another_place_cancels_the_slow_request() {
+    let fx = Fixture::new("hover-cancel");
+    let (mut ws, id) = session(&fx, &["--slow", "300"]);
+    let first = CODE.find("main").expect("main");
+    let second = CODE.find("point").expect("point");
+    assert!(ws.request_hover(id, first).expect("first"));
+    assert!(ws.request_hover(id, second).expect("second"));
+    wait(&mut ws, "the second hover", |ws| ws.hover().is_some());
+    assert_eq!(ws.hover().expect("hover").text, "point\n\nlet point");
+    let hovers = requests(&fx, "textDocument/hover");
+    let cancels = requests(&fx, "$/cancelRequest");
+    assert_eq!(hovers.len(), 2);
+    assert_eq!(cancels.len(), 1, "the first one was cancelled");
+    assert_eq!(cancels[0]["params"]["id"], hovers[0]["id"]);
+}
+
+#[test]
+fn a_hover_whose_document_changed_is_dropped() {
+    let fx = Fixture::new("hover-stale");
+    let (mut ws, id) = session(&fx, &["--slow", "200"]);
+    assert!(
+        ws.request_hover(id, CODE.find("point").expect("point"))
+            .expect("request")
+    );
+    ws.set_cursor(id, 0).expect("cursor");
+    ws.type_text(id, "x").expect("type");
+    assert!(!ws.hover_pending(), "the edit cancelled it");
+    // Let the late answer, or the cancellation error, arrive.
+    let until = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < until {
+        ws.poll_language_servers();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ws.hover().is_none());
+    assert_eq!(requests(&fx, "$/cancelRequest").len(), 1);
+}
+
+#[test]
+fn ctrl_space_lists_the_matching_items_best_first() {
+    let fx = Fixture::new("complete");
+    let (mut ws, id) = session(&fx, &["--sync", "full"]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    assert!(ws.request_completion(id).expect("request"));
+    assert!(ws.completion_pending());
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    let list = ws.completion_list(10).expect("list");
+    let names: Vec<&str> = list.rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(
+        names,
+        ["println", "print", "PrimaryKey"],
+        "equal scores keep the sortText order: {list:?}"
+    );
+    assert_eq!(list.start, end_of_pri() - 3, "under the word");
+    assert_eq!((list.selected, list.total, list.first), (0, 3, 0));
+    assert_eq!(list.rows[0].matched, vec![0, 1, 2]);
+    assert_eq!(list.rows[1].detail.as_deref(), Some("fn print()"));
+    assert_eq!(list.rows[0].kind, CompletionKind::Function);
+    assert_eq!(list.rows[2].matched, vec![0, 1, 2]);
+    let request = &requests(&fx, "textDocument/completion")[0];
+    assert_eq!(request["params"]["context"]["triggerKind"], 1);
+    assert_eq!(
+        request["params"]["position"],
+        serde_json::json!({"line": 2, "character": 7})
+    );
+}
+
+#[test]
+fn typing_narrows_the_list_without_asking_again() {
+    let fx = Fixture::new("complete-filter");
+    let (mut ws, id) = session(&fx, &[]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    assert_eq!(labels(&ws), ["println", "print"]);
+    ws.type_text(id, "l").expect("type");
+    assert_eq!(labels(&ws), ["println"], "narrowed by the filter alone");
+    ws.delete_left(id).expect("backspace");
+    assert_eq!(labels(&ws), ["println", "print"], "and widened again");
+    assert_eq!(
+        requests(&fx, "textDocument/completion").len(),
+        1,
+        "one request for the whole word"
+    );
+    ws.type_text(id, "z").expect("type");
+    assert!(!ws.completion_visible(), "nothing matches");
+}
+
+#[test]
+fn accepting_replaces_the_word_as_one_undo_step() {
+    let fx = Fixture::new("complete-accept");
+    let (mut ws, id) = session(&fx, &[]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    assert_eq!(ws.completion_list(10).expect("list").selected, 0);
+    assert!(ws.completion_accept().expect("accept"));
+    assert!(
+        text(&ws, id).contains("    println!()\n"),
+        "{}",
+        text(&ws, id)
+    );
+    assert!(!ws.completion_visible(), "the list closes");
+    assert_eq!(
+        ws.document(id).expect("doc").cursor(),
+        end_of_pri() - 3 + "println!()".len()
+    );
+    assert!(ws.undo(id).expect("undo"));
+    assert!(
+        text(&ws, id).contains("    prin\n"),
+        "one step: {}",
+        text(&ws, id)
+    );
+    assert!(ws.redo(id).expect("redo"));
+    assert!(text(&ws, id).contains("    println!()\n"));
+}
+
+#[test]
+fn an_item_with_only_insert_text_replaces_the_word_before_the_cursor() {
+    let fx = Fixture::new("complete-insert");
+    let (mut ws, id) = session(&fx, &[]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    assert!(ws.completion_move(CompletionMove::Next));
+    assert_eq!(
+        ws.completion_list(10).expect("list").rows[1].label,
+        "print",
+        "the second, with no edit of its own"
+    );
+    assert!(ws.completion_accept().expect("accept"));
+    assert!(text(&ws, id).contains("    print\n"), "{}", text(&ws, id));
+}
+
+#[test]
+fn the_trigger_character_asks_and_filters_by_what_follows() {
+    let fx = Fixture::new("complete-dot");
+    let path = fx.file("src/main.rs", "fn main() {\n    v\n}\n");
+    let mut ws = fx.workspace(&[]);
+    ws.open_folder(&fx.dir).expect("folder");
+    let id = ws.open(&path).expect("open");
+    wait(&mut ws, "the server", running);
+    ws.set_cursor(id, 17).expect("cursor");
+    ws.type_text(id, ".").expect("type");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    assert_eq!(
+        labels(&ws),
+        ["len", "push", "pop"],
+        "provider order, no word"
+    );
+    let request = &requests(&fx, "textDocument/completion")[0];
+    assert_eq!(request["params"]["context"]["triggerKind"], 2);
+    assert_eq!(request["params"]["context"]["triggerCharacter"], ".");
+    ws.type_text(id, "p").expect("type");
+    assert_eq!(labels(&ws), ["push", "pop"]);
+    assert!(ws.completion_accept().expect("accept"));
+    assert!(text(&ws, id).contains("    v.push\n"), "{}", text(&ws, id));
+}
+
+#[test]
+fn quick_suggestions_follow_the_setting() {
+    let fx = Fixture::new("complete-quick");
+    let (mut ws, id) = session(&fx, &[]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    wait(&mut ws, "typing opens the list", |ws| {
+        ws.completion_visible()
+    });
+    ws.type_text(id, " ").expect("type");
+    assert!(!ws.completion_visible(), "a space ends the word");
+
+    let fx = Fixture::new("complete-quick-off");
+    let path = fx.file("src/main.rs", CODE);
+    fx.write_settings(&fx.settings_text(&[]).replacen(
+        '{',
+        "{\"editor.quickSuggestions\": false,",
+        1,
+    ));
+    let mut ws = Workspace::new();
+    fx.load(&mut ws);
+    ws.open_folder(&fx.dir).expect("folder");
+    let id = ws.open(&path).expect("open");
+    wait(&mut ws, "the server", running);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    std::thread::sleep(Duration::from_millis(200));
+    ws.poll_language_servers();
+    assert_eq!(requests(&fx, "textDocument/completion").len(), 0);
+    assert!(
+        ws.request_completion(id).expect("by hand"),
+        "Ctrl+Space still works"
+    );
+}
+
+#[test]
+fn a_slow_answer_for_an_earlier_character_is_dropped() {
+    let fx = Fixture::new("complete-stale");
+    let (mut ws, id) = session(&fx, &["--slow", "250"]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    ws.type_text(id, "t").expect("type again before the answer");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    assert_eq!(
+        labels(&ws),
+        ["print", "println"],
+        "a full match first: {:?}",
+        labels(&ws)
+    );
+    let asked = requests(&fx, "textDocument/completion");
+    assert_eq!(asked.len(), 2, "each character asked");
+    let cancels = requests(&fx, "$/cancelRequest");
+    assert_eq!(cancels.len(), 1, "the first was cancelled");
+    assert_eq!(cancels[0]["params"]["id"], asked[0]["id"]);
+    assert_eq!(
+        asked[1]["params"]["position"],
+        serde_json::json!({"line": 2, "character": 9})
+    );
+}
+
+#[test]
+fn moving_out_of_the_word_or_escape_ends_the_list() {
+    let fx = Fixture::new("complete-end");
+    let (mut ws, id) = session(&fx, &[]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    assert!(ws.request_completion(id).expect("request"));
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    ws.set_cursor(id, end_of_pri() - 1).expect("left");
+    assert!(
+        ws.completion_visible(),
+        "still in the word: filtered by 'pr'"
+    );
+    ws.set_cursor(id, end_of_pri() - 4)
+        .expect("out of the word");
+    assert!(!ws.completion_visible());
+    ws.set_cursor(id, end_of_pri()).expect("back");
+    assert!(!ws.completion_visible() || ws.completion_list(10).is_some());
+    ws.dismiss_completion();
+    assert!(!ws.completion_visible());
+    assert!(!ws.completion_accept().expect("nothing to accept"));
+    assert!(!ws.completion_move(CompletionMove::Next));
+}
+
+#[test]
+fn the_selection_wraps_and_pages_stop_at_the_ends() {
+    let fx = Fixture::new("complete-move");
+    let path = fx.file("src/main.rs", "fn main() {\n    v\n}\n");
+    let mut ws = fx.workspace(&[]);
+    ws.open_folder(&fx.dir).expect("folder");
+    let id = ws.open(&path).expect("open");
+    wait(&mut ws, "the server", running);
+    ws.set_cursor(id, 17).expect("cursor");
+    ws.type_text(id, ".").expect("type");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    let selected = |ws: &Workspace| ws.completion_list(2).expect("list").selected;
+    assert!(ws.completion_move(CompletionMove::Previous));
+    assert_eq!(selected(&ws), 2, "up from the first goes to the last");
+    ws.completion_move(CompletionMove::Next);
+    assert_eq!(selected(&ws), 0, "down from the last goes to the first");
+    ws.completion_move(CompletionMove::PageDown(10));
+    assert_eq!(selected(&ws), 2, "a page stops at the end");
+    let list = ws.completion_list(2).expect("list");
+    assert_eq!(
+        (list.first, list.rows.len()),
+        (1, 2),
+        "scrolled to keep it in view"
+    );
+    ws.completion_move(CompletionMove::PageUp(10));
+    assert_eq!(selected(&ws), 0);
+    assert_eq!(ws.completion_list(2).expect("list").first, 0);
+}
+
+#[test]
+fn an_incomplete_list_is_asked_again_while_typing() {
+    let fx = Fixture::new("complete-incomplete");
+    let (mut ws, id) = session(&fx, &["--incomplete"]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    ws.type_text(id, "n").expect("type");
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    ws.type_text(id, "t").expect("type");
+    assert!(
+        ws.completion_visible(),
+        "the old list stays until the new one comes"
+    );
+    wait(&mut ws, "the second request", |_| {
+        requests(&fx, "textDocument/completion").len() == 2
+    });
+    wait(&mut ws, "its answer", |ws| !ws.completion_pending());
+    let asked = requests(&fx, "textDocument/completion");
+    assert_eq!(asked[1]["params"]["context"]["triggerKind"], 3);
+    assert_eq!(labels(&ws), ["print", "println"]);
+}
+
+#[test]
+fn a_snippet_goes_in_as_text_with_its_defaults() {
+    let fx = Fixture::new("complete-snippet");
+    let path = fx.file("src/main.rs", "fn main() {\n    fm\n}\n");
+    let mut ws = fx.workspace(&[]);
+    ws.open_folder(&fx.dir).expect("folder");
+    let id = ws.open(&path).expect("open");
+    wait(&mut ws, "the server", running);
+    ws.set_cursor(id, 18).expect("cursor");
+    assert!(ws.request_completion(id).expect("request"));
+    wait(&mut ws, "the list", Workspace::completion_visible);
+    assert_eq!(labels(&ws), ["fmt"]);
+    assert!(ws.completion_accept().expect("accept"));
+    assert!(
+        text(&ws, id).contains("    fmt(value, a)\n"),
+        "{}",
+        text(&ws, id)
+    );
+}
+
+#[test]
+fn a_crash_ends_what_was_asked() {
+    let fx = Fixture::new("complete-crash");
+    let (mut ws, id) = session(&fx, &["--slow", "5000"]);
+    ws.set_cursor(id, end_of_pri()).expect("cursor");
+    assert!(ws.request_completion(id).expect("request"));
+    assert!(ws.request_hover(id, 3).expect("hover"));
+    ws.type_text(id, " CRASH").expect("type");
+    wait(&mut ws, "the crash", |ws| {
+        ws.language_servers().iter().any(|s| s.restarts > 0)
+    });
+    assert!(
+        !ws.completion_pending() && !ws.hover_pending(),
+        "nobody waits for a dead server"
+    );
 }

@@ -17,6 +17,7 @@ mod lsp;
 mod quick_input;
 mod scale;
 mod search;
+mod suggest;
 mod workbench;
 
 use eframe::egui::{Key, Modifiers, Vec2, accesskit::Role};

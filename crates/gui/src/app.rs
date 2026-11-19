@@ -64,6 +64,8 @@ pub struct EditorApp {
     workspace: Workspace,
     /// Where each document is scrolled to, kept when switching tabs.
     views: HashMap<DocumentId, editor::View>,
+    /// The hover and suggest overlays' state.
+    overlay: crate::suggest::State,
     explorer: explorer::View,
     strip: tabs::Strip,
     /// Whether the sidebar is shown (Ctrl+B), and how wide.
@@ -171,6 +173,7 @@ impl EditorApp {
         Self {
             workspace,
             views: HashMap::new(),
+            overlay: crate::suggest::State::default(),
             explorer: explorer::View::default(),
             strip: tabs::Strip::default(),
             sidebar: layout::Sidebar::default(),
@@ -676,12 +679,25 @@ impl EditorApp {
         let view = self.views.entry(id).or_default();
         let matches = self.find.highlights(&self.workspace);
         let workspace = &mut self.workspace;
+        let overlay = &mut self.overlay;
         let outcome = ui
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(rect)
                     .id_salt("rustode-editor-area"),
-                |ui| editor::show(ui, workspace, id, view, &name, matches),
+                |ui| {
+                    editor::show(
+                        ui,
+                        workspace,
+                        id,
+                        view,
+                        overlay,
+                        &editor::Shown {
+                            label: &name,
+                            matches,
+                        },
+                    )
+                },
             )
             .inner;
         if let Some(error) = outcome.error {
