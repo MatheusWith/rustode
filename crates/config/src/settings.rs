@@ -81,6 +81,9 @@ impl Schema {
     ///   to its list of encodings;
     /// - `rustode.languageServers`, rustode's own (VS Code has no built-in setting for language
     ///   servers): an object of server entries by language id, which the workspace checks;
+    /// - `rustode.typescript.tsdk`, rustode's own, shaped after VS Code's `typescript.tsdk`
+    ///   (`extensions/typescript-language-features/package.json:168-173`): the folder that holds
+    ///   a TypeScript 6 `tsserver.js`, empty by default;
     /// - `rustode.debugAdapters`, rustode's own (VS Code's debuggers come from extensions): an
     ///   object of adapter entries by launch configuration type, which the workspace checks;
     /// - `files.exclude`: `src/vs/workbench/contrib/files/browser/files.contribution.ts:154-160`
@@ -166,6 +169,7 @@ impl Schema {
                 SettingType::Object,
                 Value::Object(BTreeMap::new()),
             ),
+            ("rustode.typescript.tsdk", SettingType::String, text("")),
             (
                 "rustode.debugAdapters",
                 SettingType::Object,

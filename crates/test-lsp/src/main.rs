@@ -47,6 +47,10 @@
 //! - `--definition-links`: answer definitions as `LocationLink`s;
 //! - `--hostile-format`: add an edit past the end of the document to the
 //!   formatting answer;
+//! - without `--log`, a server started under another name than
+//!   `rustode-test-lsp` (a link standing in for a real server, started by the
+//!   workspace's built-in defaults, which pass no options) logs to
+//!   `.rustode-test-lsp.log` in its working folder, the workspace root;
 //! - `--log PATH`: append every message received, one JSON object per line,
 //!   then `{"synced": URI, "text": TEXT}` after each change it applies.
 
@@ -131,7 +135,15 @@ struct Server {
 }
 
 fn main() {
-    let options = options(std::env::args().skip(1));
+    let mut options = options(std::env::args().skip(1));
+    let stand_in = std::env::args_os().next().is_some_and(|argv0| {
+        std::path::Path::new(&argv0)
+            .file_name()
+            .is_some_and(|name| name != "rustode-test-lsp")
+    });
+    if stand_in && options.log.is_none() {
+        options.log = Some(".rustode-test-lsp.log".to_owned());
+    }
     let mut server = Server {
         options,
         encoding: "utf-16".to_owned(),
