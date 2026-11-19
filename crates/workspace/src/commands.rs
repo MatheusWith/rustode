@@ -27,6 +27,15 @@
 //! "Show or Focus Hover" on Ctrl+K Ctrl+I
 //! (`src/vs/editor/contrib/hover/browser/hoverActions.ts:28-70`); both return
 //! `false` when the document's server cannot answer.
+//! "Go to Definition" on F12
+//! (`src/vs/editor/contrib/gotoSymbol/browser/goToCommands.ts:276-296`),
+//! "Go to References" on Shift+F12 (`goToCommands.ts:669-681`), "Rename
+//! Symbol" on F2 (`src/vs/editor/contrib/rename/browser/rename.ts:365-370`;
+//! it needs the new name, so the frontend asks for it and calls
+//! [`Workspace::rename_symbol`]) and "Format Document" on Ctrl+Shift+I, the
+//! Linux key (`src/vs/editor/contrib/format/browser/formatActions.ts:218-224`);
+//! like the two above, they return `false` when the document's server cannot
+//! answer.
 //! "Change Language Mode" on Ctrl+K M
 //! (`src/vs/workbench/browser/parts/editor/editorStatus.ts:1110-1131`; the
 //! frontends open the picker, [`Workspace::language_picks`]).
@@ -217,6 +226,30 @@ pub const COMMANDS: &[CommandInfo] = &[
         "Show or Focus Hover",
         Editor,
         Some("Ctrl+K Ctrl+I"),
+    ),
+    command(
+        "editor.action.revealDefinition",
+        "Go to Definition",
+        Editor,
+        Some("F12"),
+    ),
+    command(
+        "editor.action.goToReferences",
+        "Go to References",
+        Editor,
+        Some("Shift+F12"),
+    ),
+    command(
+        "editor.action.rename",
+        "Rename Symbol",
+        Workbench,
+        Some("F2"),
+    ),
+    command(
+        "editor.action.formatDocument",
+        "Format Document",
+        Editor,
+        Some("Ctrl+Shift+I"),
     ),
     command(
         "workbench.action.editor.changeLanguageMode",
@@ -427,6 +460,15 @@ impl Workspace {
                 let line = self.document(id).map_or(0, |d| d.cursor_position().line);
                 self.toggle_breakpoint(id, line)?;
             }
+            "editor.action.revealDefinition" => {
+                let cursor = self.document(id).map_or(0, crate::Document::cursor);
+                return self.request_definition(id, cursor);
+            }
+            "editor.action.goToReferences" => {
+                let cursor = self.document(id).map_or(0, crate::Document::cursor);
+                return self.request_references(id, cursor);
+            }
+            "editor.action.formatDocument" => return self.format_document(id),
             "rustode.restartLanguageServer" => return self.restart_language_server(id),
             _ => return Ok(false),
         }

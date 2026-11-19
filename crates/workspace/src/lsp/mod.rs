@@ -14,13 +14,19 @@
 //! [`Workspace::set_waker`] tells an idle frontend to do so. Every message is
 //! traced in a `child_message` span.
 //!
+//! Go to definition and find references ([`navigate`]), rename and format
+//! ([`edits`]) are requests whose answers are applied by the workspace:
+//! the frontends only pick a location or ask for a name.
+//!
 //! Diagnostics become markers ([`markers`]): per document, drawn inline, and
 //! in the problems list, which covers every file a server reported.
 
+mod edits;
 mod encoding;
 mod filter;
 mod hover;
 mod markers;
+mod navigate;
 mod requests;
 mod server;
 mod settings;
@@ -30,6 +36,7 @@ mod uri;
 
 pub use hover::Hover;
 pub use markers::{Marker, MarkerSeverity, Problem, ProblemCounts};
+pub use navigate::{Locations, LocationsKind, RenameTarget, SymbolLocation};
 pub use server::{ServerState, ServerStatus};
 pub use suggest::{CompletionKind, CompletionList, CompletionMove, CompletionRow};
 
@@ -75,8 +82,15 @@ pub(crate) struct LanguageServers {
     files: BTreeMap<PathBuf, Vec<Published>>,
     tracked: HashMap<DocumentId, Tracked>,
     waker: Waker,
-    /// Requests sent and not answered yet (hover, completion).
+    /// Requests sent and not answered yet (hover, completion, navigation,
+    /// rename, format).
     pending: HashMap<(ServerId, i64), requests::Kind>,
+    /// What the navigation, rename and format requests in flight were about.
+    ops: HashMap<(ServerId, i64), requests::Op>,
+    /// The navigation request in flight: a newer one cancels it.
+    navigation: Option<requests::Request>,
+    /// The locations waiting to be picked from.
+    locations: Option<Locations>,
     hover: Option<hover::State>,
     suggest: Option<suggest::Session>,
 }
@@ -725,11 +739,22 @@ fn anchor(
 
 /// The char offset of an LSP position in `doc`.
 fn offset(doc: &Document, position: &Value, encoding: PositionEncoding) -> usize {
-    let line = usize::try_from(position["line"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
+    offset_at(
+        doc,
+        position["line"].as_u64().unwrap_or(0),
+        position["character"].as_u64().unwrap_or(0),
+        encoding,
+    )
+}
+
+/// The char offset of line `line`, `units` code units in, of `doc`: a line
+/// past the end is the end of the document, a column past the end of its
+/// line is the end of the line.
+fn offset_at(doc: &Document, line: u64, units: u64, encoding: PositionEncoding) -> usize {
+    let line = usize::try_from(line).unwrap_or(usize::MAX);
     if line >= doc.line_count() {
         return doc.len_chars();
     }
-    let units = position["character"].as_u64().unwrap_or(0);
     let column = encoding.column(&doc.line(line), units);
     doc.offset_of(Position::new(line, column))
 }

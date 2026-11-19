@@ -16,6 +16,11 @@
 //!   identifier before the position or only an `insertText`; right after a
 //!   `.` it answers the member items instead ([`MEMBERS`]), and `.` and `:`
 //!   are its trigger characters;
+//! - `textDocument/definition`, `references`, `rename` and `formatting` work
+//!   on the `.rs` files under the workspace root and on a naive rule, see
+//!   the [`project`] module: a declaration is a word after `fn ` or `let `,
+//!   references and renames cover every whole-word match, and formatting
+//!   deletes trailing whitespace;
 //! - a request for something else gets error -32601.
 //!
 //! Options:
@@ -34,9 +39,18 @@
 //!   so a client can cancel them or see the document change first. A
 //!   `$/cancelRequest` for one that waits answers it with error -32800;
 //! - `--incomplete`: mark completion lists `isIncomplete`;
-//! - `--no-hover`, `--no-completion`: do not offer that capability;
+//! - `--no-hover`, `--no-completion`, `--no-navigation` (definition and
+//!   references), `--no-rename`, `--no-formatting`: do not offer that
+//!   capability;
+//! - `--rename MODE`: `changes`, `stale`, `fileop`, `hostile`, `overlap` or
+//!   `null`, a different answer to a rename (see [`Server::rename`]);
+//! - `--definition-links`: answer definitions as `LocationLink`s;
+//! - `--hostile-format`: add an edit past the end of the document to the
+//!   formatting answer;
 //! - `--log PATH`: append every message received, one JSON object per line,
 //!   then `{"synced": URI, "text": TEXT}` after each change it applies.
+
+mod project;
 
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -58,6 +72,12 @@ struct Options {
     incomplete: bool,
     no_hover: bool,
     no_completion: bool,
+    no_navigation: bool,
+    no_rename: bool,
+    no_formatting: bool,
+    rename: Option<String>,
+    definition_links: bool,
+    hostile_format: bool,
 }
 
 fn options(mut args: impl Iterator<Item = String>) -> Options {
@@ -82,6 +102,12 @@ fn options(mut args: impl Iterator<Item = String>) -> Options {
             "--incomplete" => options.incomplete = true,
             "--no-hover" => options.no_hover = true,
             "--no-completion" => options.no_completion = true,
+            "--no-navigation" => options.no_navigation = true,
+            "--no-rename" => options.no_rename = true,
+            "--no-formatting" => options.no_formatting = true,
+            "--rename" => options.rename = args.next(),
+            "--definition-links" => options.definition_links = true,
+            "--hostile-format" => options.hostile_format = true,
             other => eprintln!("rustode-test-lsp: ignoring {other}"),
         }
     }
@@ -94,6 +120,10 @@ struct Server {
     /// The negotiated position encoding: `utf-8`, `utf-16` or `utf-32`.
     encoding: String,
     documents: HashMap<String, String>,
+    /// The version of each open document, as the client last sent it.
+    versions: HashMap<String, i64>,
+    /// The workspace root's path, from `initialize`.
+    root: Option<String>,
     shutdown: bool,
     out: io::Stdout,
     /// Answers waiting for their time: when, the request id, the result.
@@ -106,6 +136,8 @@ fn main() {
         options,
         encoding: "utf-16".to_owned(),
         documents: HashMap::new(),
+        versions: HashMap::new(),
+        root: None,
         shutdown: false,
         out: io::stdout(),
         delayed: Vec::new(),
@@ -204,6 +236,7 @@ impl Server {
             "textDocument/didClose" => {
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or_default();
                 self.documents.remove(uri);
+                self.versions.remove(uri);
                 self.send_diagnostics(uri, &[]);
             }
             "textDocument/hover" if !self.options.no_hover => {
@@ -212,6 +245,25 @@ impl Server {
             }
             "textDocument/completion" if !self.options.no_completion => {
                 let result = self.completion(params);
+                self.reply_later(message, result);
+            }
+            "textDocument/definition" if !self.options.no_navigation => {
+                let result = self.definition(params);
+                self.reply_later(message, result);
+            }
+            "textDocument/references" if !self.options.no_navigation => {
+                let result = self.references(params);
+                self.reply_later(message, result);
+            }
+            "textDocument/rename" if !self.options.no_rename => match self.rename(params) {
+                Ok(result) => self.reply_later(message, result),
+                Err(error) => {
+                    let id = message["id"].clone();
+                    self.send(&json!({"jsonrpc": "2.0", "id": id, "error": error}));
+                }
+            },
+            "textDocument/formatting" if !self.options.no_formatting => {
+                let result = self.formatting(params);
                 self.reply_later(message, result);
             }
             "$/cancelRequest" => self.cancel(&params["id"]),
@@ -284,6 +336,20 @@ impl Server {
         if !self.options.no_completion {
             capabilities["completionProvider"] = json!({"triggerCharacters": [".", ":"]});
         }
+        self.root = params["rootUri"]
+            .as_str()
+            .and_then(|uri| uri.strip_prefix("file://"))
+            .map(str::to_owned);
+        if !self.options.no_navigation {
+            capabilities["definitionProvider"] = json!(true);
+            capabilities["referencesProvider"] = json!(true);
+        }
+        if !self.options.no_rename {
+            capabilities["renameProvider"] = json!(true);
+        }
+        if !self.options.no_formatting {
+            capabilities["documentFormattingProvider"] = json!(true);
+        }
         if let Some(wanted) = &self.options.encoding
             && offered.contains(&wanted.as_str())
         {
@@ -310,6 +376,9 @@ impl Server {
         if self.options.crash_on_open && text.contains("CRASH") {
             std::process::exit(3);
         }
+        if let Some(version) = document["version"].as_i64() {
+            self.versions.insert(uri.clone(), version);
+        }
         self.documents.insert(uri.clone(), text);
         self.publish(&uri);
     }
@@ -333,6 +402,9 @@ impl Server {
                 }
                 None => new.clone_into(&mut text),
             }
+        }
+        if let Some(version) = params["textDocument"]["version"].as_i64() {
+            self.versions.insert(uri.clone(), version);
         }
         self.log(&json!({"synced": uri, "text": text}));
         self.documents.insert(uri.clone(), text);

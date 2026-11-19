@@ -131,17 +131,30 @@ pub(crate) struct Features {
     pub hover: bool,
     /// `completionProvider`: its trigger characters, `None` without one.
     pub completion: Option<Vec<char>>,
+    /// `definitionProvider`.
+    pub definition: bool,
+    /// `referencesProvider`.
+    pub references: bool,
+    /// `renameProvider`.
+    pub rename: bool,
+    /// `documentFormattingProvider`.
+    pub formatting: bool,
+}
+
+/// A provider capability: a flag or an options object.
+fn provider(value: &Value) -> bool {
+    match value {
+        Value::Bool(on) => *on,
+        Value::Object(_) => true,
+        _ => false,
+    }
 }
 
 impl Features {
-    /// Reads `hoverProvider` (a flag or an options object) and
+    /// Reads the providers (each a flag or an options object) and
     /// `completionProvider`'s `triggerCharacters`.
     pub(crate) fn from_lsp(capabilities: &Value) -> Self {
-        let hover = match &capabilities["hoverProvider"] {
-            Value::Bool(on) => *on,
-            Value::Object(_) => true,
-            _ => false,
-        };
+        let hover = provider(&capabilities["hoverProvider"]);
         let completion = capabilities["completionProvider"]
             .as_object()
             .map(|options| {
@@ -157,7 +170,14 @@ impl Features {
                     })
                     .collect()
             });
-        Self { hover, completion }
+        Self {
+            hover,
+            completion,
+            definition: provider(&capabilities["definitionProvider"]),
+            references: provider(&capabilities["referencesProvider"]),
+            rename: provider(&capabilities["renameProvider"]),
+            formatting: provider(&capabilities["documentFormattingProvider"]),
+        }
     }
 }
 
@@ -277,6 +297,10 @@ impl Server {
                         "dynamicRegistration": false,
                         "contentFormat": ["markdown", "plaintext"],
                     },
+                    "definition": {"dynamicRegistration": false, "linkSupport": true},
+                    "references": {"dynamicRegistration": false},
+                    "rename": {"dynamicRegistration": false, "prepareSupport": false},
+                    "formatting": {"dynamicRegistration": false},
                     "completion": {
                         "dynamicRegistration": false,
                         "contextSupport": true,
