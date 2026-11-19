@@ -1,0 +1,23 @@
+The packaged Node.js compile cache for main is not active (status: disabled, configured: <scratch> active: none).
+
+DevTools listening on ws://127.0.0.1:9333/devtools/browser/5ce996d7-eabe-4e88-a740-0ad41196d0d9
+MESA-EGL: warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+Warning: 'remote-debugging-port' is not in the list of known options, but still passed to Electron/Chromium.
+[90m[main 2026-11-19T17:18:07.587Z][0m [node-compile-cache] main: packaged cache inactive (status: disabled, configured: <scratch> active: none)
+[91m[main 2026-11-19T17:18:07.610Z][0m Error: Unable to retrieve mac address (unexpected format)
+    at U_ (file://<scratch>)
+    at f9 (file://<scratch>)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file://<scratch>
+    at async cO (file://<scratch>)
+    at async pO (file://<scratch>)
+    at async Promise.all (index 0)
+    at async va.startup (file://<scratch>)
+    at async $E.startup (file://<scratch>)
+[90m[main 2026-11-19T17:18:07.616Z][0m StorageMainService: creating application shared storage
+[649944:1119/141807.672934:ERROR:gpu/ipc/client/command_buffer_proxy_impl.cc:285] ContextResult::kTransientFailure: Failed to send GpuControl.CreateCommandBuffer.
+[90m[main 2026-11-19T17:18:07.674Z][0m [shared storage] Creating shared storage database at '<scratch>' (wasCreated: true)
+[90m[main 2026-11-19T17:18:07.674Z][0m [shared storage] Initializing fallback application storage (path: <scratch>)
+[90m[main 2026-11-19T17:18:07.690Z][0m [shared storage] Fallback application storage initialized with 3 items
+[90m[main 2026-11-19T17:18:07.691Z][0m update#setState disabled
+[90m[main 2026-11-19T17:18:07.691Z][0m update#ctor - updates are disabled as there is no update URL

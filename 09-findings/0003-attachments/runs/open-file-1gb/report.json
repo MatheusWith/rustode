@@ -1,0 +1,572 @@
+{
+  "schema": "rustode-bench-report/1",
+  "run": "2026-11-19-173928-open-file-1gb",
+  "status": "ok",
+  "reasons": [],
+  "command": "<scratch> bench open-file-1gb --scenarios <scratch> --project ~/Projects/rustode --out <scratch> --app-copy-dir <scratch> --gui-bin <scratch>",
+  "folder": "<scratch>",
+  "run_folder": "<scratch>",
+  "started": "2026-11-19T17:39:28Z",
+  "finished": "2026-11-19T17:41:41Z",
+  "scenario": {
+    "id": "open-file-1gb",
+    "title": "Open a 1 GiB text file",
+    "kind": "open-file",
+    "list": "<scratch>",
+    "list_version": 2
+  },
+  "inputs": {
+    "fixture": {
+      "path": "fixtures/open-file-1gb.txt",
+      "bytes": 1073741824,
+      "line_bytes": 80,
+      "sha256": "dffdc91a5d70cfecb2442fff4e9fbf15a504c119b42af6618771854a54c32c6f",
+      "first_line": "00000001 the quick brown fox jumps over the lazy dog the quick brown fox jumps."
+    },
+    "rustode": {
+      "warmup": 1,
+      "repetitions": 3
+    },
+    "gui": {
+      "warmup": 0,
+      "repetitions": 3,
+      "timeout_s": 180
+    },
+    "launch": null,
+    "app": {
+      "warmup": 0,
+      "repetitions": 3,
+      "timeout_s": 180,
+      "poll_ms": 50,
+      "cdp_port": 9333,
+      "driver": "<scratch>",
+      "settings": "<scratch>"
+    },
+    "guards": {
+      "min_available_mb": 2000,
+      "abort_below_mb": 700,
+      "abort_psi_some_avg10": 40
+    }
+  },
+  "environment": {
+    "label": "measured",
+    "rustode": "0.1.0",
+    "git": "git 82e0786c4741 (clean)",
+    "build": "release",
+    "kernel": "7.3.4-arch1-2",
+    "cpu": "11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz",
+    "cpus": 12,
+    "mem_total_mb": 7708,
+    "mem_available_mb": 3307,
+    "app_version": "1.147.0, commit 22d8dccf0f29c4c824501c342e4d3c8a69776214, x64"
+  },
+  "integrity": {
+    "app_dir": "~/Projects/rustode/01-app/VSCode-linux-x64",
+    "manifest": "~/Projects/rustode/02-package-analysis/manifest-sha256.txt",
+    "before": {
+      "ok": true,
+      "listed": 3008,
+      "mismatches": [],
+      "unlisted": 0,
+      "unlisted_files": []
+    },
+    "copy": {
+      "ok": true,
+      "listed": 3008,
+      "mismatches": [],
+      "unlisted": 0,
+      "unlisted_files": []
+    },
+    "after": {
+      "ok": true,
+      "listed": 3008,
+      "mismatches": [],
+      "unlisted": 0,
+      "unlisted_files": []
+    }
+  },
+  "gui": {
+    "status": "ok",
+    "reason": null,
+    "binary": "<scratch>",
+    "binary_sha256": "a9423e64d49551815958efd80c29bf3972d0c2ea89ce43d1452ae5390a01b4a4",
+    "version": "rustode-gui 0.1.0",
+    "leftovers_killed": false,
+    "env": {
+      "GALLIUM_DRIVER": "llvmpipe",
+      "LIBGL_ALWAYS_SOFTWARE": "1",
+      "RUSTODE_REPORT_FIRST_FRAME": "1",
+      "RUSTODE_USER_DIR": "{profile}/user",
+      "VK_ICD_FILENAMES": "/nonexistent",
+      "WGPU_BACKEND": "gl",
+      "XDG_CACHE_HOME": "{profile}/cache",
+      "XDG_CONFIG_HOME": "{profile}/config",
+      "XDG_DATA_HOME": "{profile}/data",
+      "XDG_STATE_HOME": "{profile}/state",
+      "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+      "__GLX_VENDOR_LIBRARY_NAME": "mesa"
+    },
+    "node": "v24.22.1",
+    "launches": [
+      {
+        "label": "rep-1",
+        "warmup": false,
+        "spawn_to_cdp_ms": null,
+        "spawn_to_first_paint_ms": null,
+        "spawn_to_workbench_ms": null,
+        "spawn_to_first_line_ms": null,
+        "spawn_to_first_frame_ms": 3143.4,
+        "first_frame_after_main_ms": 3140.2,
+        "shutdown_ms": 118.9,
+        "needed_sigkill": false,
+        "peak_rss_mb": 1859.0,
+        "ready_rss_mb": 1292.9,
+        "ready_pss_mb": 1260.4,
+        "idle_rss_mb": null,
+        "idle_pss_mb": null,
+        "idle_procs": null,
+        "outcome": null,
+        "outcome_detail": null,
+        "complaint": null,
+        "cache_reference_resident_pct": null
+      },
+      {
+        "label": "rep-2",
+        "warmup": false,
+        "spawn_to_cdp_ms": null,
+        "spawn_to_first_paint_ms": null,
+        "spawn_to_workbench_ms": null,
+        "spawn_to_first_line_ms": null,
+        "spawn_to_first_frame_ms": 3022.7,
+        "first_frame_after_main_ms": 3016.7,
+        "shutdown_ms": 61.7,
+        "needed_sigkill": false,
+        "peak_rss_mb": 1031.0,
+        "ready_rss_mb": 1310.5,
+        "ready_pss_mb": 1278.1,
+        "idle_rss_mb": null,
+        "idle_pss_mb": null,
+        "idle_procs": null,
+        "outcome": null,
+        "outcome_detail": null,
+        "complaint": null,
+        "cache_reference_resident_pct": null
+      },
+      {
+        "label": "rep-3",
+        "warmup": false,
+        "spawn_to_cdp_ms": null,
+        "spawn_to_first_paint_ms": null,
+        "spawn_to_workbench_ms": null,
+        "spawn_to_first_line_ms": null,
+        "spawn_to_first_frame_ms": 2089.9,
+        "first_frame_after_main_ms": 2085.4,
+        "shutdown_ms": 61.8,
+        "needed_sigkill": false,
+        "peak_rss_mb": 1300.0,
+        "ready_rss_mb": 1308.9,
+        "ready_pss_mb": 1276.4,
+        "idle_rss_mb": null,
+        "idle_pss_mb": null,
+        "idle_procs": null,
+        "outcome": null,
+        "outcome_detail": null,
+        "complaint": null,
+        "cache_reference_resident_pct": null
+      }
+    ]
+  },
+  "app": {
+    "status": "ok",
+    "reason": null,
+    "copy": "<scratch>",
+    "copy_writes": [],
+    "reaper": true,
+    "leftovers_killed": false,
+    "node": "v24.22.1",
+    "playwright_core": "1.61.0-alpha-2026-06-04",
+    "gpu": {
+      "gl_renderer": "ANGLE (Mesa, llvmpipe (LLVM 23.1.4 256 bits), OpenGL ES 3.2 Mesa 26.2.7-arch1.1)",
+      "gl_vendor": "Google Inc. (Mesa)",
+      "gl_implementation": "(gl=egl-angle,angle=opengl)",
+      "skia_backend": "GaneshGL",
+      "display_type": "ANGLE_OPENGL",
+      "gpu_compositing": "unavailable_off",
+      "opengl": "unavailable_off",
+      "vulkan": "disabled_off"
+    },
+    "launches": [
+      {
+        "label": "rep-1",
+        "warmup": false,
+        "spawn_to_cdp_ms": 363.2,
+        "spawn_to_first_paint_ms": 2086.2,
+        "spawn_to_workbench_ms": 2077.5,
+        "spawn_to_first_line_ms": 6743.8,
+        "spawn_to_first_frame_ms": null,
+        "first_frame_after_main_ms": null,
+        "shutdown_ms": 10593.5,
+        "needed_sigkill": true,
+        "peak_rss_mb": 2428.0,
+        "ready_rss_mb": 2324.0,
+        "ready_pss_mb": 1757.0,
+        "idle_rss_mb": null,
+        "idle_pss_mb": null,
+        "idle_procs": null,
+        "outcome": null,
+        "outcome_detail": null,
+        "complaint": null,
+        "cache_reference_resident_pct": null
+      },
+      {
+        "label": "rep-2",
+        "warmup": false,
+        "spawn_to_cdp_ms": 298.8,
+        "spawn_to_first_paint_ms": 1771.8,
+        "spawn_to_workbench_ms": 1762.7,
+        "spawn_to_first_line_ms": 6198.7,
+        "spawn_to_first_frame_ms": null,
+        "first_frame_after_main_ms": null,
+        "shutdown_ms": 10544.7,
+        "needed_sigkill": true,
+        "peak_rss_mb": 2466.0,
+        "ready_rss_mb": 2307.8,
+        "ready_pss_mb": 1739.0,
+        "idle_rss_mb": null,
+        "idle_pss_mb": null,
+        "idle_procs": null,
+        "outcome": null,
+        "outcome_detail": null,
+        "complaint": null,
+        "cache_reference_resident_pct": null
+      },
+      {
+        "label": "rep-3",
+        "warmup": false,
+        "spawn_to_cdp_ms": 303.8,
+        "spawn_to_first_paint_ms": 1792.2,
+        "spawn_to_workbench_ms": 1779.6,
+        "spawn_to_first_line_ms": 6232.5,
+        "spawn_to_first_frame_ms": null,
+        "first_frame_after_main_ms": null,
+        "shutdown_ms": 10541.3,
+        "needed_sigkill": true,
+        "peak_rss_mb": 2448.0,
+        "ready_rss_mb": 2264.3,
+        "ready_pss_mb": 1697.8,
+        "idle_rss_mb": null,
+        "idle_pss_mb": null,
+        "idle_procs": null,
+        "outcome": null,
+        "outcome_detail": null,
+        "complaint": null,
+        "cache_reference_resident_pct": null
+      }
+    ]
+  },
+  "results": [
+    {
+      "side": "rustode",
+      "metric": "workspace_open",
+      "name": "Workspace::open",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 1498.853,
+      "p50": 1641.266,
+      "p95": 1729.158,
+      "max": 1729.158,
+      "samples": [
+        1729.158,
+        1641.266,
+        1498.853
+      ],
+      "meaning": "`Workspace::open` on a fresh `Workspace` in this process: read the file, detect encoding and line endings, build the buffer, hash the bytes for external-change detection and start watching the file; no window and no rendering (rustode has no GUI until M3); clock: `std::time::Instant`"
+    },
+    {
+      "side": "rustode",
+      "metric": "launch_to_first_frame",
+      "name": "launch to first frame",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 2089.9,
+      "p50": 3022.7,
+      "p95": 3143.4,
+      "max": 3143.4,
+      "samples": [
+        3143.4,
+        3022.7,
+        2089.9
+      ],
+      "meaning": "from spawning `rustode-gui` (release build, the fixture on its command line, a fresh profile folder, software rendering) to the arrival of the line the GUI prints after returning from its first `RedrawRequested` (eframe has painted and called `wgpu::Queue::present`); the driver's clock, the same one the App's times use. The file is already open in that frame, because the GUI opens its arguments before it creates the window"
+    },
+    {
+      "side": "rustode",
+      "metric": "main_to_first_frame",
+      "name": "main to first frame",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 2085.4,
+      "p50": 3016.7,
+      "p95": 3140.2,
+      "max": 3140.2,
+      "samples": [
+        3140.2,
+        3016.7,
+        2085.4
+      ],
+      "meaning": "the GUI's own `Instant`: from `rustode_trace::init_from_env` (the first thing `main` does) to the same first present; it leaves out exec, dynamic linking and the driver's pipe"
+    },
+    {
+      "side": "rustode",
+      "metric": "shutdown",
+      "name": "shutdown after SIGTERM",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 61.7,
+      "p50": 61.8,
+      "p95": 118.9,
+      "max": 118.9,
+      "samples": [
+        118.9,
+        61.7,
+        61.8
+      ],
+      "meaning": "SIGTERM to the GUI process until no process of its tree is left (SIGKILL after 10 s)"
+    },
+    {
+      "side": "rustode",
+      "metric": "peak_rss",
+      "name": "peak RSS, all processes",
+      "unit": "MB",
+      "label": "measured",
+      "n": 3,
+      "min": 1031.0,
+      "p50": 1300.0,
+      "p95": 1859.0,
+      "max": 1859.0,
+      "samples": [
+        1859.0,
+        1031.0,
+        1300.0
+      ],
+      "meaning": "the largest total RSS of the GUI's process tree in the QA watchdog's 1 s samples (collectors/sampler.py); the GUI is stopped as soon as its first frame arrives, so this is usually one sample taken at the start: prefer the RSS at the first frame"
+    },
+    {
+      "side": "rustode",
+      "metric": "ready_rss",
+      "name": "RSS at first frame",
+      "unit": "MB",
+      "label": "measured",
+      "n": 3,
+      "min": 1292.9,
+      "p50": 1308.9,
+      "p95": 1310.5,
+      "max": 1310.5,
+      "samples": [
+        1292.9,
+        1310.5,
+        1308.9
+      ],
+      "meaning": "summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup right after the first-frame line arrived: the memory of the open file and the first frame"
+    },
+    {
+      "side": "rustode",
+      "metric": "ready_pss",
+      "name": "PSS at first frame",
+      "unit": "MB",
+      "label": "measured",
+      "n": 3,
+      "min": 1260.4,
+      "p50": 1276.4,
+      "p95": 1278.1,
+      "max": 1278.1,
+      "samples": [
+        1260.4,
+        1278.1,
+        1276.4
+      ],
+      "meaning": "summed `Pss` of the same processes at the same moment"
+    },
+    {
+      "side": "app",
+      "metric": "launch_to_cdp",
+      "name": "launch to CDP endpoint",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 298.8,
+      "p50": 303.8,
+      "p95": 363.2,
+      "max": 363.2,
+      "samples": [
+        363.2,
+        298.8,
+        303.8
+      ],
+      "meaning": "from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to its CDP endpoint answering `/json/version`, checked every 25 ms"
+    },
+    {
+      "side": "app",
+      "metric": "launch_to_first_paint",
+      "name": "launch to first paint",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 1771.8,
+      "p50": 1792.2,
+      "p95": 2086.2,
+      "max": 2086.2,
+      "samples": [
+        2086.2,
+        1771.8,
+        1792.2
+      ],
+      "meaning": "from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to Chromium's first contentful paint in the workbench page (`performance` paint timing, a wall-clock time read over CDP, minus the wall-clock time of the spawn): the first frame with content that Chromium painted, which can be before the editor is usable"
+    },
+    {
+      "side": "app",
+      "metric": "launch_to_workbench",
+      "name": "launch to workbench",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 1762.7,
+      "p50": 1779.6,
+      "p95": 2077.5,
+      "max": 2077.5,
+      "samples": [
+        2077.5,
+        1762.7,
+        1779.6
+      ],
+      "meaning": "from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's \"workbench ready\""
+    },
+    {
+      "side": "app",
+      "metric": "launch_to_first_line",
+      "name": "launch to first line shown",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 6198.7,
+      "p50": 6232.5,
+      "p95": 6743.8,
+      "max": 6743.8,
+      "samples": [
+        6743.8,
+        6198.7,
+        6232.5
+      ],
+      "meaning": "from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the fixture's first line rendered in an editor `.view-line`, checked every 50 ms over CDP; includes Electron and workbench startup, reading the file and rendering it on the virtual display"
+    },
+    {
+      "side": "app",
+      "metric": "workbench_to_first_line",
+      "name": "workbench to first line",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 4436.0,
+      "p50": 4452.9,
+      "p95": 4666.3,
+      "max": 4666.3,
+      "samples": [
+        4666.3,
+        4436.0,
+        4452.9
+      ],
+      "meaning": "the two previous times subtracted, per launch: what the App spends after its editor part exists until the first line shows"
+    },
+    {
+      "side": "app",
+      "metric": "shutdown",
+      "name": "shutdown after SIGTERM",
+      "unit": "ms",
+      "label": "measured",
+      "n": 3,
+      "min": 10541.3,
+      "p50": 10544.7,
+      "p95": 10593.5,
+      "max": 10593.5,
+      "samples": [
+        10593.5,
+        10544.7,
+        10541.3
+      ],
+      "meaning": "SIGTERM to the App's main process until no process of its profile is left (SIGKILL after 10 s), as the QA startup benchmark does"
+    },
+    {
+      "side": "app",
+      "metric": "peak_rss",
+      "name": "peak RSS, all processes",
+      "unit": "MB",
+      "label": "measured",
+      "n": 3,
+      "min": 2428.0,
+      "p50": 2448.0,
+      "p95": 2466.0,
+      "max": 2466.0,
+      "samples": [
+        2428.0,
+        2466.0,
+        2448.0
+      ],
+      "meaning": "the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py); the App is stopped about a second after its first line, so this is one to three samples: prefer the RSS at the first line"
+    },
+    {
+      "side": "app",
+      "metric": "ready_rss",
+      "name": "RSS at first line",
+      "unit": "MB",
+      "label": "measured",
+      "n": 3,
+      "min": 2264.3,
+      "p50": 2307.8,
+      "p95": 2324.0,
+      "max": 2324.0,
+      "samples": [
+        2324.0,
+        2307.8,
+        2264.3
+      ],
+      "meaning": "summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup right after the first line was seen (the App is still starting some processes then); shared pages are counted once per process"
+    },
+    {
+      "side": "app",
+      "metric": "ready_pss",
+      "name": "PSS at first line",
+      "unit": "MB",
+      "label": "measured",
+      "n": 3,
+      "min": 1697.8,
+      "p50": 1739.0,
+      "p95": 1757.0,
+      "max": 1757.0,
+      "samples": [
+        1757.0,
+        1739.0,
+        1697.8
+      ],
+      "meaning": "summed `Pss` of the same processes at the same moment"
+    }
+  ],
+  "notes": [
+    {
+      "label": "estimated",
+      "text": "Each App time is late by up to one polling interval plus one CDP round trip: about 50 ms for the first line and 25 ms for the CDP endpoint and the workbench (estimated from the polling intervals, not measured)."
+    },
+    {
+      "label": "measured",
+      "text": "3 of 3 launches did not exit within 10 s of SIGTERM and were killed with SIGKILL: rep-1, rep-2, rep-3; their shutdown times include the 10 s wait."
+    },
+    {
+      "label": null,
+      "text": "rustode's in-process `Workspace::open` has no process start, window or rendering and is not comparable with any App number. Compare the GUI's \"launch to first frame\" with the App's \"launch to first paint\" and \"launch to first line shown\" (a bracket, not one number): the GUI's first frame already shows the file, Chromium's first paint is not tied to the file, and the first line is polled over CDP. The two editors have no common 'first frame' event: rustode's is the return from its first wgpu present, the App's closest events are Chromium's first contentful paint and the first fixture line seen in the DOM (polled over CDP). The comparison is therefore approximate: read the rustode number against the interval between the App's two, and do not divide one by the other."
+    }
+  ],
+  "like_for_like": false
+}

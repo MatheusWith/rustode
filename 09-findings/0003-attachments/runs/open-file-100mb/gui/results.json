@@ -1,0 +1,89 @@
+{
+ "schema": "rustode-bench-app-results/2",
+ "target": "gui",
+ "measure": "open",
+ "cache": "warm",
+ "status": "ok",
+ "node": "v24.22.1",
+ "playwright_core": null,
+ "launches": [
+  {
+   "label": "warmup-1",
+   "warmup": true,
+   "spawn_to_first_frame_ms": 333,
+   "first_frame_after_main_ms": 330.1,
+   "ready_rss_mb": 251.7,
+   "ready_pss_mb": 221.5,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 61.4,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 107
+  },
+  {
+   "label": "rep-1",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 310.1,
+   "first_frame_after_main_ms": 307.8,
+   "ready_rss_mb": 251.7,
+   "ready_pss_mb": 221.6,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 60.6,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 106
+  },
+  {
+   "label": "rep-2",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 310.5,
+   "first_frame_after_main_ms": 308.3,
+   "ready_rss_mb": 251.8,
+   "ready_pss_mb": 221.6,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 61.1,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 107
+  },
+  {
+   "label": "rep-3",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 313.3,
+   "first_frame_after_main_ms": 310.9,
+   "ready_rss_mb": 253.9,
+   "ready_pss_mb": 223.8,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 60.1,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 107
+  },
+  {
+   "label": "rep-4",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 309.2,
+   "first_frame_after_main_ms": 306.9,
+   "ready_rss_mb": 253.6,
+   "ready_pss_mb": 223.4,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 63.2,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 107
+  },
+  {
+   "label": "rep-5",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 316,
+   "first_frame_after_main_ms": 313.8,
+   "ready_rss_mb": 251.9,
+   "ready_pss_mb": 221.6,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 59.5,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 107
+  }
+ ]
+}

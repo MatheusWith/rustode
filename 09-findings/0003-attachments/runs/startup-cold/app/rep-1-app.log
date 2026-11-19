@@ -1,0 +1,22 @@
+The packaged Node.js compile cache for main is not active (status: disabled, configured: <scratch> active: none).
+
+DevTools listening on ws://127.0.0.1:9333/devtools/browser/0689db6a-dc09-426f-a78b-8dcdd7229a5a
+MESA-EGL: warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+Warning: 'remote-debugging-port' is not in the list of known options, but still passed to Electron/Chromium.
+[90m[main 2026-11-19T17:47:02.956Z][0m [node-compile-cache] main: packaged cache inactive (status: disabled, configured: <scratch> active: none)
+[91m[main 2026-11-19T17:47:02.979Z][0m Error: Unable to retrieve mac address (unexpected format)
+    at U_ (file://<scratch>)
+    at f9 (file://<scratch>)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file://<scratch>
+    at async cO (file://<scratch>)
+    at async pO (file://<scratch>)
+    at async Promise.all (index 0)
+    at async va.startup (file://<scratch>)
+    at async $E.startup (file://<scratch>)
+[90m[main 2026-11-19T17:47:02.987Z][0m StorageMainService: creating application shared storage
+[90m[main 2026-11-19T17:47:03.081Z][0m [shared storage] Creating shared storage database at '<scratch>' (wasCreated: true)
+[90m[main 2026-11-19T17:47:03.081Z][0m [shared storage] Initializing fallback application storage (path: <scratch>)
+[90m[main 2026-11-19T17:47:03.085Z][0m [shared storage] Fallback application storage initialized with 3 items
+[90m[main 2026-11-19T17:47:03.085Z][0m update#setState disabled
+[90m[main 2026-11-19T17:47:03.085Z][0m update#ctor - updates are disabled as there is no update URL
