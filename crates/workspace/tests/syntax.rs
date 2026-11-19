@@ -136,7 +136,8 @@ fn a_comment_opened_above_the_view_colors_the_lines_in_it() {
 fn other_languages_stay_plain() {
     for (file, text) in [
         ("notes.txt", "fn main() {}\n"),
-        ("data.json", "{\"a\": 1}\n"),
+        ("data.ini", "a = 1\n"),
+        ("build.log", "fn main() {}\n"),
     ] {
         let (ws, id, _) = open(file, file, text);
         let doc = ws.document(id).expect("doc");

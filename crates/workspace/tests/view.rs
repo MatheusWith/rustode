@@ -79,7 +79,9 @@ fn languages_follow_the_apps_built_in_extensions() {
         ("a.c", "C"),
         ("Dockerfile", "Docker"),
         ("Makefile", "Makefile"),
-        ("Cargo.toml", "Plain Text"),
+        // TOML is rustode's own addition: the App has no built-in TOML language.
+        ("Cargo.toml", "TOML"),
+        ("a.txt", "Plain Text"),
         ("notes", "Plain Text"),
         ("x.JSON", "JSON"),
         ("tsconfig.jsonc", "JSON with Comments"),

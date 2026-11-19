@@ -13,6 +13,10 @@
 //! (`extensions/theme-defaults/themes/dark_modern.json:90-101`), with the
 //! no-folder background while no folder is open (`statusbarPart.ts:770`).
 //!
+//! A click on the language name opens the language picker (`language.rs`),
+//! as VS Code's status bar item does
+//! (`src/vs/workbench/browser/parts/editor/editorStatus.ts:577-589`).
+//!
 //! **Language servers.** Once a language server is configured, the problem
 //! counts come first on the left, a button that toggles the problems panel as VS Code's does
 //! (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:583`,
@@ -92,6 +96,9 @@ struct Item {
 /// The key of the problem counts item.
 const PROBLEMS: &str = "problems";
 
+/// The key of the language item.
+const LANGUAGE: &str = "language";
+
 /// What the bar asks of the window.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Outcome {
@@ -99,6 +106,9 @@ pub(crate) struct Outcome {
     pub(crate) leave: bool,
     /// The problem counts were clicked, or activated with Enter or Space.
     pub(crate) toggle_problems: bool,
+    /// The language was clicked, or activated with Enter or Space: the
+    /// window opens the language picker.
+    pub(crate) language: bool,
 }
 
 /// Draws the status bar over the whole of `ui`, for the active document if
@@ -143,6 +153,9 @@ pub(crate) fn show(
     outcome.toggle_problems |= shown
         .iter()
         .any(|(key, _, response)| *key == PROBLEMS && response.clicked());
+    outcome.language |= shown
+        .iter()
+        .any(|(key, _, response)| *key == LANGUAGE && clicked(ui, response));
     let focused = shown.iter().find(|(key, ..)| Some(*key) == bar.focused);
     if has_focus {
         focus::outline(&painter, focused.map_or(rect, |(_, place, _)| *place));
@@ -187,7 +200,7 @@ fn items(
                 },
             ));
         }
-        texts.push(("language", doc.language_name().to_owned()));
+        texts.push((LANGUAGE, doc.language_name().to_owned()));
     }
     let mut items: Vec<Item> = texts
         .into_iter()
@@ -280,6 +293,12 @@ fn fit(rect: Rect, mut items: Vec<Item>) -> (Vec<Placed>, Vec<Placed>) {
     (left, right)
 }
 
+/// Whether the pointer pressed on `response`'s item. Items are not widgets
+/// that take part in the Tab order, so the click is read from the pointer.
+fn clicked(ui: &Ui, response: &Response) -> bool {
+    response.hovered() && ui.input(|input| input.pointer.primary_clicked())
+}
+
 /// One item as a label, centered in `rect`, or from its left edge.
 fn draw(ui: &mut Ui, rect: Rect, item: &Item, font: &FontId, from_left: bool) -> Response {
     if let Some(counts) = item.counts {
@@ -358,6 +377,7 @@ fn keyboard(ui: &Ui, bar: &mut Bar, shown: &[(&'static str, Rect, Response)]) ->
             Key::End => last,
             Key::Enter | Key::Space => {
                 outcome.toggle_problems |= bar.focused == Some(PROBLEMS);
+                outcome.language |= bar.focused == Some(LANGUAGE);
                 index
             }
             _ => {

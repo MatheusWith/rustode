@@ -266,8 +266,18 @@ fn quick_line(item: &QuickItem, width: usize, selected: bool, theme: &Theme) -> 
             (vec![Span::raw(text)], String::new())
         }
         QuickItem::Hint(hint) => (vec![Span::styled(format!(" {hint}"), dim)], String::new()),
+        QuickItem::Language(pick) => {
+            let mut spans = highlighted(
+                &format!(" {}", pick.label),
+                &shift(&pick.positions),
+                highlight,
+            );
+            spans.push(Span::styled(format!("  {}", pick.description), dim));
+            (spans, pick.extensions.clone())
+        }
     };
     let used: usize = spans.iter().map(|s| s.content.width()).sum();
+    let right = truncate(&right, width.saturating_sub(used + 2));
     let gap = width.saturating_sub(used + right.width() + 1);
     spans.push(Span::raw(" ".repeat(gap)));
     spans.push(Span::styled(format!("{right} "), dim));
@@ -438,6 +448,14 @@ fn draw_status(app: &mut App, frame: &mut Frame, area: Rect) {
         left = format!("{left}  {message}");
     }
     let width = usize::from(area.width);
+    app.hits.language_status = document.map(|d| {
+        let name = to_u16(d.language_name().width() + 1);
+        (
+            area.y,
+            (area.x + area.width).saturating_sub(name + 1),
+            area.x + area.width,
+        )
+    });
     let room = width.saturating_sub(right.width());
     let left = truncate(&left, room);
     let gap = " ".repeat(room - left.width());

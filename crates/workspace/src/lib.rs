@@ -9,6 +9,7 @@ mod external;
 mod find;
 mod fuzzy;
 mod language;
+mod languages;
 mod lsp;
 mod quick_open;
 mod search;
@@ -30,6 +31,7 @@ pub use extensions::{
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
+pub use languages::LanguagePick;
 pub use lsp::{Marker, MarkerSeverity, Problem, ProblemCounts, ServerState, ServerStatus};
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
@@ -75,6 +77,8 @@ pub enum Error {
     Conflict(DocumentId),
     /// [`Workspace::resolve_conflict`] was called with no conflict pending.
     NoConflict(DocumentId),
+    /// [`Workspace::set_language`] was given an id that is no language.
+    UnknownLanguage(String),
 }
 
 /// Something that happened in the workspace, for frontends to react to.
@@ -96,6 +100,12 @@ pub enum Event {
     /// the frontend asks the user to [`Resolution::ReloadTheirs`] or
     /// [`Resolution::KeepMine`].
     Conflict {
+        /// The document.
+        id: DocumentId,
+    },
+    /// A document's language changed: the user picked one, or
+    /// `files.associations` now says another. Its highlights changed too.
+    LanguageChanged {
         /// The document.
         id: DocumentId,
     },
@@ -149,6 +159,7 @@ impl fmt::Display for Error {
                 "{id:?} changed on disk under unsaved edits; reload or keep the edits first"
             ),
             Self::NoConflict(id) => write!(f, "{id:?} has no conflict to resolve"),
+            Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
         }
     }
 }
@@ -177,6 +188,8 @@ pub struct Workspace {
     lsp: lsp::LanguageServers,
     /// Search across the folder: the running search and its results.
     search: search::Searches,
+    /// `files.associations`, read again whenever the settings load.
+    associations: language::Associations,
 }
 
 impl Workspace {
@@ -199,7 +212,7 @@ impl Workspace {
             path: path.to_owned(),
             source,
         })?;
-        let document = Document::from_owned_bytes(path.to_owned(), bytes);
+        let document = Document::from_owned_bytes(path.to_owned(), bytes, &self.associations);
         tracing::debug!(path = %path.display(), encoding = document.encoding().label(), "opened");
         self.documents.push(Some(document));
         self.watch(path);
