@@ -1,0 +1,16 @@
+ notes.txt │
+   1 def f(a):
+   2     return None
+   3
+
+
+
+
+
+
+
+
+
+
+
+ notes.txt                                                           Ln 1, Col 1  UTF-8  LF  Python
