@@ -35,7 +35,9 @@ use crate::focus::Part;
 use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::quick_input::QuickInput;
-use crate::{editor, explorer, extensions, find, focus, layout, problems, search, status, tabs};
+use crate::{
+    editor, explorer, extensions, find, focus, language, layout, problems, search, status, tabs,
+};
 use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, Sense, UiBuilder, Vec2, ViewportCommand,
 };
@@ -104,6 +106,8 @@ pub struct EditorApp {
     find: find::Find,
     /// Whether the next quit discards unsaved changes.
     confirm_quit: bool,
+    /// The "Change Language Mode" picker.
+    language: language::Picker,
 }
 
 fn file_name(document: &Document) -> String {
@@ -185,6 +189,7 @@ impl EditorApp {
             extensions: extensions::Panel::default(),
             waker_set: false,
             search: search::Panel::default(),
+            language: language::Picker::default(),
             problems: problems::Panel::default(),
             focus_editor_next: false,
             quick: None,
@@ -430,6 +435,35 @@ impl EditorApp {
     fn switch(&mut self, ctx: &Context, switch: fn(&mut Workspace)) {
         switch(&mut self.workspace);
         self.focus_editor(ctx);
+    }
+
+    /// "Change Language Mode": Ctrl+K M or a click on the status bar's
+    /// language opens the picker, which is drawn while it is open. Returns
+    /// whether a pick changed the document's language.
+    fn change_language(&mut self, ctx: &Context, clicked: bool) -> bool {
+        let chord = !self.language.is_open() && self.language.chord(ctx);
+        if let Some(id) = self
+            .workspace
+            .active_document()
+            .filter(|_| chord || clicked)
+        {
+            self.language.open(id);
+        }
+        match self.language.show(ctx, &mut self.workspace) {
+            language::Outcome::Picked => {
+                self.focus_editor(ctx);
+                true
+            }
+            language::Outcome::Closed => {
+                self.focus_editor(ctx);
+                false
+            }
+            language::Outcome::Failed(message) => {
+                self.error = Some(message);
+                false
+            }
+            language::Outcome::None => false,
+        }
     }
 
     /// Focuses the editor, or the empty editor group without a tab.
@@ -726,6 +760,7 @@ impl eframe::App for EditorApp {
             .or(self.error.as_deref())
             .or(self.notice.as_deref());
         let active = self.workspace.active_document();
+        let mut clicked_language = false;
         if let Some(rect) = areas.status {
             let outcome = ui
                 .scope_builder(
@@ -739,6 +774,7 @@ impl eframe::App for EditorApp {
             if outcome.toggle_problems {
                 self.toggle_problems(&ctx);
             }
+            clicked_language = outcome.language;
             if outcome.leave {
                 self.focus_editor(&ctx);
             }
@@ -748,6 +784,7 @@ impl eframe::App for EditorApp {
             // one when it wraps around: draw that one now.
             ctx.request_repaint();
         }
+        changed |= self.change_language(&ctx, clicked_language);
         self.update_title(&ctx);
         if let Some(latency) = &self.latency {
             latency.borrow_mut().frame(changed);

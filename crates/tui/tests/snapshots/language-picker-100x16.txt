@@ -1,0 +1,16 @@
+ notes.txt │
+   1 def f┌──────────────────────────────────────────────────────────────────────────────┐
+   2     r│                                                                              │
+   3      │ Auto Detect                                                                  │
+          │ C  (c)                                                                 .c .i │
+          │ C++  (cpp) .c++ .c++m .cc .ccm .cpp .cppm .cxx .cxxm .h .h++ .h.in .hh .hpp  │
+          │ CSS  (css)                                                              .css │
+          │ Docker  (dockerfile)                              .containerfile .dockerfile │
+          │ Go  (go)                                                                 .go │
+          │ HTML  (html) .asp .aspx .ejs .htm .html .jshtm .jsp .mdoc .rhtml .shtml .vol │
+          │ Ini  (ini)                                                              .ini │
+          │ Java  (java)                                                      .jav .java │
+          │ JavaScript  (javascript)                             .cjs .es6 .js .mjs .pac │
+          └──────────────────────────────────────────────────────────────────────────────┘
+
+ notes.txt                                                       Ln 1, Col 1  UTF-8  LF  Plain Text

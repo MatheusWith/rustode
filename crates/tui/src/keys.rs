@@ -58,6 +58,7 @@ pub(crate) enum Command {
     FindNext,
     FindPrevious,
     ToggleProblems,
+    ChangeLanguage,
 }
 
 /// What a key does while the explorer has focus.
@@ -155,6 +156,7 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::FindNext => "editor.action.nextMatchFindAction",
         Command::FindPrevious => "editor.action.previousMatchFindAction",
         Command::ToggleProblems => "workbench.actions.view.problems",
+        Command::ChangeLanguage => "workbench.action.editor.changeLanguageMode",
         Command::Undo => "undo",
         Command::Redo => "redo",
         Command::SelectAll => "editor.action.selectAll",
@@ -228,6 +230,7 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::FindNext,
         Command::FindPrevious,
         Command::ToggleProblems,
+        Command::ChangeLanguage,
         Command::Undo,
         Command::Redo,
         Command::SelectAll,

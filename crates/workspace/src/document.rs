@@ -11,7 +11,7 @@
 //! and reimplemented, see `ATTRIBUTION.md`). VS Code counts UTF-16 code
 //! units; rustode counts chars.
 
-use crate::language::{self, Language};
+use crate::language::{self, Associations, Language};
 use rustode_core::{EditError, Editor, Position, Range, Selection};
 use rustode_fs::{EncodeError, Encoding, Eol};
 use rustode_syntax::{Syntax, TokenKind};
@@ -67,6 +67,9 @@ pub struct Document {
     /// reload, so undo and redo restore it (VS Code's `pushEOL` is undoable).
     eol_at: HashMap<u64, (Eol, bool)>,
     language: &'static Language,
+    /// Whether the user picked the language, so it no longer follows the
+    /// file's name and first line.
+    language_picked: bool,
     /// The syntax tree, for languages with a grammar and files not too
     /// large for it.
     syntax: Option<Syntax>,
@@ -90,26 +93,34 @@ const TOKENIZATION_LINE_LIMIT: usize = 300 * 1000;
 
 impl Document {
     /// Decodes a file's bytes, without copying valid UTF-8 (large files).
-    pub(crate) fn from_owned_bytes(path: PathBuf, bytes: Vec<u8>) -> Self {
+    pub(crate) fn from_owned_bytes(
+        path: PathBuf,
+        bytes: Vec<u8>,
+        associations: &Associations,
+    ) -> Self {
         let disk = DiskStamp::of(&bytes);
-        Self::from_decoded(path, rustode_fs::decode_owned(bytes), disk)
+        Self::from_decoded(path, rustode_fs::decode_owned(bytes), disk, associations)
     }
 
-    fn from_decoded(path: PathBuf, decoded: rustode_fs::Decoded, disk: DiskStamp) -> Self {
+    fn from_decoded(
+        path: PathBuf,
+        decoded: rustode_fs::Decoded,
+        disk: DiskStamp,
+        associations: &Associations,
+    ) -> Self {
         let rustode_fs::Decoded {
             text,
             encoding,
             bom,
         } = decoded;
         let info = rustode_fs::detect_eol(&text);
-        let name = path
-            .file_name()
-            .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
-        let language = language::detect(&name);
+        let first_line = text.split(['\n', '\r']).next().unwrap_or_default();
+        let language = language::detect(&path, first_line, associations);
         let mut editor = Editor::new(&text);
         let syntax = syntax_for(language.id, &mut editor);
         Self {
             language,
+            language_picked: false,
             syntax,
             eol: (info.dominant, info.mixed),
             eol_at: HashMap::new(),
@@ -390,10 +401,41 @@ impl Document {
 
     /// Replays the text's changes since the last call on the syntax tree.
     pub(crate) fn sync_syntax(&mut self) {
+        let edits = self.editor.take_byte_edits();
         if let Some(syntax) = self.syntax.as_mut() {
-            let edits = self.editor.take_byte_edits();
             syntax.edit(&edits, self.editor.buffer());
         }
+    }
+
+    /// Makes `language` the document's language and parses the text again
+    /// with its grammar, if it has one. A picked language stays whatever
+    /// the file's name and first line say.
+    pub(crate) fn set_language(&mut self, language: &'static Language, picked: bool) {
+        self.language = language;
+        self.language_picked = picked;
+        self.syntax = None;
+        self.editor.take_byte_edits();
+        self.syntax = syntax_for(language.id, &mut self.editor);
+    }
+
+    /// Detects the language again after `files.associations` changed,
+    /// unless the user picked one.
+    pub(crate) fn redetect_language(&mut self, associations: &Associations) {
+        if self.language_picked {
+            return;
+        }
+        let first_line = self.editor.buffer().line_text(0);
+        let detected = language::detect(&self.path, &first_line, associations);
+        if detected != self.language {
+            self.set_language(detected, false);
+        }
+    }
+
+    /// Whether the user picked the language
+    /// ([`crate::Workspace::set_language`]).
+    #[must_use]
+    pub fn language_picked(&self) -> bool {
+        self.language_picked
     }
 }
 

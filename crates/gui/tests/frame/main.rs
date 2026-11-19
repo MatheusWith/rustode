@@ -11,6 +11,7 @@ mod editor;
 mod extensions;
 mod find;
 mod keyboard;
+mod language;
 mod layout;
 mod lsp;
 mod quick_input;

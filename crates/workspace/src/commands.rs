@@ -223,7 +223,7 @@ pub struct CommandMatch {
 }
 
 /// `query`'s space-separated words found in `label`, case-insensitively.
-fn match_label(label: &str, query: &str) -> Option<Vec<usize>> {
+pub(crate) fn match_label(label: &str, query: &str) -> Option<Vec<usize>> {
     let lower: Vec<char> = label.chars().flat_map(char::to_lowercase).collect();
     let mut positions = Vec::new();
     for word in query.split_whitespace() {

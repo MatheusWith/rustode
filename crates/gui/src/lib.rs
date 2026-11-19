@@ -37,6 +37,8 @@
 //!   box of files, commands from the workspace's registry, or a line
 //!   (`quick_input.rs`). Ctrl+F and Ctrl+H open the find widget at the
 //!   editor's top right, with every match in view highlighted (`find.rs`).
+//! - **Change Language Mode** from a click on the status bar's language or
+//!   Ctrl+K M: a list picker over the editor (`language.rs`).
 //!
 //! - **Hover and suggest** overlays anchored to the text: the hover after the
 //!   pointer rests on a char for 300 ms or on Ctrl+K Ctrl+I, the suggest list
@@ -55,6 +57,7 @@ mod focus;
 pub mod fonts;
 mod input;
 mod keys;
+mod language;
 pub mod latency;
 pub mod layout;
 mod problems;

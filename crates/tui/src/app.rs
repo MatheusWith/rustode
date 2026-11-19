@@ -70,6 +70,8 @@ pub(crate) struct Hits {
     pub problems: Option<(Rect, Vec<Option<usize>>)>,
     /// The status bar's problem counts: row, first and one-past-last column.
     pub problems_status: Option<(u16, u16, u16)>,
+    /// The status bar's language name: row, first and one-past-last column.
+    pub language_status: Option<(u16, u16, u16)>,
     /// The Search view's result rows.
     pub search: Option<Rect>,
 }
@@ -82,6 +84,9 @@ const WHEEL_LINES: usize = 3;
 pub(crate) struct QuickInput {
     pub text: String,
     pub selected: usize,
+    /// Picking the language of this document ("Change Language Mode")
+    /// instead of a file, command or line.
+    pub language: Option<DocumentId>,
 }
 
 /// One row of the quick input list.
@@ -89,8 +94,13 @@ pub(crate) struct QuickInput {
 pub(crate) enum QuickItem {
     File(FileMatch),
     Command(CommandMatch),
-    Line { line: usize, column: Option<usize> },
+    Line {
+        line: usize,
+        column: Option<usize>,
+    },
     Hint(String),
+    /// A language of the "Change Language Mode" picker.
+    Language(rustode_workspace::LanguagePick),
 }
 
 /// Rows the quick input list shows at most.
@@ -503,6 +513,7 @@ impl App {
             Command::FindNext => self.find_step(true),
             Command::FindPrevious => self.find_step(false),
             Command::ToggleProblems => self.toggle_problems(),
+            Command::ChangeLanguage => self.open_language_picker(),
             other => self.edit(other),
         }
     }
@@ -775,6 +786,7 @@ impl App {
         self.quick = Some(QuickInput {
             text: prefix.to_owned(),
             selected: 0,
+            language: None,
         });
     }
 
@@ -783,6 +795,9 @@ impl App {
         let Some(text) = self.quick.as_ref().map(|q| q.text.clone()) else {
             return Vec::new();
         };
+        if let Some(items) = self.language_items(&text) {
+            return items;
+        }
         match parse_quick_query(&text) {
             QuickQuery::Files(query) => self
                 .workspace
@@ -851,6 +866,7 @@ impl App {
                 self.focus = Focus::Editor;
                 self.report(|ws, id| ws.go_to_line(id, line, column));
             }
+            Some(QuickItem::Language(pick)) => self.pick_language(&pick),
             Some(QuickItem::Hint(_)) | None => {}
         }
     }
@@ -891,6 +907,14 @@ impl App {
         {
             let _ = self.workspace.activate(id);
             self.focus = Focus::Editor;
+            return;
+        }
+        if self
+            .hits
+            .language_status
+            .is_some_and(|(y, x0, x1)| y == row && (x0..x1).contains(&column))
+        {
+            self.open_language_picker();
             return;
         }
         if self

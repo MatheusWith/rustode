@@ -82,6 +82,8 @@ impl Schema {
     ///   servers): an object of server entries by language id, which the workspace checks;
     /// - `files.exclude`: `src/vs/workbench/contrib/files/browser/files.contribution.ts:154-160`
     ///   (the desktop defaults);
+    /// - `files.associations`: `files.contribution.ts:190-196` (an object of glob to language
+    ///   id, empty by default);
     /// - `search.exclude`, `search.useIgnoreFiles`, `search.useGlobalIgnoreFiles`,
     ///   `search.useParentIgnoreFiles`, `search.followSymlinks`, `search.maxResults`:
     ///   `src/vs/workbench/contrib/search/browser/search.common.contribution.ts:26-95`, with
@@ -159,6 +161,11 @@ impl Schema {
                     "**/.DS_Store",
                     "**/Thumbs.db",
                 ]),
+            ),
+            (
+                "files.associations",
+                SettingType::Object,
+                Value::Object(BTreeMap::new()),
             ),
             (
                 "search.exclude",
