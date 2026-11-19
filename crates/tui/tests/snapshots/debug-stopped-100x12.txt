@@ -1,0 +1,12 @@
+ program.txt │
+   1 print one
+▶  2 print two
+   3 print three
+   4
+
+
+
+
+
+
+ program.txt  Debug: stopped (Run program)                       Ln 1, Col 1  UTF-8  LF  Plain Text

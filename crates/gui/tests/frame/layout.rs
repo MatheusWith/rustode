@@ -3,7 +3,7 @@
 //! items that no longer fit and goes when the window is too short. Read
 //! from the AccessKit tree's bounds and image snapshots.
 
-use super::{open_paths, press, status, temp_dir, type_text};
+use super::{open_paths, press, quiet, status, temp_dir, type_text};
 use eframe::egui::{Key, Modifiers, Vec2, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -24,7 +24,7 @@ fn folder_and_file(name: &str) -> Vec<PathBuf> {
 
 fn resize(harness: &mut Harness<'_, EditorApp>, width: f32) {
     harness.set_size(Vec2::new(width, HEIGHT));
-    harness.run();
+    quiet(harness);
 }
 
 /// Where the editor area starts: the sidebar's width, or 0 without it.
@@ -186,7 +186,7 @@ fn a_window_too_short_for_the_editor_hides_the_status_bar() {
         "127 points fit"
     );
     harness.set_size(Vec2::new(600.0, 126.0));
-    harness.run();
+    quiet(&mut harness);
     assert!(harness.query_by_role(Role::Status).is_none(), "126 do not");
     assert!(harness.query_by_role(Role::MultilineTextInput).is_some());
 }

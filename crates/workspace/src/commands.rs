@@ -30,6 +30,12 @@
 //! "Change Language Mode" on Ctrl+K M
 //! (`src/vs/workbench/browser/parts/editor/editorStatus.ts:1110-1131`; the
 //! frontends open the picker, [`Workspace::language_picks`]).
+//! "Debug: Start Debugging" on F5, "Debug: Continue" on F5 while stopped,
+//! "Debug: Stop" on Shift+F5 and "Debug: Toggle Breakpoint" on F9
+//! (`src/vs/workbench/contrib/debug/browser/debugCommands.ts:48-72`, `:650`,
+//! `:687`, `:767`, `:1169`; `debugEditorActions.ts:35-60`); the first three run
+//! without a document, and [`Workspace::debug_key_command`] says which of
+//! start and continue F5 means now.
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
@@ -213,6 +219,30 @@ pub const COMMANDS: &[CommandInfo] = &[
         Some("Ctrl+K M"),
     ),
     command(
+        "workbench.action.debug.start",
+        "Debug: Start Debugging",
+        Editor,
+        Some("F5"),
+    ),
+    command(
+        "workbench.action.debug.continue",
+        "Debug: Continue",
+        Editor,
+        Some("F5"),
+    ),
+    command(
+        "workbench.action.debug.stop",
+        "Debug: Stop",
+        Editor,
+        Some("Shift+F5"),
+    ),
+    command(
+        "editor.debug.action.toggleBreakpoint",
+        "Debug: Toggle Breakpoint",
+        Editor,
+        Some("F9"),
+    ),
+    command(
         "rustode.restartLanguageServer",
         "Language Server: Restart",
         Editor,
@@ -332,6 +362,18 @@ impl Workspace {
         match id {
             "workbench.action.nextEditor" => self.next_tab(),
             "workbench.action.previousEditor" => self.previous_tab(),
+            "workbench.action.debug.start" => {
+                return self.start_debugging().map(|()| true).map_err(Error::Debug);
+            }
+            "workbench.action.debug.continue" => {
+                return self
+                    .continue_debugging()
+                    .map(|()| true)
+                    .map_err(Error::Debug);
+            }
+            "workbench.action.debug.stop" => {
+                return self.stop_debugging().map(|()| true).map_err(Error::Debug);
+            }
             _ => {
                 let Some(document) = self.active_document() else {
                     return Ok(false);
@@ -385,6 +427,10 @@ impl Workspace {
             "editor.action.showHover" => {
                 let cursor = self.document(id).map_or(0, crate::Document::cursor);
                 return self.request_hover(id, cursor);
+            }
+            "editor.debug.action.toggleBreakpoint" => {
+                let line = self.document(id).map_or(0, |d| d.cursor_position().line);
+                self.toggle_breakpoint(id, line)?;
             }
             "rustode.restartLanguageServer" => return self.restart_language_server(id),
             _ => return Ok(false),

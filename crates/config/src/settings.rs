@@ -80,6 +80,8 @@ impl Schema {
     ///   to its list of encodings;
     /// - `rustode.languageServers`, rustode's own (VS Code has no built-in setting for language
     ///   servers): an object of server entries by language id, which the workspace checks;
+    /// - `rustode.debugAdapters`, rustode's own (VS Code's debuggers come from extensions): an
+    ///   object of adapter entries by launch configuration type, which the workspace checks;
     /// - `files.exclude`: `src/vs/workbench/contrib/files/browser/files.contribution.ts:154-160`
     ///   (the desktop defaults);
     /// - `files.associations`: `files.contribution.ts:190-196` (an object of glob to language
@@ -90,6 +92,7 @@ impl Schema {
     ///   `DEFAULT_MAX_SEARCH_RESULTS` from `src/vs/workbench/services/search/common/search.ts:32`.
     ///   `search.maxResults` is a number or `null` in VS Code; any value is accepted here.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // one table row per setting
     pub fn builtin() -> Self {
         let mut schema = Self::empty();
         let number = |minimum, maximum| SettingType::Number { minimum, maximum };
@@ -147,6 +150,11 @@ impl Schema {
             ),
             (
                 "rustode.languageServers",
+                SettingType::Object,
+                Value::Object(BTreeMap::new()),
+            ),
+            (
+                "rustode.debugAdapters",
                 SettingType::Object,
                 Value::Object(BTreeMap::new()),
             ),

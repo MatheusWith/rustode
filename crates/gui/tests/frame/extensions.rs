@@ -4,6 +4,7 @@
 //! not-loaded notice, read from the AccessKit tree and image snapshots. The extension logic is tested at the workspace
 //! seam (`crates/workspace/tests/extensions.rs`).
 
+use super::quiet;
 use eframe::egui::{Event, Key, Modifiers, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -42,7 +43,7 @@ fn open(name: &str, stand_in: &StandIn) -> (Harness<'static, EditorApp>, PathBuf
             rustode_gui::fonts::install(&cc.egui_ctx);
             app
         });
-    harness.run();
+    quiet(&mut harness);
     (harness, extensions)
 }
 
@@ -57,12 +58,12 @@ fn settle(harness: &mut Harness<'_, EditorApp>) {
         assert!(Instant::now() < deadline, "extension work did not finish");
         std::thread::sleep(Duration::from_millis(5));
     }
-    harness.run();
+    quiet(harness);
 }
 
 fn press(harness: &mut Harness<'_, EditorApp>, modifiers: Modifiers, key: Key) {
     harness.key_press_modifiers(modifiers, key);
-    harness.run();
+    quiet(harness);
 }
 
 fn ctrl_shift_x(harness: &mut Harness<'_, EditorApp>) {
@@ -105,7 +106,7 @@ fn search(harness: &mut Harness<'_, EditorApp>) {
     ctrl_shift_x(harness);
     settle(harness);
     harness.event(Event::Text("hello".to_owned()));
-    harness.run();
+    quiet(harness);
     press(harness, Modifiers::NONE, Key::Enter);
     settle(harness);
 }

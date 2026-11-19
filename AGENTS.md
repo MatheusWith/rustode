@@ -527,7 +527,7 @@ The crates form layers, and a dependency only points to a lower layer:
 | L1 | `rustode-syntax`, `rustode-fs`, `rustode-config`, `rustode-trace`, `rustode-protocol` |
 | L2 | `rustode-workspace` |
 | L3 | `rustode-cli`, `rustode-tui`, `rustode-gui` |
-| tools | `xtask`, `test-lsp` (`publish = false`) |
+| tools | `xtask`, `test-lsp`, `test-dap` (`publish = false`) |
 
 - Applied: frontends depend on no rustode crate but the workspace, checked by `xtask/tests/frontend_deps.rs` through `cargo metadata`.
 - Not applied yet: a table-driven check, in the same test or an `xtask layers` task, that fails on:

@@ -104,7 +104,7 @@ impl EditorApp {
 
     /// Runs a command of the registry chosen in the palette: a workbench
     /// command here, any other in the workspace, on the active document.
-    fn run_command(&mut self, ctx: &Context, id: &str) {
+    pub(super) fn run_command(&mut self, ctx: &Context, id: &str) {
         if let Some(command) = Workbench::from_id(id) {
             self.run_workbench(ctx, command);
             return;

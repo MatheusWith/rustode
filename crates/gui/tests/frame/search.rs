@@ -3,7 +3,7 @@
 //! Escape, read from the AccessKit tree and an image snapshot. The search
 //! itself is tested at the workspace seam (`crates/workspace/tests/search.rs`).
 
-use super::{press, temp_dir, type_text};
+use super::{press, quiet, temp_dir, type_text};
 use eframe::egui::{Key, Modifiers, accesskit::Role, accesskit::Toggled};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -35,7 +35,7 @@ fn open(name: &str) -> (Harness<'static, EditorApp>, PathBuf) {
             rustode_gui::fonts::install(&cc.egui_ctx);
             app
         });
-    harness.run();
+    quiet(&mut harness);
     (harness, root)
 }
 
@@ -50,7 +50,7 @@ fn settle(harness: &mut Harness<'_, EditorApp>) {
         assert!(Instant::now() < deadline, "the search did not finish");
         std::thread::sleep(Duration::from_millis(2));
     }
-    harness.run();
+    quiet(harness);
 }
 
 fn ctrl_shift_f(harness: &mut Harness<'_, EditorApp>) {
@@ -159,14 +159,14 @@ fn a_click_on_a_file_collapses_it_and_on_a_match_opens_it() {
     let (mut harness, root) = open("search-click");
     search(&mut harness, "needle");
     harness.get_by_label("lib.rs").click();
-    harness.run();
+    quiet(&mut harness);
     assert!(harness.query_by_label("lib.rs").is_some());
     assert!(
         harness.query_by_label("pub fn needle() {}").is_none(),
         "the file's matches are hidden"
     );
     harness.get_by_label("fn main() { needle(); }").click();
-    harness.run();
+    quiet(&mut harness);
     let workspace = harness.state().workspace();
     let id = workspace.active_document().expect("a tab");
     let document = workspace.document(id).expect("document");

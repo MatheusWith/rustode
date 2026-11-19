@@ -21,9 +21,7 @@ mod encoding;
 mod filter;
 mod hover;
 mod markers;
-mod process;
 mod requests;
-mod rpc;
 mod server;
 mod settings;
 mod suggest;
@@ -35,10 +33,10 @@ pub use markers::{Marker, MarkerSeverity, Problem, ProblemCounts};
 pub use server::{ServerState, ServerStatus};
 pub use suggest::{CompletionKind, CompletionList, CompletionMove, CompletionRow};
 
+use crate::child::{Incoming, Waker};
 use crate::{Document, DocumentId, Error, Event, Position, Range, Selection, Workspace};
 use encoding::PositionEncoding;
 use markers::{Anchor, Stored};
-use process::{Incoming, Waker};
 use rustode_trace::spans::{self, Direction};
 use serde_json::{Value, json};
 use server::{Server, ServerId, SyncKind};
@@ -126,6 +124,7 @@ impl Workspace {
     pub fn set_waker(&mut self, wake: impl Fn() + Send + Sync + 'static) {
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         self.lsp.waker.set(Arc::clone(&wake));
+        self.dap.waker().set(Arc::clone(&wake));
         let extensions = Arc::clone(&wake);
         self.set_extensions_waker(move || extensions());
         self.set_search_waker(move || wake());

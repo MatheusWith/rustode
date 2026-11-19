@@ -314,12 +314,14 @@ impl App {
     /// changed, so the screen needs drawing.
     pub fn poll_language_servers(&mut self) -> bool {
         self.workspace.poll_language_servers();
+        self.workspace.poll_debug();
         self.take_events()
     }
 
     /// Applies one terminal event to the workspace.
     pub fn handle(&mut self, event: &Event) {
         self.workspace.poll_language_servers();
+        self.workspace.poll_debug();
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release && self.quick.is_some() => {
                 self.quick_key(*key);
@@ -514,6 +516,12 @@ impl App {
             Command::FindPrevious => self.find_step(false),
             Command::ToggleProblems => self.toggle_problems(),
             Command::ChangeLanguage => self.open_language_picker(),
+            Command::DebugStart => self.debug_command("workbench.action.debug.start"),
+            Command::DebugContinue => self.debug_command("workbench.action.debug.continue"),
+            Command::DebugStop => self.debug_command("workbench.action.debug.stop"),
+            Command::ToggleBreakpoint => {
+                self.debug_command("editor.debug.action.toggleBreakpoint");
+            }
             other => self.edit(other),
         }
     }
@@ -577,15 +585,26 @@ impl App {
         });
     }
 
-    /// F5: loads the disk version after a conflict.
+    /// F5: loads the disk version after a conflict, else starts debugging
+    /// or continues, whichever the workspace says F5 means now.
     fn reload(&mut self) {
-        let Some(id) = self.document() else { return };
-        if self
-            .workspace
-            .document(id)
-            .is_some_and(Document::has_conflict)
+        if let Some(id) = self.document()
+            && self
+                .workspace
+                .document(id)
+                .is_some_and(Document::has_conflict)
         {
             self.report(|ws, id| ws.resolve_conflict(id, Resolution::ReloadTheirs));
+            return;
+        }
+        let command = self.workspace.debug_key_command();
+        self.debug_command(command);
+    }
+
+    /// Runs a debug command by id and shows why it was refused.
+    fn debug_command(&mut self, id: &str) {
+        if let Err(err) = self.workspace.execute(id) {
+            self.message = Some(err.to_string());
         }
     }
 
@@ -909,6 +928,9 @@ impl App {
             self.focus = Focus::Editor;
             return;
         }
+        if self.click_gutter(column, row) {
+            return;
+        }
         if self
             .hits
             .language_status
@@ -971,6 +993,30 @@ impl App {
         if let Err(err) = result {
             self.message = Some(err.to_string());
         }
+    }
+
+    /// A click on the editor's gutter sets or clears a breakpoint on that
+    /// line, as a click on VS Code's glyph margin does; returns whether the
+    /// click was there.
+    fn click_gutter(&mut self, column: u16, row: u16) -> bool {
+        let Some(hit) = self.hits.editor else {
+            return false;
+        };
+        let area = hit.area;
+        if row < area.y || row >= area.bottom() || column < area.x || column >= area.x + hit.gutter
+        {
+            return false;
+        }
+        let view = self.views.get(&hit.id).copied().unwrap_or_default();
+        let line = view.top + usize::from(row - area.y);
+        let in_text = self
+            .workspace
+            .document(hit.id)
+            .is_some_and(|d| line < d.line_count());
+        if in_text && let Err(err) = self.workspace.toggle_breakpoint(hit.id, line) {
+            self.message = Some(err.to_string());
+        }
+        true
     }
 
     /// The char offset under a screen cell of the editor's text.

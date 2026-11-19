@@ -4,7 +4,7 @@
 //! exposed selection and image snapshots. Searching and replacing are
 //! tested at the workspace seam (`crates/workspace/tests/find.rs`).
 
-use super::{assert_status, open_text, press, type_text};
+use super::{assert_status, open_text, press, quiet, type_text};
 use eframe::egui::{
     Event, Key, Modifiers, PointerButton, Pos2, ViewportId,
     accesskit::{Role, Toggled},
@@ -76,7 +76,7 @@ fn alt(harness: &mut Harness<'_, EditorApp>, key: Key, letter: &str) {
     ]);
     harness.step();
     harness.event(Event::ModifiersChanged(NONE));
-    harness.run();
+    quiet(harness);
 }
 
 fn click_at(harness: &mut Harness<'_, EditorApp>, pos: Pos2) {
@@ -89,7 +89,7 @@ fn click_at(harness: &mut Harness<'_, EditorApp>, pos: Pos2) {
             modifiers: NONE,
         });
     }
-    harness.run();
+    quiet(harness);
 }
 
 #[test]
@@ -211,12 +211,12 @@ fn the_buttons_step_toggle_and_close() {
     dialog(&harness)
         .get_by_role_and_label(Role::Button, "Next Match")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(count(&harness), "2 of 3");
     dialog(&harness)
         .get_by_role_and_label(Role::Button, "Use Regular Expression")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(
         toggled(&harness, "Use Regular Expression"),
         Some(Toggled::True)
@@ -233,7 +233,7 @@ fn the_buttons_step_toggle_and_close() {
     dialog(&harness)
         .get_by_role_and_label(Role::Button, "Close")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert!(harness.query_by_role(Role::Dialog).is_none());
 }
 

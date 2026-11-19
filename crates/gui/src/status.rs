@@ -53,7 +53,9 @@ use eframe::egui::{
     Align, Color32, EventFilter, FontId, Id, Key, Label, Layout, Rect, Response, RichText, Stroke,
     Ui, UiBuilder, Vec2, accesskit, pos2,
 };
-use rustode_workspace::{Document, DocumentId, Eol, ProblemCounts, ServerState, Workspace};
+use rustode_workspace::{
+    DebugState, Document, DocumentId, Eol, ProblemCounts, ServerState, Workspace,
+};
 
 /// Height of the status bar, in points.
 pub const STATUS_BAR_HEIGHT: f32 = 22.0;
@@ -172,6 +174,20 @@ pub(crate) fn show(
 
 /// The items to show: the problem counts and the message on the left, then
 /// the right-hand items left to right, each measured.
+/// The debug session for the status bar: its state while there is one, or
+/// why the last one ended.
+fn debug_text(workspace: &Workspace) -> Option<String> {
+    let status = workspace.debug_status();
+    match (status.state, status.configuration, status.message) {
+        (DebugState::Inactive, _, message) => message.map(|m| format!("Debug: {m}")),
+        (state, name, _) => Some(format!(
+            "Debug: {} ({})",
+            state.label(),
+            name.unwrap_or_default()
+        )),
+    }
+}
+
 fn items(
     ui: &Ui,
     workspace: &Workspace,
@@ -185,6 +201,9 @@ fn items(
     }
     if focus::tab_moves_focus(ui.ctx()) {
         texts.push(("tab-moves-focus", TAB_MOVES_FOCUS.to_owned()));
+    }
+    if let Some(text) = debug_text(workspace) {
+        texts.push(("debug", text));
     }
     if let Some((id, doc)) = document.and_then(|id| workspace.document(id).map(|doc| (id, doc))) {
         let tab_size = workspace.tab_size(id).unwrap_or(4);
