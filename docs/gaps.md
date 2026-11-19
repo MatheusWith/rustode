@@ -172,15 +172,15 @@ Editor (rustode, Phase 1):
 - **Missing:** four differences from the Search view's replace, found while building ticket 34.
   - The preview is the match's line before and after (a struck-through match followed by its replacement), not VS Code's diff editor per file (`src/vs/workbench/contrib/search/browser/replaceService.ts:140-166`).
   - VS Code edits a closed file through a hidden model with no tab, and keeps the bulk edit's undo in its own stack (`replaceService.ts:115-138`). Documents in rustode always have a tab, so each edited file stays open as a tab, and Ctrl+Z works in it; `rustode.search.undoReplace` undoes every file of the last replace at once, only while none was edited since.
-  - VS Code saves every edited file after the replace (`replaceService.ts:133`), including the other unsaved edits of a file that was already dirty. rustode does the same; whether it should save only files that were clean before is open.
+  - VS Code saves every edited file after the replace (`replaceService.ts:133`), including the other unsaved edits of a file that was already dirty. **Owner decision, 2026-11-19:** rustode saves only the files that were clean before the replace (closed files it opened count as clean). A file with unsaved changes keeps the replacement in memory and stays dirty, and the notice counts such files. Closed as a gap: a deliberate difference.
   - The preview of a file larger than 64 MiB is not built, and such a file is refused when replacing (`crates/workspace/src/search/replace.rs`).
-- **Approach:** **owner decision** on the third point; the others need a tab-less document model and a diff view (M6/M7). **1–2 days.**
+- **Approach:** the third point is decided (see above); the others need a tab-less document model and a diff view (M6/M7). **1–2 days.**
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-11-19 | minor | G20: replace across files against VS Code's |
+| 2026-11-19 | minor | G20: replace across files against VS Code's; owner decision: save only clean files |
 | 2026-11-17 | minor | G17 and G18: the TUI's provisional layout from 60 to 79 columns and its Dark Modern colors, left for the owner to confirm |
 | 2026-11-17 | minor | Editor questions G13–G19 (integrity, benchmark method, TUI layout, theme, branch protection) |
 | 2026-11-16 | minor | Translated to English; G1 mentions REA |
