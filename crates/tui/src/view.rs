@@ -13,17 +13,17 @@
 //! one at a line's end takes one cell), and the gutter shows the line's most
 //! severe problem as E, W or I in its first column.
 
-use crate::app::{App, EditorHit, Focus, Hits, QUICK_ROWS, QuickItem, Viewport};
+use crate::app::{App, EditorHit, Focus, GroupHit, Hits, QUICK_ROWS, QuickItem, Viewport};
 use crate::theme::Theme;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use rustode_workspace::{
-    BreakpointKind, DebugState, Document, DocumentId, Eol, Highlight, Marker, MarkerSeverity,
-    Position, Selection, ServerState,
+    Axis, BreakpointKind, DebugState, Document, DocumentId, Eol, GroupId, Highlight,
+    Layout as GroupLayout, Marker, MarkerSeverity, Position, Selection, Selections, ServerState,
 };
 use std::collections::HashMap;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -125,7 +125,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
         } else {
             editor
         };
-        draw_editor_group(app, frame, editor);
+        draw_editor_area(app, frame, editor);
         if app.find_visible {
             draw_find(app, frame, editor);
         }
@@ -514,15 +514,129 @@ pub(crate) fn truncate(text: &str, width: usize) -> String {
     out
 }
 
-/// The tab bar on the first row, then the active document below it.
-fn draw_editor_group(app: &mut App, frame: &mut Frame, area: Rect) {
-    let [tabs, text] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
-    app.hits.tabs = draw_tabs(app, frame.buffer_mut(), tabs);
-    if let Some(id) = app.document() {
-        draw_editor(app, frame, text, id);
-        return;
+/// Columns a group needs side by side with others, and rows a group needs
+/// stacked with others. A split that cannot give every child this much
+/// shows only the child that holds the active group, so the width bands
+/// keep working: a narrow terminal shows one group, a wide one several.
+const MIN_GROUP_WIDTH: u16 = 30;
+const MIN_GROUP_HEIGHT: u16 = 6;
+
+/// Where each group goes inside `area`, and the divider columns between
+/// side-by-side groups.
+fn arrange(
+    layout: &GroupLayout,
+    area: Rect,
+    active: GroupId,
+    groups: &mut Vec<(GroupId, Rect)>,
+    dividers: &mut Vec<Rect>,
+) {
+    match layout {
+        GroupLayout::Group(id) => groups.push((*id, area)),
+        GroupLayout::Split { axis, children } => {
+            let count = u16::try_from(children.len()).unwrap_or(u16::MAX);
+            let fits = match axis {
+                Axis::Horizontal => area.width >= count.saturating_mul(MIN_GROUP_WIDTH),
+                Axis::Vertical => area.height >= count.saturating_mul(MIN_GROUP_HEIGHT),
+            };
+            if !fits {
+                // Only the child with the active group.
+                if let Some(child) = children.iter().find(|c| holds(c, active)) {
+                    arrange(child, area, active, groups, dividers);
+                }
+                return;
+            }
+            let rects = match axis {
+                Axis::Horizontal => split_with_dividers(area, children.len(), dividers),
+                Axis::Vertical => Layout::vertical(vec![Constraint::Fill(1); children.len()])
+                    .split(area)
+                    .to_vec(),
+            };
+            for (child, rect) in children.iter().zip(rects) {
+                arrange(child, rect, active, groups, dividers);
+            }
+        }
     }
-    let hint = vec![
+}
+
+fn holds(layout: &GroupLayout, group: GroupId) -> bool {
+    layout.groups().contains(&group)
+}
+
+/// `count` equal columns with a one-column divider between neighbors.
+fn split_with_dividers(area: Rect, count: usize, dividers: &mut Vec<Rect>) -> Vec<Rect> {
+    let mut constraints = Vec::new();
+    for i in 0..count {
+        if i > 0 {
+            constraints.push(Constraint::Length(1));
+        }
+        constraints.push(Constraint::Fill(1));
+    }
+    let cells = Layout::horizontal(constraints).split(area);
+    let mut columns = Vec::new();
+    for (i, cell) in cells.iter().enumerate() {
+        if i % 2 == 1 {
+            dividers.push(*cell);
+        } else {
+            columns.push(*cell);
+        }
+    }
+    columns
+}
+
+/// The editor area: the groups of the workspace's layout.
+fn draw_editor_area(app: &mut App, frame: &mut Frame, area: Rect) {
+    let active = app.workspace.active_group();
+    let mut groups = Vec::new();
+    let mut dividers = Vec::new();
+    arrange(
+        app.workspace.layout(),
+        area,
+        active,
+        &mut groups,
+        &mut dividers,
+    );
+    for divider in dividers {
+        let separator = app.theme.separator;
+        let buffer = frame.buffer_mut();
+        for y in divider.y..divider.bottom() {
+            buffer[(divider.x, y)].set_symbol("│").set_style(separator);
+        }
+    }
+    for (group, rect) in groups {
+        let hit = draw_group(app, frame, rect, group, group == active);
+        if group == active {
+            app.hits.tabs.clone_from(&hit.tabs);
+            app.hits.editor = hit.editor;
+        }
+        app.hits.groups.push(hit);
+    }
+}
+
+/// One group: its tab bar on the first row, then its active document.
+fn draw_group(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    group: GroupId,
+    focused: bool,
+) -> GroupHit {
+    let [tabs, text] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    let tab_hits = draw_tabs(app, frame.buffer_mut(), tabs, group, focused);
+    let mut placed = GroupHit {
+        group,
+        area,
+        tabs: tab_hits,
+        editor: None,
+    };
+    let active = app
+        .workspace
+        .group_by_id(group)
+        .and_then(rustode_workspace::EditorGroup::active);
+    if let Some(id) = active {
+        placed.editor = draw_editor(app, frame, text, group, id, focused);
+        return placed;
+    }
+    let message = vec![
         Line::from("No file open"),
         Line::from("Open one from the explorer: Ctrl+Shift+E or F6"),
     ];
@@ -532,24 +646,32 @@ fn draw_editor_group(app: &mut App, frame: &mut Frame, area: Rect) {
         height: (text.height - top).min(2),
         ..text
     };
-    frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), hint_area);
+    frame.render_widget(
+        Paragraph::new(message).alignment(Alignment::Center),
+        hint_area,
+    );
+    placed
 }
 
 /// One cell per tab: its name, ● when dirty; the active tab reversed. The
 /// row scrolls so the active tab stays visible.
-fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) -> Vec<(u16, u16, u16, DocumentId)> {
-    let active = app.document();
-    let ids: Vec<DocumentId> = app
-        .workspace
-        .tabs()
+fn draw_tabs(
+    app: &App,
+    buffer: &mut Buffer,
+    area: Rect,
+    group: GroupId,
+    focused: bool,
+) -> Vec<(u16, u16, u16, DocumentId)> {
+    let shown = app.workspace.group_by_id(group);
+    let active = shown.and_then(rustode_workspace::EditorGroup::active);
+    let group_tabs: &[DocumentId] = shown.map_or(&[], rustode_workspace::EditorGroup::tabs);
+    let ids: Vec<DocumentId> = group_tabs
         .iter()
         .copied()
         .filter(|&id| app.workspace.document(id).is_some())
         .collect();
     let mut tabs = Vec::new();
-    let labels: Vec<(String, bool)> = app
-        .workspace
-        .tabs()
+    let labels: Vec<(String, bool)> = group_tabs
         .iter()
         .filter_map(|&id| app.workspace.document(id).map(|d| (id, d)))
         .map(|(id, document)| {
@@ -581,8 +703,11 @@ fn draw_tabs(app: &App, buffer: &mut Buffer, area: Rect) -> Vec<(u16, u16, u16, 
     let mut spans = Vec::new();
     let mut x = area.x;
     for ((label, is_active), id) in labels.into_iter().zip(ids).skip(start) {
-        let style = if is_active {
+        // The active tab of a group without focus is marked, but quieter.
+        let style = if is_active && focused {
             theme.tab_active
+        } else if is_active {
+            theme.tab_inactive.add_modifier(Modifier::UNDERLINED)
         } else {
             theme.tab_inactive
         };
@@ -723,18 +848,28 @@ fn gutter_letters(
     letters
 }
 
-fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
+fn draw_editor(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    group: GroupId,
+    id: DocumentId,
+    focused: bool,
+) -> Option<EditorHit> {
     let tab_size = app.workspace.tab_size(id).unwrap_or(4);
-    let view = app.views.get(&id).copied().unwrap_or_default();
-    let Some(document) = app.workspace.document(id) else {
-        return;
-    };
+    let view = app.views.get(&(group, id)).copied().unwrap_or_default();
+    let document = app.workspace.document(id)?;
+    // This group's own cursors: the document's for the group with focus.
+    let own = app
+        .workspace
+        .view_selections(group, id)
+        .unwrap_or_else(|| Selections::single(document.primary_selection()));
     let lines = document.line_count();
     let area_width = usize::from(area.width);
     let gutter = (lines.to_string().len().max(3) + 2).min(area_width);
     let width = area_width - gutter;
     let height = usize::from(area.height);
-    let cursor = document.cursor_position();
+    let cursor = document.position_of(own.primary().head);
     let cursor_x = display_width(
         document.line(cursor.line).chars().take(cursor.column),
         tab_size,
@@ -756,8 +891,8 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
     let letters = gutter_letters(document, &markers);
     let context = RowContext {
         document,
-        selections: document.selections(),
-        primary: document.primary_selection(),
+        selections: own.as_slice(),
+        primary: own.primary(),
         tab_size,
         left: view.left,
         width,
@@ -782,23 +917,27 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         spans.extend(row_spans(&context, line));
         buffer.set_line(area.x, area.y + to_u16(row), &Line::from(spans), area.width);
     }
-    app.views.insert(id, view);
-    app.page = height.saturating_sub(2).max(1);
-    app.hits.editor = Some(EditorHit {
+    app.views.insert((group, id), view);
+    if focused {
+        app.page = height.saturating_sub(2).max(1);
+    }
+    let hit = EditorHit {
+        group,
         area,
         gutter: to_u16(gutter),
         id,
         tab_size,
-    });
+    };
     let visible = cursor.line >= view.top
         && cursor.line < view.top + height
         && cursor_x >= view.left
         && cursor_x < view.left + width;
-    if visible && app.focus == Focus::Editor {
+    if visible && focused && app.focus == Focus::Editor {
         let x = area.x + to_u16(gutter + cursor_x - view.left);
         let y = area.y + to_u16(cursor.line - view.top);
         frame.set_cursor_position((x, y));
     }
+    Some(hit)
 }
 
 /// The first visible index so that `target` is inside a window of `size`.
