@@ -4,8 +4,9 @@
 //!
 //! A run takes the bench lock, checks the App (integrity against the
 //! manifest, no file outside it, one App at a time, enough memory), creates
-//! its run folder and fixture, measures rustode in-process, drives a
+//! its run folder and fixture, launches the rustode GUI, drives a
 //! verified copy of the App through the QA harness on the virtual display,
+//! then measures rustode in-process (last: its heap stays large),
 //! and writes `report.txt` and `report.json`. Refusals stop before anything
 //! is written. A run that fails after its folder exists is still reported,
 //! and the folder is renamed `<run>-INVALIDA` or `<run>-INTERROMPIDA` so it
@@ -16,6 +17,7 @@ mod args;
 mod display;
 mod fixture;
 mod guard;
+mod gui_side;
 mod integrity;
 mod plan;
 mod report;
@@ -26,7 +28,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use args::Mode;
 use plan::Plan;
@@ -148,6 +150,9 @@ fn dispatch(args: &[String]) -> Result<u8, Failure> {
 
 fn execute(plan: &Plan) -> Result<u8, Failure> {
     let _lock = guard::lock(&plan.lock)?;
+    if plan.runs_gui() {
+        gui_side::preflight(plan)?;
+    }
     let preflight = if plan.runs_app() {
         Some(app_side::preflight(plan)?)
     } else {
@@ -160,25 +165,23 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
     let fixture_sha256 = sha256(&plan.fixture());
     let mut status = Status::Ok;
     let mut reasons = Vec::new();
-    let rustode = if plan.runs_rustode() {
-        eprintln!(
-            "bench: rustode: {} + {} opens of the fixture",
-            plan.scenario.rustode.warmup, plan.scenario.rustode.repetitions
-        );
-        rustode_side::open_file(
-            &plan.fixture(),
-            plan.scenario.fixture.bytes,
-            plan.scenario.rustode,
-        )
-        .map_err(|err| {
-            status = Status::Failed;
-            reasons.push(err);
-        })
-        .ok()
+    let gui = if plan.runs_gui() && status == Status::Ok {
+        eprintln!("bench: rustode-gui: launching on the virtual display");
+        let gui = gui_side::run(plan);
+        if gui.status != Status::Ok {
+            status = gui.status;
+        }
+        reasons.extend(gui.reasons.iter().cloned());
+        Some(gui)
     } else {
         None
     };
-    let app = preflight.map(|preflight| app_side::run(plan, preflight));
+    let gui_stopped = gui
+        .as_ref()
+        .is_some_and(|g| matches!(g.status, Status::Aborted | Status::Refused));
+    let app = preflight
+        .filter(|_| !gui_stopped)
+        .map(|preflight| app_side::run(plan, preflight));
     if let Some(app) = &app {
         if app.status != Status::Ok && (status == Status::Ok || app.status == Status::Invalid) {
             status = app.status;
@@ -188,6 +191,9 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
         let _ = fs::create_dir_all(plan.app_out())
             .and_then(|()| fs::write(&writes, app.copy_writes.join("\n") + "\n"));
     }
+    // Last, because the 1 GiB open leaves this process's heap large (the
+    // allocator keeps freed memory), which would starve the launches after it.
+    let rustode = measure_in_process(plan, &mut status, &mut reasons);
     let (run_id, run_folder) = finish_folder(plan, status, &mut reasons);
     let report = Report {
         plan,
@@ -199,10 +205,58 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
         environment,
         fixture_sha256,
         rustode,
+        gui,
         app,
     };
     write_report(&report)?;
     Ok(status.code())
+}
+
+/// The in-process side of an `open-file` scenario: the recorded opens, or
+/// `None` with `status` and `reasons` set when it did not run or failed.
+fn measure_in_process(
+    plan: &Plan,
+    status: &mut Status,
+    reasons: &mut Vec<String>,
+) -> Option<Vec<Duration>> {
+    if !plan.runs_in_process() || *status != Status::Ok {
+        return None;
+    }
+    if let Err(reason) = enough_for_in_process(plan) {
+        *status = Status::Refused;
+        reasons.push(reason);
+        return None;
+    }
+    eprintln!(
+        "bench: rustode: {} + {} opens of the fixture",
+        plan.scenario.rustode.warmup, plan.scenario.rustode.repetitions
+    );
+    rustode_side::open_file(
+        &plan.fixture(),
+        plan.scenario.fixture.bytes,
+        plan.scenario.rustode,
+    )
+    .map_err(|err| {
+        *status = Status::Failed;
+        reasons.push(err);
+    })
+    .ok()
+}
+
+/// The in-process open holds the file, its buffer and the hashing's copy at
+/// once; it does not start unless about three times the fixture plus the
+/// watchdog's floor is available (estimated: measured peaks are in the report).
+fn enough_for_in_process(plan: &Plan) -> Result<(), String> {
+    let need_mb = plan.scenario.fixture.bytes / (1 << 20) * 3 + guard::ABORT_BELOW_MB;
+    let available = guard::mem_available_mb(&plan.proc_dir)?;
+    if available < need_mb {
+        return Err(format!(
+            "MemAvailable {available} MB is below {need_mb} MB (3 x the {} byte fixture + {} MB), the in-process open does not start",
+            plan.scenario.fixture.bytes,
+            guard::ABORT_BELOW_MB
+        ));
+    }
+    Ok(())
 }
 
 fn create_run_folder(plan: &Plan) -> Result<(), Failure> {

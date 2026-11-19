@@ -33,10 +33,19 @@ pub(crate) struct Scenario {
     pub kind: Kind,
     /// The generated input file.
     pub fixture: Fixture,
-    /// Repetitions on the rustode side.
+    /// In-process repetitions on the rustode side (`open-file` only; unused
+    /// by `launch`, which has no in-process side).
+    #[serde(default)]
     pub rustode: RustodeSide,
     /// How the App side is driven.
     pub app: AppSide,
+    /// The rustode GUI side: launches of `rustode-gui` on the same virtual
+    /// display. Required by `launch`; optional for `open-file`.
+    #[serde(default)]
+    pub gui: Option<GuiSide>,
+    /// What a `launch` scenario measures. Required by `launch`.
+    #[serde(default)]
+    pub launch: Option<LaunchSpec>,
 }
 
 /// The scenario kinds the runner implements.
@@ -45,6 +54,9 @@ pub(crate) struct Scenario {
 pub(crate) enum Kind {
     /// Open one generated text file.
     OpenFile,
+    /// Launch each editor with the generated file and measure the launch
+    /// (startup to first frame, or idle memory), with no in-process side.
+    Launch,
 }
 
 impl Kind {
@@ -52,6 +64,7 @@ impl Kind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::OpenFile => "open-file",
+            Self::Launch => "launch",
         }
     }
 }
@@ -67,7 +80,7 @@ pub(crate) struct Fixture {
 }
 
 /// Repetitions on the rustode side.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RustodeSide {
     /// Unrecorded runs first.
@@ -92,6 +105,72 @@ pub(crate) struct AppSide {
     pub driver: PathBuf,
     /// The `settings.json` for each fresh profile, relative to the list file.
     pub settings: PathBuf,
+}
+
+/// Launches of the rustode GUI (`rustode-gui`).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GuiSide {
+    /// Unrecorded launches first.
+    pub warmup: u32,
+    /// Recorded launches.
+    pub repetitions: u32,
+    /// Longest wait for each launch to present its first frame.
+    pub timeout_s: u32,
+}
+
+/// What a `launch` scenario measures and under which cache state.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LaunchSpec {
+    /// What is read from each launch.
+    pub measure: Measure,
+    /// The state of the operating system's file cache at each launch.
+    pub cache: Cache,
+    /// `idle`: seconds to wait after the editor is ready before memory is read.
+    #[serde(default)]
+    pub settle_s: u32,
+}
+
+/// What a launch scenario reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Measure {
+    /// Time from the spawn to the first frame and to the fixture's first line.
+    Startup,
+    /// Memory of the editor's processes `settle_s` after it is ready.
+    Idle,
+}
+
+/// The file-cache state of an editor's own files at each launch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Cache {
+    /// Before each launch the editor's files are dropped from the page cache
+    /// (`posix_fadvise(DONTNEED)`, `bench/evict.py`).
+    Cold,
+    /// Nothing is dropped; the previous launch left its files cached.
+    Warm,
+}
+
+impl Cache {
+    /// The name used in the list and in reports.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Cold => "cold",
+            Self::Warm => "warm",
+        }
+    }
+}
+
+impl Measure {
+    /// The name used in the list, the driver config and reports.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Startup => "startup",
+            Self::Idle => "idle",
+        }
+    }
 }
 
 impl List {
@@ -136,8 +215,13 @@ impl List {
         for s in &self.scenarios {
             let _ = writeln!(
                 out,
-                "{}  {}  [fixture {} bytes; rustode {} opens; App {} launches]",
-                s.id, s.title, s.fixture.bytes, s.rustode.repetitions, s.app.repetitions
+                "{}  {}  [fixture {} bytes; rustode {} opens, {} GUI launches; App {} launches]",
+                s.id,
+                s.title,
+                s.fixture.bytes,
+                s.rustode.repetitions,
+                s.gui.map_or(0, |g| g.repetitions),
+                s.app.repetitions
             );
         }
         out
@@ -178,8 +262,26 @@ impl Scenario {
                 "fixture.bytes must hold at least one whole line",
             ),
             (
-                self.rustode.repetitions >= 1,
+                self.kind != Kind::OpenFile || self.rustode.repetitions >= 1,
                 "rustode.repetitions must be at least 1",
+            ),
+            (
+                self.kind != Kind::Launch || (self.launch.is_some() && self.gui.is_some()),
+                "a launch scenario needs [scenario.launch] and [scenario.gui]",
+            ),
+            (
+                self.kind != Kind::OpenFile || self.launch.is_none(),
+                "[scenario.launch] belongs to launch scenarios",
+            ),
+            (
+                self.gui
+                    .is_none_or(|g| g.repetitions >= 1 && g.timeout_s >= 1),
+                "gui.repetitions and gui.timeout_s must be at least 1",
+            ),
+            (
+                self.launch
+                    .is_none_or(|l| l.measure != Measure::Idle || l.settle_s >= 1),
+                "launch.settle_s must be at least 1 for an idle scenario",
             ),
             (
                 self.app.repetitions >= 1,
