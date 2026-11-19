@@ -214,3 +214,131 @@ fn f6_leaves_the_search_view_for_the_editor_and_comes_back_to_it() {
         "Shift+F6: the status bar"
     );
 }
+
+/// Steps frames until the replace is over.
+fn settle_replace(harness: &mut Harness<'_, EditorApp>) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while harness.state().workspace().is_replacing() {
+        harness.step();
+        assert!(Instant::now() < deadline, "the replace did not finish");
+    }
+    quiet(harness);
+}
+
+fn ctrl_shift_h(harness: &mut Harness<'_, EditorApp>) {
+    press(harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::H);
+}
+
+/// Ctrl+Shift+H, a search for `needle`, then `pin` in the replace box.
+fn replace_view(harness: &mut Harness<'_, EditorApp>) {
+    ctrl_shift_h(harness);
+    type_text(harness, "needle");
+    press(harness, Modifiers::NONE, Key::Enter);
+    settle(harness);
+    let replace = harness
+        .query_all_by_role(Role::TextInput)
+        .find(|input| input.accesskit_node().placeholder() == Some("Replace"))
+        .expect("the replace box");
+    replace.click();
+    quiet(harness);
+    type_text(harness, "pin");
+}
+
+#[test]
+fn ctrl_shift_h_adds_the_replace_box_and_previews_each_match() {
+    let (mut harness, _) = open("replace-preview");
+    ctrl_shift_h(&mut harness);
+    let placeholders: Vec<String> = harness
+        .query_all_by_role(Role::TextInput)
+        .filter_map(|input| input.accesskit_node().placeholder().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        placeholders,
+        ["Search", "Replace", "files to include", "files to exclude"]
+    );
+    replace_view(&mut harness);
+    assert_label(&harness, "4 results in 2 files");
+    assert_eq!(harness.state().workspace().search_replacement(), "pin");
+    harness.snapshot("search_replace_preview");
+}
+
+#[test]
+fn replace_all_asks_then_replaces_in_every_file() {
+    let (mut harness, root) = open("replace-all");
+    replace_view(&mut harness);
+    harness.get_by_label("Replace All").click();
+    quiet(&mut harness);
+    assert_label(&harness, "Replace 4 occurrences across 2 files with 'pin'?");
+    let lib = std::fs::read_to_string(root.join("src/lib.rs")).expect("read");
+    assert!(lib.contains("needle"), "nothing changes before confirming");
+    harness.snapshot("search_replace_confirm");
+    harness.get_by_label("Confirm").click();
+    quiet(&mut harness);
+    settle_replace(&mut harness);
+    let lib = std::fs::read_to_string(root.join("src/lib.rs")).expect("read");
+    assert_eq!(lib, "pub fn pin() {}\n// a pin and a pin\n");
+    let main = std::fs::read_to_string(root.join("src/main.rs")).expect("read");
+    assert_eq!(main, "fn main() { pin(); }\n");
+    assert_label(
+        &harness,
+        "Replaced 4 occurrences across 2 files with 'pin'.",
+    );
+}
+
+#[test]
+fn cancel_leaves_the_files_alone() {
+    let (mut harness, root) = open("replace-cancel");
+    replace_view(&mut harness);
+    harness.get_by_label("Replace All").click();
+    quiet(&mut harness);
+    harness.get_by_label("Cancel").click();
+    quiet(&mut harness);
+    assert!(harness.query_by_label("Confirm").is_none());
+    let lib = std::fs::read_to_string(root.join("src/lib.rs")).expect("read");
+    assert!(lib.contains("needle"));
+}
+
+#[test]
+fn a_result_replaces_or_is_dismissed_by_its_buttons() {
+    let (mut harness, root) = open("replace-buttons");
+    replace_view(&mut harness);
+    // The first Dismiss belongs to lib.rs's file row: the second to its
+    // first match.
+    harness
+        .query_all_by_label("Dismiss")
+        .nth(1)
+        .expect("a match's button")
+        .click();
+    quiet(&mut harness);
+    assert_eq!(
+        harness.state().workspace().search_results().match_count(),
+        3
+    );
+    // Rows now: lib.rs, two matches, main.rs, its match; Replace buttons
+    // are in the same order.
+    harness
+        .query_all_by_label("Replace")
+        .nth(1)
+        .expect("a match's button")
+        .click();
+    quiet(&mut harness);
+    settle_replace(&mut harness);
+    let lib = std::fs::read_to_string(root.join("src/lib.rs")).expect("read");
+    assert_eq!(lib, "pub fn needle() {}\n// a pin and a Needle\n");
+    assert_eq!(
+        harness.state().workspace().search_results().match_count(),
+        2
+    );
+    // A file's Replace takes the rest of its matches.
+    harness
+        .query_all_by_label("Replace")
+        .next()
+        .expect("a file's button")
+        .click();
+    quiet(&mut harness);
+    settle_replace(&mut harness);
+    let lib = std::fs::read_to_string(root.join("src/lib.rs")).expect("read");
+    assert_eq!(lib, "pub fn needle() {}\n// a pin and a pin\n");
+    let main = std::fs::read_to_string(root.join("src/main.rs")).expect("read");
+    assert_eq!(main, "fn main() { needle(); }\n", "another file stays");
+}

@@ -169,6 +169,18 @@ pub(crate) enum Workbench {
     ToggleProblems,
     /// Ctrl+Shift+F: the Search view in the sidebar.
     ShowSearch,
+    /// Ctrl+Shift+H: the Search view with its replace field.
+    ShowReplace,
+    /// `search.action.replaceAll`: asks to confirm, then replaces.
+    SearchReplaceAll,
+    /// Ctrl+Shift+1, `search.action.replace`: the selected result.
+    SearchReplace,
+    /// `search.action.replaceAllInFile`: the selected result's file.
+    SearchReplaceFile,
+    /// `search.action.remove`: dismisses the selected result.
+    SearchRemove,
+    /// `rustode.search.undoReplace`.
+    SearchUndoReplace,
     /// Ctrl+Q: closes the window; with unsaved changes, only when asked twice.
     Quit,
     /// Ctrl+P: quick open.
@@ -204,6 +216,12 @@ impl Workbench {
             "workbench.view.extensions" => Self::ShowExtensions,
             "workbench.action.focusNextPart" => Self::FocusNextPart,
             "workbench.action.findInFiles" => Self::ShowSearch,
+            "workbench.action.replaceInFiles" => Self::ShowReplace,
+            "search.action.replaceAll" => Self::SearchReplaceAll,
+            "search.action.replace" => Self::SearchReplace,
+            "search.action.replaceAllInFile" => Self::SearchReplaceFile,
+            "search.action.remove" => Self::SearchRemove,
+            "rustode.search.undoReplace" => Self::SearchUndoReplace,
             "workbench.actions.view.problems" => Self::ToggleProblems,
             "workbench.action.quickOpen" => Self::QuickOpen,
             "workbench.action.showCommands" => Self::ShowCommands,
@@ -241,6 +259,8 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::X, true, true, false) => Workbench::ShowExtensions,
         (Key::M, true, true, false) => Workbench::ToggleProblems,
         (Key::F, true, true, false) => Workbench::ShowSearch,
+        (Key::H, true, true, false) => Workbench::ShowReplace,
+        (Key::Num1, true, true, false) => Workbench::SearchReplace,
         (Key::F6, false, false, false) => Workbench::FocusNextPart,
         (Key::F6, false, true, false) => Workbench::FocusPreviousPart,
         (Key::M, true, false, false) => Workbench::ToggleTabMovesFocus,

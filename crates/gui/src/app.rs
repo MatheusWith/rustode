@@ -43,12 +43,14 @@ use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, Sense, UiBuilder, Vec2, ViewportCommand,
 };
 use rustode_workspace::{
-    Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Problem, ServerState, Workspace,
+    Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Problem, SearchEvent,
+    ServerState, Workspace,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 mod overlays;
 
@@ -56,6 +58,9 @@ mod overlays;
 const CLOSE_PROMPT: &str = "Unsaved changes: Ctrl+W again closes without saving, Ctrl+S saves";
 /// The status bar prompt after quitting with unsaved changes, as in the TUI.
 const QUIT_PROMPT: &str = "Unsaved changes: Ctrl+Q again quits without saving, Ctrl+S saves";
+/// How long one frame works on a running replace, so the window keeps
+/// drawing.
+const REPLACE_SLICE: Duration = Duration::from_millis(8);
 const EDITOR_BACKGROUND: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
 const HINT: Color32 = Color32::from_rgb(0x9d, 0x9d, 0x9d);
 
@@ -273,6 +278,10 @@ impl EditorApp {
                     self.views.entry(id).or_default().reveal();
                     continue;
                 }
+                Event::Search(SearchEvent::Replaced) => {
+                    self.notice = self.search.replaced(&mut self.workspace);
+                    continue;
+                }
                 Event::LocationsChanged => {
                     if let Some(text) = self.navigator.locations_changed(&self.workspace) {
                         self.notice = Some(text);
@@ -434,6 +443,34 @@ impl EditorApp {
                 self.sidebar.reveal();
                 self.extensions.shown = false;
                 self.search.show_search(&self.workspace);
+            }
+            Workbench::ShowReplace => {
+                self.sidebar.reveal();
+                self.extensions.shown = false;
+                self.search.show_replace(&self.workspace);
+            }
+            Workbench::SearchReplaceAll => {
+                self.message = self.search.ask_replace_all(&self.workspace);
+            }
+            Workbench::SearchReplace => {
+                self.message = self
+                    .search
+                    .run_selected(&mut self.workspace, search::Act::Replace);
+            }
+            Workbench::SearchReplaceFile => {
+                self.message = self
+                    .search
+                    .run_selected(&mut self.workspace, search::Act::ReplaceFile);
+            }
+            Workbench::SearchRemove => {
+                self.message = self
+                    .search
+                    .run_selected(&mut self.workspace, search::Act::Remove);
+            }
+            Workbench::SearchUndoReplace => {
+                self.message = self
+                    .search
+                    .run_selected(&mut self.workspace, search::Act::Undo);
             }
             Workbench::Quit => self.quit(ctx),
             Workbench::QuickOpen => self.open_quick(ctx, ""),
@@ -754,6 +791,9 @@ impl eframe::App for EditorApp {
         self.workspace.poll_language_servers();
         self.workspace.poll_debug();
         self.workspace.poll_search();
+        if self.workspace.poll_replace(Some(REPLACE_SLICE)) {
+            ctx.request_repaint();
+        }
         self.note();
         let tab = focus::tab_pressed(&ctx);
         // Before the editor, which also reads Ctrl+K for Ctrl+K Ctrl+I.
