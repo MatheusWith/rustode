@@ -57,6 +57,17 @@ fn open_program(
     size: [f32; 2],
     breakpoints: &[usize],
 ) -> Harness<'static, EditorApp> {
+    open_with(name, program, size, breakpoints, &[])
+}
+
+/// As [`open_program`], with these options for the adapter.
+fn open_with(
+    name: &str,
+    program: &str,
+    size: [f32; 2],
+    breakpoints: &[usize],
+    args: &[&str],
+) -> Harness<'static, EditorApp> {
     let base = std::env::temp_dir().join(format!("rustode-gui-dap-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let dir = base.join("project");
@@ -71,8 +82,16 @@ fn open_program(
     )
     .expect("launch.json");
     let command = format!("{:?}", adapter().display().to_string());
-    let settings =
-        format!("{{\"rustode.debugAdapters\": {{\"test\": {{\"command\": {command}}}}}}}");
+    let args = format!(
+        "[{}]",
+        args.iter()
+            .map(|a| format!("{a:?}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let settings = format!(
+        "{{\"rustode.debugAdapters\": {{\"test\": {{\"command\": {command}, \"args\": {args}}}}}}}"
+    );
     std::fs::write(base.join("user/settings.json"), settings).expect("settings");
     let mut workspace = Workspace::new();
     workspace.open_folder(&dir).expect("folder");
@@ -309,4 +328,154 @@ fn f6_pauses_while_the_program_runs_and_moves_the_focus_otherwise() {
     press(&mut harness, Modifiers::NONE, Key::F6);
     assert_eq!(state(&harness), DebugState::Stopped);
     assert!(focused(&harness), "the panel's console took the focus");
+}
+
+// ---- ticket 39: the breakpoint editor and the marks of each kind ----
+
+use rustode_workspace::{BreakpointKind, BreakpointSpec};
+
+const LOOP: &str = "loop 3\ninc i\nprint tick\nend\n";
+
+/// Runs a command from the palette.
+fn palette(harness: &mut Harness<'_, EditorApp>, words: &str) {
+    press(harness, Modifiers::NONE, Key::F1);
+    type_text(harness, words);
+    press(harness, Modifiers::NONE, Key::Enter);
+}
+
+#[test]
+fn the_conditional_breakpoint_box_sets_a_condition_and_the_program_stops_when_it_holds() {
+    let mut harness = open_program("conditional", LOOP, [640.0, 360.0], &[]);
+    let id = harness.state().workspace().tabs()[0];
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    palette(&mut harness, "add conditional");
+    // The box names the three texts and shows the expression's field.
+    for name in ["Expression", "Hit Count", "Log Message"] {
+        harness.get_by_label(name);
+    }
+    type_text(&mut harness, "i == 2");
+    harness.snapshot("breakpoint_box");
+    // Tab shows the hit count, which is empty; a click on a name goes back.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    assert_eq!(
+        harness.get_by_role(Role::TextInput).value().as_deref(),
+        Some("")
+    );
+    harness.get_by_label("Expression").click();
+    quiet(&mut harness);
+    assert_eq!(
+        harness.get_by_role(Role::TextInput).value().as_deref(),
+        Some("i == 2"),
+        "the text was kept"
+    );
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert!(harness.query_by_role(Role::TextInput).is_none(), "closed");
+    let info = harness
+        .state()
+        .workspace()
+        .breakpoint_at(id, 2)
+        .expect("set");
+    assert_eq!(info.kind, BreakpointKind::Condition);
+    assert_eq!(info.spec.condition.as_deref(), Some("i == 2"));
+    harness.snapshot("breakpoint_conditional_mark");
+
+    press(&mut harness, Modifiers::NONE, Key::F5);
+    wait(&mut harness, |h| {
+        h.state().workspace().stopped_line(id) == Some(2)
+            && h.state()
+                .workspace()
+                .debug_rows(rustode_workspace::DebugTree::Variables)
+                .iter()
+                .any(|r| r.name.trim() == "i" && r.value == "2")
+    });
+    press(&mut harness, Modifiers::NONE, Key::F5);
+    wait(&mut harness, |h| state(h) == DebugState::Inactive);
+}
+
+#[test]
+fn the_logpoint_box_edit_breakpoint_and_escape() {
+    let mut harness = open_program("logpoint", LOOP, [640.0, 360.0], &[]);
+    let id = harness.state().workspace().tabs()[0];
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    palette(&mut harness, "add logpoint");
+    type_text(&mut harness, "tick {i}");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert_eq!(
+        harness
+            .state()
+            .workspace()
+            .breakpoint_at(id, 2)
+            .expect("set")
+            .kind,
+        BreakpointKind::LogPoint
+    );
+    // Edit Breakpoint opens on the log message the line has; Escape cancels.
+    palette(&mut harness, "edit breakpoint");
+    assert_eq!(
+        harness.get_by_role(Role::TextInput).value().as_deref(),
+        Some("tick {i}")
+    );
+    type_text(&mut harness, "zzz");
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    assert!(harness.query_by_role(Role::TextInput).is_none(), "closed");
+    assert_eq!(
+        harness
+            .state()
+            .workspace()
+            .breakpoint_at(id, 2)
+            .and_then(|b| b.spec.log_message)
+            .as_deref(),
+        Some("tick {i}")
+    );
+    // A line with no breakpoint has nothing to edit.
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+    palette(&mut harness, "edit breakpoint");
+    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert!(
+        status(&harness)
+            .iter()
+            .any(|i| i.contains("there is no breakpoint on this line")),
+        "{:?}",
+        status(&harness)
+    );
+}
+
+#[test]
+fn each_kind_of_breakpoint_has_its_own_mark_and_an_unsupported_one_is_unverified() {
+    let mut harness = open_with(
+        "marks",
+        "print a\nprint b\nprint c\n",
+        [640.0, 360.0],
+        &[],
+        &["--no-conditions", "--no-hit-conditions", "--no-logpoints"],
+    );
+    let id = harness.state().workspace().tabs()[0];
+    let spec = |c: Option<&str>, l: Option<&str>| BreakpointSpec {
+        condition: c.map(str::to_owned),
+        hit_condition: None,
+        log_message: l.map(str::to_owned),
+    };
+    let ws = harness.state_mut().workspace_mut();
+    ws.toggle_breakpoint(id, 0).expect("plain");
+    ws.set_breakpoint(id, 1, spec(Some("a == 1"), None))
+        .expect("condition");
+    ws.set_breakpoint(id, 2, spec(None, Some("hi")))
+        .expect("log");
+    ws.toggle_breakpoint(id, 3).expect("past the end");
+    quiet(&mut harness);
+    harness.snapshot("breakpoint_marks");
+
+    press(&mut harness, Modifiers::NONE, Key::F5);
+    wait(&mut harness, |h| {
+        h.state().workspace().stopped_line(id) == Some(0)
+            && h.state()
+                .workspace()
+                .breakpoint_at(id, 3)
+                .is_some_and(|b| !b.verified)
+    });
+    harness.snapshot("breakpoint_marks_unverified");
+    let details = harness.state().workspace().breakpoint_details(id);
+    assert!(details[1..].iter().all(|b| !b.verified), "{details:?}");
 }
