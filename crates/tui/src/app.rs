@@ -24,6 +24,9 @@ use std::time::{Duration, Instant};
 const DISK_POLL: Duration = Duration::from_millis(250);
 /// How often it takes search results while a search runs.
 const SEARCH_POLL: Duration = Duration::from_millis(30);
+/// How long one turn of the loop works on a running replace, so the screen
+/// keeps drawing and keys keep coming in.
+const REPLACE_SLICE: Duration = Duration::from_millis(8);
 
 /// Which part of the screen receives keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,7 +239,8 @@ impl App {
     pub fn poll(&mut self) -> bool {
         self.workspace.poll_extensions();
         self.workspace.poll_search();
-        self.take_events()
+        let replacing = self.workspace.poll_replace(Some(REPLACE_SLICE));
+        self.take_events() || replacing
     }
 
     /// The document in the active tab.
@@ -291,7 +295,9 @@ impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         terminal.draw(|frame| self.draw(frame))?;
         while !self.quit {
-            let wait = if self.workspace.search_results().is_running() {
+            let wait = if self.workspace.is_replacing() {
+                Duration::ZERO
+            } else if self.workspace.search_results().is_running() {
                 SEARCH_POLL
             } else {
                 DISK_POLL
@@ -304,11 +310,12 @@ impl App {
                 self.workspace.poll_extensions();
                 let servers = self.poll_language_servers();
                 self.workspace.poll_search();
+                let replacing = self.workspace.poll_replace(Some(REPLACE_SLICE));
                 let config_changed = !self.workspace.reload_config().is_empty();
                 if config_changed {
                     self.report_config_problems();
                 }
-                if self.take_events() || config_changed || servers {
+                if self.take_events() || config_changed || servers || replacing {
                     terminal.draw(|frame| self.draw(frame))?;
                 }
             }
@@ -518,6 +525,12 @@ impl App {
             Command::FocusNextPart => self.focus_next_part(),
             Command::ShowExtensions => self.show_extensions(),
             Command::ShowSearch => self.show_search(),
+            Command::ShowReplace => self.show_replace(),
+            Command::SearchReplaceAll => self.search_replace_all(),
+            Command::SearchReplace => self.search_replace_selected(false),
+            Command::SearchReplaceFile => self.search_replace_selected(true),
+            Command::SearchRemove => self.search_remove(),
+            Command::SearchUndoReplace => self.search_undo_replace(),
             Command::Reload => self.reload(),
             Command::QuickOpen => self.open_quick(""),
             Command::ShowCommands => self.open_quick(">"),
@@ -1112,6 +1125,10 @@ impl App {
                     None => continue,
                 },
                 WorkspaceEvent::Notice(text) => text.clone(),
+                WorkspaceEvent::Search(rustode_workspace::SearchEvent::Replaced) => {
+                    self.search_replaced();
+                    continue;
+                }
                 WorkspaceEvent::LocationsChanged => {
                     self.show_locations();
                     continue;

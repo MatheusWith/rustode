@@ -1,0 +1,16 @@
+ SEARCH                                    │ notes.txt │ lib.rs │ main.rs │
+ Search: needle                   Aa ab .* │   1 hello
+ Replace: pin                              │   2
+ files to include                          │
+ files to exclude                          │
+ Replaced 4 occurrences across 2 files with│
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+ notes.txt  Replaced 4 occurrences across 2 files with 'pin'.    Ln 1, Col 1  UTF-8  LF  Plain Text
