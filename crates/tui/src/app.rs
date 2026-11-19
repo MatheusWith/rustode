@@ -36,6 +36,8 @@ pub(crate) enum Focus {
     /// The Extensions view in the sidebar.
     Extensions,
     Problems,
+    /// The debug panel.
+    Debug,
     /// The Search view in the sidebar.
     Search,
 }
@@ -151,6 +153,8 @@ pub struct App {
     pub(crate) extensions: crate::extensions::ExtensionsView,
     /// The problems panel.
     pub(crate) problems: crate::problems::ProblemsPanel,
+    /// The debug panel's state.
+    pub(crate) debug: crate::debug::DebugPanel,
     /// The Search view's state.
     pub(crate) search: crate::search::SearchView,
     /// The hover and suggest popups' keys.
@@ -207,6 +211,7 @@ impl App {
             find_visible: false,
             extensions: crate::extensions::ExtensionsView::default(),
             problems: crate::problems::ProblemsPanel::default(),
+            debug: crate::debug::DebugPanel::default(),
             search: crate::search::SearchView::default(),
             suggest: crate::suggest::State::default(),
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
@@ -372,6 +377,17 @@ impl App {
             self.run_id(&id);
             return;
         }
+        if self.focus == Focus::Debug && !crate::debug::visible(self) {
+            self.focus = Focus::Editor;
+        }
+        if let Some(id) = keys::debug_key(key)
+            && self.workspace.command_applies(id)
+            && !self.removed_id(id, key)
+        {
+            self.message = None;
+            self.debug_command(id);
+            return;
+        }
         if self.focus == Focus::Editor && self.suggest_key(key) {
             return;
         }
@@ -396,6 +412,7 @@ impl App {
                     }
                 }
             }
+            Focus::Debug => self.debug_key(key),
             Focus::Extensions => self.extensions_key(key),
             Focus::Search => self.search_key(key),
         }
@@ -426,9 +443,11 @@ impl App {
 
     /// Whether the user removed this default key for `command`.
     fn removed(&self, command: &Command, key: KeyEvent) -> bool {
-        let Some(id) = keys::id_of(command) else {
-            return false;
-        };
+        keys::id_of(command).is_some_and(|id| self.removed_id(id, key))
+    }
+
+    /// Whether the user removed this default key for the command `id`.
+    fn removed_id(&self, id: &str, key: KeyEvent) -> bool {
         self.workspace.config().keybindings().iter().any(|b| {
             b.command.as_deref().and_then(|c| c.strip_prefix('-')) == Some(id)
                 && match b.key.as_deref() {
@@ -476,7 +495,7 @@ impl App {
             self.run_command(command);
             return;
         }
-        if self.run_language(id) {
+        if self.run_debug_view(id) || self.run_language(id) {
             return;
         }
         match self.workspace.execute(id) {
@@ -691,12 +710,20 @@ impl App {
     fn focus_next_part(&mut self) {
         match self.focus {
             Focus::Editor => self.focus_explorer(),
-            Focus::Explorer | Focus::Extensions | Focus::Problems | Focus::Search
+            Focus::Explorer
+            | Focus::Extensions
+            | Focus::Problems
+            | Focus::Search
+            | Focus::Debug
                 if self.document().is_some() =>
             {
                 self.focus = Focus::Editor;
             }
-            Focus::Explorer | Focus::Extensions | Focus::Problems | Focus::Search => {}
+            Focus::Explorer
+            | Focus::Extensions
+            | Focus::Problems
+            | Focus::Search
+            | Focus::Debug => {}
         }
     }
 

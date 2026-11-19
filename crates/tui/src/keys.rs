@@ -131,6 +131,24 @@ pub(crate) fn global(key: KeyEvent) -> Option<Command> {
     }
 }
 
+/// The debug commands whose keys apply only in some debug states: the
+/// workspace says whether the command's `when` clause holds
+/// (`Workspace::command_applies`), and when it does not the key keeps its
+/// other meaning (F6 moves the focus unless the program runs).
+pub(crate) fn debug_key(key: KeyEvent) -> Option<&'static str> {
+    let (ctrl, shift, alt) = split(key.modifiers);
+    if ctrl || alt {
+        return None;
+    }
+    match (key.code, shift) {
+        (KeyCode::F(10), false) => Some("workbench.action.debug.stepOver"),
+        (KeyCode::F(11), false) => Some("workbench.action.debug.stepInto"),
+        (KeyCode::F(11), true) => Some("workbench.action.debug.stepOut"),
+        (KeyCode::F(6), false) => Some("workbench.action.debug.pause"),
+        _ => None,
+    }
+}
+
 /// The explorer's own keys.
 pub(crate) fn explorer_key(key: KeyEvent) -> Option<ExplorerKey> {
     if key

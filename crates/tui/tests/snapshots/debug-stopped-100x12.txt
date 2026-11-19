@@ -3,10 +3,10 @@
 ▶  2 print two
    3 print three
    4
-
-
-
-
-
-
- program.txt  Debug: stopped (Run program)                       Ln 1, Col 1  UTF-8  LF  Plain Text
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ CALL STACK                    VARIABLES                WATCH               DEBUG CONSOLE
+ main  PAUSED ON BREAKPOINT                                                 one
+  ▶main  program.txt:2
+ worker
+                                                                            >
+ program.txt  Debug: stopped (Run program)                       Ln 2, Col 1  UTF-8  LF  Plain Text
