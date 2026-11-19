@@ -73,6 +73,7 @@ impl Schema {
     /// - `editor.tabSize`, `editor.insertSpaces`, `editor.detectIndentation`:
     ///   `src/vs/editor/common/config/editorConfigurationSchema.ts:25`, `:46`, `:51`, defaults
     ///   from `src/vs/editor/common/core/misc/textModelDefaults.ts:6`;
+    /// - `editor.minimap.enabled`: `src/vs/editor/common/config/editorOptions.ts:3582`, `:3599-3603`;
     /// - `files.encoding`, `files.eol`, `files.trimTrailingWhitespace`,
     ///   `files.insertFinalNewline`, `files.autoSave`, `files.autoSaveDelay`:
     ///   `src/vs/workbench/contrib/files/browser/files.contribution.ts:197`, `:223`, `:244`,
@@ -108,6 +109,11 @@ impl Schema {
                 "editor.tabSize",
                 number(Some(1.0), Some(100.0)),
                 Value::Number(4.0),
+            ),
+            (
+                "editor.minimap.enabled",
+                SettingType::Boolean,
+                Value::Bool(true),
             ),
             (
                 "editor.insertSpaces",
