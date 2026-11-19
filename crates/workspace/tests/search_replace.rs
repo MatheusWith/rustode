@@ -84,7 +84,7 @@ fn the_preview_builds_each_replacement_from_the_match() {
 }
 
 #[test]
-fn replace_all_edits_every_file_and_saves_like_vs_code() {
+fn replace_all_edits_every_file_and_saves_the_clean_ones() {
     let (mut ws, root) = folder(
         "all",
         &[
@@ -208,7 +208,12 @@ fn an_open_document_is_edited_as_it_is_in_the_editor() {
     ws.set_search_replacement("1");
     ws.replace_in_search(ReplaceScope::All).expect("replace");
     assert_eq!(ws.document(id).expect("doc").text(), "1 1\n");
-    assert_eq!(read(&root, "a.txt"), "1 1\n", "saved, as VS Code does");
+    assert_eq!(
+        read(&root, "a.txt"),
+        "one\n",
+        "it had unsaved changes: not saved"
+    );
+    assert!(ws.document(id).expect("doc").is_dirty());
 }
 
 #[test]
@@ -419,4 +424,86 @@ fn starting_a_new_search_stops_a_running_replace() {
     search(&mut ws, "nothing", FindOptions::default());
     assert!(!ws.is_replacing());
     assert_eq!(read(&root, "a.txt"), "x\n", "planned, never applied");
+}
+
+#[test]
+fn a_clean_file_is_saved_and_stays_clean() {
+    let (mut ws, root) = folder("clean", &[("a.txt", "k\n")]);
+    let id = ws.open(&root.join("a.txt")).expect("open");
+    search(&mut ws, "k", FindOptions::default());
+    ws.set_search_replacement("m");
+    let outcome = ws.replace_in_search(ReplaceScope::All).expect("replace");
+    assert_eq!(outcome.left_unsaved, 0);
+    assert_eq!(read(&root, "a.txt"), "m\n");
+    assert!(!ws.document(id).expect("doc").is_dirty());
+    assert_eq!(
+        outcome.message("m"),
+        "Replaced 1 occurrence across 1 file with 'm'."
+    );
+    // Undo: back to the old text, now unsaved.
+    assert_eq!(ws.undo_replace().expect("undo"), 1);
+    assert_eq!(ws.document(id).expect("doc").text(), "k\n");
+    assert!(ws.document(id).expect("doc").is_dirty());
+    assert_eq!(read(&root, "a.txt"), "m\n");
+}
+
+#[test]
+fn a_dirty_file_keeps_the_replacement_in_memory_and_stays_dirty() {
+    let (mut ws, root) = folder("dirty", &[("a.txt", "k\n")]);
+    let id = ws.open(&root.join("a.txt")).expect("open");
+    ws.type_text(id, "z").expect("type");
+    search(&mut ws, "k", FindOptions::default());
+    ws.set_search_replacement("m");
+    let outcome = ws.replace_in_search(ReplaceScope::All).expect("replace");
+    assert_eq!((outcome.files, outcome.left_unsaved), (1, 1));
+    assert!(outcome.unsaved.is_empty(), "nothing failed to save");
+    assert_eq!(ws.document(id).expect("doc").text(), "zm\n");
+    assert!(ws.document(id).expect("doc").is_dirty());
+    assert_eq!(read(&root, "a.txt"), "k\n", "the disk is untouched");
+    assert_eq!(
+        outcome.message("m"),
+        "Replaced 1 occurrence across 1 file with 'm'. 1 file with unsaved changes was left unsaved."
+    );
+    // Undo the replace: the user's own edit stays, still unsaved.
+    assert_eq!(ws.undo_replace().expect("undo"), 1);
+    assert_eq!(ws.document(id).expect("doc").text(), "zk\n");
+    assert!(ws.document(id).expect("doc").is_dirty());
+    // Undo the user's edit too: back to the saved text, clean again.
+    assert!(ws.undo(id).expect("undo"));
+    assert_eq!(ws.document(id).expect("doc").text(), "k\n");
+    assert!(!ws.document(id).expect("doc").is_dirty());
+}
+
+#[test]
+fn a_mix_saves_only_the_files_that_were_clean() {
+    let (mut ws, root) = folder(
+        "mix",
+        &[("a.txt", "k\n"), ("b.txt", "k\n"), ("c.txt", "k\n")],
+    );
+    let b = ws.open(&root.join("b.txt")).expect("open");
+    ws.type_text(b, "z").expect("type");
+    let c = ws.open(&root.join("c.txt")).expect("open");
+    search(&mut ws, "k", FindOptions::default());
+    ws.set_search_replacement("m");
+    let outcome = ws.replace_in_search(ReplaceScope::All).expect("replace");
+    assert_eq!(
+        (outcome.matches, outcome.files, outcome.left_unsaved),
+        (3, 3, 1)
+    );
+    assert_eq!(
+        read(&root, "a.txt"),
+        "m\n",
+        "closed before: opened and saved"
+    );
+    assert_eq!(read(&root, "b.txt"), "k\n", "dirty: not saved");
+    assert_eq!(read(&root, "c.txt"), "m\n", "open and clean: saved");
+    assert!(ws.document(b).expect("doc").is_dirty());
+    assert!(!ws.document(c).expect("doc").is_dirty());
+    assert_eq!(ws.undo_replace().expect("undo"), 3);
+    assert_eq!(ws.document(b).expect("doc").text(), "zk\n");
+    assert!(
+        ws.document(c).expect("doc").is_dirty(),
+        "undone, so unsaved"
+    );
+    assert_eq!(ws.document(c).expect("doc").text(), "k\n");
 }

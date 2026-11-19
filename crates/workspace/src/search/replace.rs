@@ -10,10 +10,13 @@
 //!   (`src/vs/workbench/contrib/search/browser/searchTreeModel/match.ts:83-120`,
 //!   `src/vs/editor/contrib/find/browser/replacePattern.ts`);
 //! - the edits of the chosen matches are applied as one bulk edit, and
-//!   every edited file is **saved** afterwards
+//!   edited files are saved afterwards
 //!   (`src/vs/workbench/contrib/search/browser/replaceService.ts:115-138`,
 //!   `:133`), so a replaced file is not left dirty; undo then brings the
-//!   text back as an unsaved change;
+//!   text back as an unsaved change. **Owner decision, 2026-11-19:** unlike
+//!   VS Code, only files that were clean before the replace are saved; a
+//!   file with unsaved changes keeps the replacement in memory, stays
+//!   dirty and is counted in [`ReplaceOutcome::left_unsaved`];
 //! - the commands: Replace on a match and Replace All in a file, both on
 //!   `Ctrl+Shift+1`, and Dismiss on `Delete`
 //!   (`searchActionsRemoveReplace.ts:59-68`, `:154-160`, `:190-196`);
@@ -76,6 +79,9 @@ pub struct ReplaceOutcome {
     /// Files that were edited but could not be saved, with the reason; they
     /// stay open with unsaved changes.
     pub unsaved: Vec<String>,
+    /// How many edited files had unsaved changes before the replace, so
+    /// were not saved and stay dirty.
+    pub left_unsaved: usize,
 }
 
 /// "N occurrence(s) across M file(s)", in VS Code's four forms
@@ -106,10 +112,28 @@ impl ReplaceOutcome {
     /// Replace All (`searchView.ts:858-888`).
     #[must_use]
     pub fn message(&self, replacement: &str) -> String {
-        format!(
+        let mut text = format!(
             "Replaced {}.",
             across(self.matches, self.files, replacement)
-        )
+        );
+        if self.left_unsaved > 0 {
+            let _ = write!(
+                text,
+                " {} {} with unsaved changes {} left unsaved.",
+                self.left_unsaved,
+                if self.left_unsaved == 1 {
+                    "file"
+                } else {
+                    "files"
+                },
+                if self.left_unsaved == 1 {
+                    "was"
+                } else {
+                    "were"
+                },
+            );
+        }
+        text
     }
 }
 
@@ -485,6 +509,7 @@ impl Workspace {
                 matches: 0,
                 files: 0,
                 unsaved: Vec::new(),
+                left_unsaved: 0,
             },
         });
         Ok(())
@@ -565,6 +590,7 @@ impl Workspace {
                     matches: 0,
                     files: 0,
                     unsaved: Vec::new(),
+                    left_unsaved: 0,
                 },
             )));
             true
@@ -622,7 +648,7 @@ impl Workspace {
         });
     }
 
-    /// Edits and saves one planned file, and brings the results up to date.
+    /// Edits one planned file, saves it when it was clean, and brings the results up to date.
     fn apply_file(&mut self, job: &mut Job) -> Result<(), String> {
         let at = job.applied;
         job.applied += 1;
@@ -643,8 +669,11 @@ impl Workspace {
                 .push(format!("{}: changed while replacing", path.display()));
             return Ok(());
         }
+        let dirty = self.document(id).is_some_and(crate::Document::is_dirty);
         let applied = self.apply_planned(vec![(id, plan.edits.clone())])?;
-        if let Err(err) = self.save(id) {
+        if dirty {
+            job.outcome.left_unsaved += 1;
+        } else if let Err(err) = self.save(id) {
             job.outcome
                 .unsaved
                 .push(format!("{}: {err}", path.display()));
