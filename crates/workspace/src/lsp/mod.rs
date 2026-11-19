@@ -82,6 +82,9 @@ pub(crate) struct LanguageServers {
     files: BTreeMap<PathBuf, Vec<Published>>,
     tracked: HashMap<DocumentId, Tracked>,
     waker: Waker,
+    /// The search path the built-in default servers are looked up in; `None`
+    /// until a frontend asks for the defaults.
+    default_search_path: Option<std::ffi::OsString>,
     /// Requests sent and not answered yet (hover, completion, navigation,
     /// rename, format).
     pending: HashMap<(ServerId, i64), requests::Kind>,
@@ -166,6 +169,18 @@ impl Workspace {
                 Incoming::Closed => self.lsp_closed(id),
             }
         }
+    }
+
+    /// Turns on the built-in language servers: `rust-analyzer` for Rust and
+    /// `typescript-language-server` for TypeScript and JavaScript, for each
+    /// language the user's `rustode.languageServers` does not mention and
+    /// whose program is in a folder of `search_path` (the value of `PATH`).
+    /// A workspace made with [`Workspace::new`] has none, so tests and
+    /// tools start no server by accident. Open documents of those languages
+    /// are attached at once.
+    pub fn use_default_language_servers(&mut self, search_path: &std::ffi::OsStr) {
+        self.lsp.default_search_path = Some(search_path.to_owned());
+        self.lsp_config_changed();
     }
 
     /// The diagnostics of an open document, where to draw them, sorted by
@@ -413,7 +428,10 @@ impl Workspace {
     /// changed or went away, restarts the changed ones, and attaches the
     /// open documents of newly configured languages.
     pub(crate) fn lsp_config_changed(&mut self) {
-        let (configs, problems) = settings::parse(self.config.value(settings::KEY));
+        let (mut configs, problems) = settings::parse(self.config.value(settings::KEY));
+        if let Some(search_path) = &self.lsp.default_search_path {
+            settings::add_defaults(&mut configs, self.config.value(settings::KEY), search_path);
+        }
         for problem in &problems {
             tracing::warn!(%problem, "language server settings");
         }

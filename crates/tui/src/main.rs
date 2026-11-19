@@ -34,6 +34,10 @@ fn main() -> ExitCode {
         }
     };
     app.load_user_config(&user_dir());
+    // The user's own settings are loaded, so a built-in server starts only
+    // for a language they leave alone.
+    app.workspace_mut()
+        .use_default_language_servers(&std::env::var_os("PATH").unwrap_or_default());
     if let Some(dir) = rustode_workspace::default_extensions_dir(|key| std::env::var_os(key)) {
         app.workspace_mut().set_extensions_location(&dir);
     }

@@ -11,10 +11,20 @@
 //! `command` is required; `args` (strings) and `initializationOptions` (any
 //! JSON, passed in `initialize`) are optional. An entry with a problem is
 //! reported and, when it cannot be used, skipped; the other entries still
-//! work.
+//! work. An entry set to `null` switches that language's server off, built-in
+//! default included.
+//!
+//! Built-in defaults ([`DEFAULTS`]): once a frontend asks for them
+//! ([`crate::Workspace::use_default_language_servers`]), `rust-analyzer` serves
+//! Rust and `typescript-language-server --stdio` serves TypeScript and
+//! JavaScript when the program is on the search path and the user's settings
+//! have no entry for that language. The user's entry always wins, whatever it
+//! holds.
 
 use rustode_config::Value;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::path::PathBuf;
 
 /// The setting's id.
 pub(crate) const KEY: &str = "rustode.languageServers";
@@ -27,6 +37,66 @@ pub(crate) struct ServerConfig {
     pub initialization_options: Option<serde_json::Value>,
 }
 
+/// The servers rustode starts without settings: language ids, program and
+/// arguments.
+pub(crate) const DEFAULTS: &[(&str, &str, &[&str])] = &[
+    ("rust", "rust-analyzer", &[]),
+    ("typescript", "typescript-language-server", &["--stdio"]),
+    (
+        "typescriptreact",
+        "typescript-language-server",
+        &["--stdio"],
+    ),
+    ("javascript", "typescript-language-server", &["--stdio"]),
+    (
+        "javascriptreact",
+        "typescript-language-server",
+        &["--stdio"],
+    ),
+];
+
+/// Adds the built-in default of every language the user's settings do not
+/// mention, when its program is an executable file in a folder of
+/// `search_path` (a `PATH`-style list).
+pub(crate) fn add_defaults(
+    configs: &mut BTreeMap<String, ServerConfig>,
+    value: Option<&Value>,
+    search_path: &OsStr,
+) {
+    for &(language, command, args) in DEFAULTS {
+        let mentioned =
+            matches!(value, Some(Value::Object(entries)) if entries.contains_key(language));
+        if mentioned {
+            continue;
+        }
+        let Some(program) = on_path(command, search_path) else {
+            continue;
+        };
+        configs.insert(
+            language.to_owned(),
+            ServerConfig {
+                command: program.display().to_string(),
+                args: args.iter().map(|a| (*a).to_owned()).collect(),
+                initialization_options: None,
+            },
+        );
+    }
+}
+
+/// The executable file named `command` in the first folder of `search_path`
+/// that has one. The server is started from this path, so the search path
+/// given is the one that decides, not the process's own.
+fn on_path(command: &str, search_path: &OsStr) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::env::split_paths(search_path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(command))
+        .find(|file| {
+            file.metadata()
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
 /// The usable entries by language id, and a sentence for each problem.
 pub(crate) fn parse(value: Option<&Value>) -> (BTreeMap<String, ServerConfig>, Vec<String>) {
     let mut configs = BTreeMap::new();
@@ -35,6 +105,9 @@ pub(crate) fn parse(value: Option<&Value>) -> (BTreeMap<String, ServerConfig>, V
         return (configs, problems);
     };
     for (language, entry) in entries {
+        if matches!(entry, Value::Null) {
+            continue; // switched off on purpose
+        }
         let mut report = |what: String| problems.push(format!("{KEY}[\"{language}\"]: {what}"));
         if let Some(config) = parse_entry(entry, &mut report) {
             configs.insert(language.clone(), config);
@@ -135,6 +208,7 @@ fn whole(n: f64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn numbers_keep_their_kind_in_initialization_options() {
@@ -152,6 +226,34 @@ mod tests {
     }
 
     #[test]
+    fn defaults_start_from_the_path_found_and_skip_what_the_user_mentions() {
+        let dir =
+            std::env::temp_dir().join(format!("rustode-defaults-unit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let program = dir.join("typescript-language-server");
+        std::fs::write(&program, "#!/bin/sh\n").expect("file");
+        let mut mode = std::fs::metadata(&program).expect("meta").permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
+        std::fs::set_permissions(&program, mode).expect("chmod");
+        let path = std::env::join_paths([&dir, Path::new("relative/bin")]).expect("path");
+
+        let mut configs = BTreeMap::new();
+        add_defaults(&mut configs, None, &path);
+        let ts = &configs["typescript"];
+        assert_eq!(ts.command, program.display().to_string());
+        assert_eq!(ts.args, ["--stdio"]);
+        assert!(!configs.contains_key("rust"), "rust-analyzer is not there");
+
+        let mut mentioned = BTreeMap::new();
+        mentioned.insert("javascript".to_owned(), Value::Null);
+        let mut configs = BTreeMap::new();
+        add_defaults(&mut configs, Some(&Value::Object(mentioned)), &path);
+        assert!(!configs.contains_key("javascript"), "null switches it off");
+        assert!(configs.contains_key("typescriptreact"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn entries_that_are_not_objects_or_have_an_empty_command_are_skipped() {
         let mut entries = BTreeMap::new();
         entries.insert("a".to_owned(), Value::Number(1.0));
@@ -162,5 +264,9 @@ mod tests {
         assert!(configs.is_empty());
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert!(parse(None).0.is_empty());
+        let mut off = BTreeMap::new();
+        off.insert("c".to_owned(), Value::Null);
+        let (configs, problems) = parse(Some(&Value::Object(off)));
+        assert!(configs.is_empty() && problems.is_empty());
     }
 }
