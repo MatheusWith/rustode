@@ -11,7 +11,7 @@ use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use rustode_tui::App;
-use rustode_workspace::DebugState;
+use rustode_workspace::{ConsoleKind, DebugState, DebugTree};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -45,6 +45,11 @@ fn adapter() -> PathBuf {
 /// A folder with the program, a `launch.json` and settings naming the test
 /// adapter; the app opens the folder and the program.
 fn open(name: &str) -> (App, PathBuf) {
+    open_program(name, "print one\nprint two\nprint three\n")
+}
+
+/// As [`open`], with this program.
+fn open_program(name: &str, program: &str) -> (App, PathBuf) {
     let dir = std::env::temp_dir()
         .join(format!("rustode-tui-dap-{}", std::process::id()))
         .join(name);
@@ -52,7 +57,7 @@ fn open(name: &str) -> (App, PathBuf) {
     std::fs::create_dir_all(dir.join("user")).expect("temp dir");
     std::fs::create_dir_all(dir.join(".vscode")).expect("vscode dir");
     let file = dir.join("program.txt");
-    std::fs::write(&file, "print one\nprint two\nprint three\n").expect("program");
+    std::fs::write(&file, program).expect("program");
     std::fs::write(
         dir.join(".vscode/launch.json"),
         r#"{ "configurations": [ { "name": "Run program", "type": "test", "request": "launch",
@@ -239,4 +244,200 @@ fn starting_without_an_adapter_says_why_on_the_status_bar() {
         shown.contains("no debug adapter for type \"test\""),
         "{shown}"
     );
+}
+
+// ---- ticket 38: stepping, call stack, variables, watch and console ----
+
+const NESTED: &str = "print starting\nglobal g 9\nvar a 1\nobj p k=v\nenter outer\nvar b 2\n\
+obj o x=1 inner=@p\nprint in outer\nleave\nprint done\n";
+
+fn chars(text: &str) -> Vec<Event> {
+    text.chars()
+        .map(|c| key(KeyCode::Char(c), KeyModifiers::NONE))
+        .collect()
+}
+
+/// F1, the words, Enter: runs a command from the palette.
+fn palette(app: &mut App, terminal: &mut Terminal<TestBackend>, words: &str) {
+    send(app, terminal, &[key(KeyCode::F(1), KeyModifiers::NONE)]);
+    send(app, terminal, &chars(words));
+    send(app, terminal, &[key(KeyCode::Enter, KeyModifiers::NONE)]);
+}
+
+/// Stopped on the line of `print in outer`, views loaded.
+fn stopped_in_outer(name: &str) -> (App, Terminal<TestBackend>) {
+    let (mut app, _dir) = open_program(name, NESTED);
+    let mut terminal = terminal(100, 24);
+    let id = app.workspace().tabs()[0];
+    app.workspace_mut()
+        .toggle_breakpoint(id, 7)
+        .expect("breakpoint");
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(5), KeyModifiers::NONE)],
+    );
+    wait(&mut app, "the stop and the views", |app| {
+        let rows = app.workspace().debug_rows(DebugTree::Variables);
+        state(app) == DebugState::Stopped
+            && app.workspace().debug_frames().len() == 2
+            && rows.len() > 2
+            && rows.iter().all(|r| !r.loading)
+    });
+    (app, terminal)
+}
+
+#[test]
+fn the_stopped_state_shows_call_stack_variables_watch_and_console() {
+    let (mut app, mut terminal) = stopped_in_outer("views");
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    assert_snapshot("debug-views-stopped-100x24", &screen(&terminal));
+
+    // Watch: focus the column from the palette, type an expression, Enter.
+    palette(&mut app, &mut terminal, "focus on watch");
+    send(&mut app, &mut terminal, &chars("b"));
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Enter, KeyModifiers::NONE)],
+    );
+    // Console: Tab to it, evaluate an object.
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Tab, KeyModifiers::NONE)],
+    );
+    send(&mut app, &mut terminal, &chars("o"));
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Enter, KeyModifiers::NONE)],
+    );
+    wait(&mut app, "the watch value and the console result", |app| {
+        let watch = app.workspace().debug_rows(DebugTree::Watch);
+        let console = app.workspace().debug_console();
+        watch.first().is_some_and(|r| r.value == "2")
+            && console.iter().any(|l| l.kind == ConsoleKind::Result)
+    });
+    // Variables: open `o` from the keyboard (Tab wraps to the call stack).
+    send(
+        &mut app,
+        &mut terminal,
+        &[
+            key(KeyCode::Tab, KeyModifiers::NONE),
+            key(KeyCode::Tab, KeyModifiers::NONE),
+            key(KeyCode::Down, KeyModifiers::NONE),
+            key(KeyCode::Down, KeyModifiers::NONE),
+            key(KeyCode::Right, KeyModifiers::NONE),
+        ],
+    );
+    wait(&mut app, "o's members", |app| {
+        app.workspace().debug_rows(DebugTree::Variables).len() > 5
+    });
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    assert_snapshot("debug-views-inspected-100x24", &screen(&terminal));
+}
+
+#[test]
+fn f10_f11_and_shift_f11_step_and_enter_on_a_frame_moves_the_editor() {
+    let (mut app, mut terminal) = stopped_in_outer("keys");
+    let id = app.workspace().tabs()[0];
+    assert_eq!(app.workspace().stopped_line(id), Some(7));
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(10), KeyModifiers::NONE)],
+    );
+    wait(&mut app, "the step", |app| {
+        state(app) == DebugState::Stopped && app.workspace().stopped_line(id) == Some(8)
+    });
+    // Shift+F11 leaves `outer`: its `leave` runs, main goes on at `print done`.
+    wait(&mut app, "the stack", |app| {
+        app.workspace().debug_frames().len() == 2
+    });
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(11), KeyModifiers::SHIFT)],
+    );
+    wait(&mut app, "the step out", |app| {
+        state(app) == DebugState::Stopped && app.workspace().stopped_line(id) == Some(9)
+    });
+    wait(&mut app, "main only", |app| {
+        app.workspace().debug_frames().len() == 1
+    });
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(11), KeyModifiers::NONE)],
+    );
+    wait(&mut app, "the end", |app| {
+        state(app) == DebugState::Inactive
+    });
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    assert!(screen(&terminal).contains("exited with code 0"));
+}
+
+#[test]
+fn selecting_a_frame_with_enter_goes_to_its_line() {
+    let (mut app, mut terminal) = stopped_in_outer("frame");
+    let id = app.workspace().tabs()[0];
+    palette(&mut app, &mut terminal, "focus on call stack");
+    send(
+        &mut app,
+        &mut terminal,
+        &[
+            key(KeyCode::Down, KeyModifiers::NONE),
+            key(KeyCode::Enter, KeyModifiers::NONE),
+        ],
+    );
+    assert_eq!(app.workspace().debug_selected_frame(), 1);
+    assert_eq!(
+        app.workspace().stopped_line(id),
+        Some(4),
+        "the call in main"
+    );
+    let cursor = app.workspace().document(id).expect("doc").cursor_position();
+    assert_eq!(cursor.line, 4);
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Esc, KeyModifiers::NONE)],
+    );
+}
+
+#[test]
+fn f6_pauses_while_the_program_runs_and_moves_the_focus_otherwise() {
+    let (mut app, _dir) = open_program("f6", "print a\nWAIT\nprint b\n");
+    let mut terminal = terminal(100, 20);
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(5), KeyModifiers::NONE)],
+    );
+    wait(&mut app, "running", |app| state(app) == DebugState::Running);
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(6), KeyModifiers::NONE)],
+    );
+    wait(&mut app, "the pause", |app| {
+        state(app) == DebugState::Stopped
+    });
+    assert_eq!(
+        app.workspace().debug_status().reason.as_deref(),
+        Some("pause")
+    );
+    assert!(
+        !screen(&terminal).contains("EXPLORER"),
+        "the key paused, it did not move the focus"
+    );
+    // Stopped: F6 is "focus the next part" again.
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::F(6), KeyModifiers::NONE)],
+    );
+    assert_eq!(state(&app), DebugState::Stopped);
+    assert!(screen(&terminal).contains("EXPLORER"));
 }

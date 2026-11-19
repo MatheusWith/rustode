@@ -203,6 +203,22 @@ pub(crate) enum Workbench {
     DebugStop,
     /// F9: a breakpoint on the cursor's line.
     ToggleBreakpoint,
+    /// F10: step over (while stopped).
+    StepOver,
+    /// F11: step into.
+    StepInto,
+    /// Shift+F11: step out.
+    StepOut,
+    /// "Debug: Focus on Call Stack View".
+    FocusCallStack,
+    /// "Debug: Focus on Variables View".
+    FocusVariables,
+    /// "Debug: Focus on Watch View" and "Debug: Add Watch Expression".
+    FocusWatch,
+    /// "Debug: Focus on Debug Console View".
+    FocusConsole,
+    /// "Debug: Remove Watch Expression".
+    RemoveWatch,
 }
 
 impl Workbench {
@@ -230,6 +246,12 @@ impl Workbench {
             "editor.action.startFindReplaceAction" => Self::Replace,
             "editor.action.nextMatchFindAction" => Self::FindNext,
             "editor.action.previousMatchFindAction" => Self::FindPrevious,
+            "workbench.debug.action.focusCallStackView" => Self::FocusCallStack,
+            "workbench.debug.action.focusVariablesView" => Self::FocusVariables,
+            "workbench.debug.action.focusWatchView"
+            | "workbench.debug.viewlet.action.addWatchExpression" => Self::FocusWatch,
+            "workbench.debug.action.focusRepl" => Self::FocusConsole,
+            "debug.removeWatchExpression" => Self::RemoveWatch,
             _ => return None,
         })
     }
@@ -275,6 +297,9 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::F5, false, false, false) => Workbench::DebugKey,
         (Key::F5, false, true, false) => Workbench::DebugStop,
         (Key::F9, false, false, false) => Workbench::ToggleBreakpoint,
+        (Key::F10, false, false, false) => Workbench::StepOver,
+        (Key::F11, false, false, false) => Workbench::StepInto,
+        (Key::F11, false, true, false) => Workbench::StepOut,
         _ => return None,
     })
 }

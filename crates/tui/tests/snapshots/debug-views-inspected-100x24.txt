@@ -1,0 +1,24 @@
+ program.txt │
+   1 print starting
+   2 global g 9
+   3 var a 1
+   4 obj p k=v
+   5 enter outer
+   6 var b 2
+   7 obj o x=1 inner=@p
+▶  8 print in outer
+   9 leave
+  10 print done
+  11
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ CALL STACK                    VARIABLES                WATCH               DEBUG CONSOLE
+ main  PAUSED ON BREAKPOINT    ▾ Locals                   b: 2              starting
+  ▶outer  program.txt:8            b: 2                                     > o
+   main  program.txt:5           ▾ o: Object                                Object
+ worker                              x: 1
+                                   ▸ inner: Object
+                               ▸ Globals
+
+
+                                                                            >
+ program.txt  Debug: stopped (Run program)                       Ln 8, Col 1  UTF-8  LF  Plain Text

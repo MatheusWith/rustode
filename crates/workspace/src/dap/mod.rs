@@ -24,20 +24,34 @@
 //! numbers are checked, unknown messages are ignored, and the adapter's own
 //! requests are refused politely.
 //!
-//! Not done yet (ticket 38 and later): stepping, the call stack, variables
-//! and the console, attach, compound configurations, other variables than
+//! Stepping, the call stack, variables, watch expressions and the console
+//! (ticket 38, [`model`] and [`views`]) follow `debugModel.ts` and the views
+//! of `src/vs/workbench/contrib/debug/browser/`: when the program stops the
+//! client asks for `threads` and `stackTrace`, then for the `scopes` of the
+//! selected frame, the variables of the first cheap scope and the watch
+//! expressions (`evaluate`, context `watch`); deeper variables are asked for
+//! when expanded. Whatever execution moves past is dropped: continuing, a
+//! step or another frame forgets the state and the requests waiting for it
+//! (VS Code does the same on `stopped` and `continued`, `debugSession.ts:964-990`, `:1107-1165`), so
+//! a late answer is never applied.
+//!
+//! Not done yet: attach, compound configurations, other variables than
 //! `${workspaceFolder}`, breakpoints that follow edits or survive a restart,
 //! conditions and logpoints.
 
 mod launch;
+mod model;
 mod session;
 mod settings;
+mod views;
 
 pub use launch::LaunchConfiguration;
+pub use model::{ConsoleKind, ConsoleLine, DebugTree, FrameInfo, ThreadInfo, VariableRow};
 
 use crate::child::{Process, Waker};
 use crate::{DocumentId, Error, Event, Workspace};
 use launch::Launch;
+use model::Node;
 use serde_json::json;
 use session::Session;
 use settings::AdapterConfig;
@@ -92,6 +106,8 @@ pub struct DebugStatus {
     pub reason: Option<String>,
     /// Where it stopped, once the adapter said so.
     pub location: Option<StopLocation>,
+    /// The id of the thread that stopped, while stopped.
+    pub thread: Option<i64>,
     /// Why the last session ended or what went wrong, e.g. `the debug
     /// adapter exited with code 3`.
     pub message: Option<String>,
@@ -111,6 +127,14 @@ pub enum DebugError {
     NotRunning,
     /// The program is not stopped.
     NotStopped,
+    /// The program is not running, so it cannot be paused.
+    NotRunningProgram,
+    /// There is no such frame, variable or watch expression.
+    NoSuchRow,
+    /// The adapter has too many requests waiting for an answer.
+    Busy,
+    /// A watch expression that is empty, or one too many.
+    BadWatch(String),
     /// No debug adapter is configured for this configuration type, in
     /// `rustode.debugAdapters`.
     NoAdapter(String),
@@ -128,6 +152,10 @@ impl fmt::Display for DebugError {
             Self::AlreadyRunning => f.write_str("a debug session is already running"),
             Self::NotRunning => f.write_str("there is no debug session"),
             Self::NotStopped => f.write_str("the program is not stopped"),
+            Self::NotRunningProgram => f.write_str("the program is not running"),
+            Self::NoSuchRow => f.write_str("there is nothing there"),
+            Self::Busy => f.write_str("the debug adapter has too many requests waiting"),
+            Self::BadWatch(why) => f.write_str(why),
             Self::NoAdapter(kind) => write!(
                 f,
                 "no debug adapter for type \"{kind}\"; set rustode.debugAdapters[\"{kind}\"]"
@@ -147,6 +175,26 @@ pub const START_COMMAND: &str = "workbench.action.debug.start";
 /// VS Code's id for "Continue" (F5 while stopped).
 pub const CONTINUE_COMMAND: &str = "workbench.action.debug.continue";
 
+/// VS Code's id for "Step Over" (F10).
+pub const STEP_OVER_COMMAND: &str = "workbench.action.debug.stepOver";
+/// VS Code's id for "Step Into" (F11).
+pub const STEP_INTO_COMMAND: &str = "workbench.action.debug.stepInto";
+/// VS Code's id for "Step Out" (Shift+F11).
+pub const STEP_OUT_COMMAND: &str = "workbench.action.debug.stepOut";
+/// VS Code's id for "Pause" (F6 while the program runs).
+pub const PAUSE_COMMAND: &str = "workbench.action.debug.pause";
+
+/// How far a step goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepKind {
+    /// To the next line of this frame (`next`).
+    Over,
+    /// Into the call on the line (`stepIn`).
+    Into,
+    /// Out of this frame (`stepOut`).
+    Out,
+}
+
 /// The debugging state of a workspace.
 #[derive(Debug, Default)]
 pub(crate) struct Debug {
@@ -160,6 +208,11 @@ pub(crate) struct Debug {
     /// What the last session said when it ended.
     message: Option<String>,
     waker: Waker,
+    /// The watch expressions, which outlive sessions.
+    watches: Vec<Node>,
+    next_watch: u64,
+    /// The debug console, cleared when a session starts.
+    console: Vec<ConsoleLine>,
 }
 
 impl Debug {
@@ -250,6 +303,9 @@ impl Workspace {
                 configuration: Some(session.name.clone()),
                 reason: session.reason.clone(),
                 location: session.location.clone(),
+                thread: session
+                    .thread
+                    .filter(|_| session.state == DebugState::Stopped),
                 message: self.dap.message.clone(),
             },
             None => DebugStatus {
@@ -257,6 +313,7 @@ impl Workspace {
                 configuration: None,
                 reason: None,
                 location: None,
+                thread: None,
                 message: self.dap.message.clone(),
             },
         }
@@ -307,6 +364,7 @@ impl Workspace {
             &adapter.command,
             &adapter.args,
             &root,
+            &adapter.env,
             &configuration.adapter_type,
             &self.dap.waker,
         )
@@ -327,6 +385,10 @@ impl Workspace {
             session::Pending::Initialize,
         );
         self.dap.message = None;
+        self.dap.console.clear();
+        for watch in &mut self.dap.watches {
+            watch.reset();
+        }
         self.dap.session = Some(session);
         self.events.push(Event::DebugChanged);
         Ok(())
@@ -338,10 +400,11 @@ impl Workspace {
     /// When there is no session or the program is not stopped.
     pub fn continue_debugging(&mut self) -> Result<(), DebugError> {
         let session = self.dap.session.as_mut().ok_or(DebugError::NotRunning)?;
-        if session.state != DebugState::Stopped {
+        if !session.can_resume() {
             return Err(DebugError::NotStopped);
         }
         session.resume();
+        self.events.push(Event::DebugChanged);
         Ok(())
     }
 
@@ -440,7 +503,7 @@ impl Workspace {
         if closed && self.dap.session.is_some() {
             self.dap_end(None, true);
         }
-        if self.debug_status() != before {
+        if !messages.is_empty() || closed || self.debug_status() != before {
             self.events.push(Event::DebugChanged);
         }
     }
@@ -451,6 +514,9 @@ impl Workspace {
         let Some(session) = self.dap.session.take() else {
             return;
         };
+        for watch in &mut self.dap.watches {
+            watch.reset();
+        }
         self.dap.message = if crashed {
             Some(format!("the debug adapter {}", session.reap()))
         } else {

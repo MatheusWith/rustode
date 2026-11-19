@@ -107,6 +107,15 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
         }
     }
     if let Some(editor) = areas.editor {
+        let editor = if crate::debug::visible(app) {
+            let panel = crate::debug::height(editor.height);
+            let [editor, debug] =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(panel)]).areas(editor);
+            crate::debug::draw(app, frame, debug);
+            editor
+        } else {
+            editor
+        };
         let editor = if app.problems.visible {
             let panel = crate::problems::height(editor.height);
             let [editor, problems] =

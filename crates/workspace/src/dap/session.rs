@@ -4,7 +4,8 @@
 //! before it is used, and a message nobody asked for is ignored.
 
 use super::launch::LaunchConfiguration;
-use super::{DebugState, StopLocation, resolve};
+use super::model::{self, ConsoleKind, FrameInfo, Node, ThreadInfo, short};
+use super::{DebugState, StepKind, StopLocation};
 use crate::Workspace;
 use crate::child::Process;
 use serde_json::{Value, json};
@@ -14,19 +15,42 @@ use std::path::{Path, PathBuf};
 /// Requests allowed to wait for an answer; past it, new stack trace
 /// requests are not sent, so an adapter that never answers cannot grow it.
 const MAX_PENDING: usize = 256;
-/// Longest message text kept from an adapter.
-const MAX_TEXT: usize = 500;
 
 /// What a request in flight was for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Pending {
+pub(crate) enum Pending {
     Initialize,
     Launch,
     SetBreakpoints,
     ConfigurationDone,
     Continue,
-    StackTrace(i64),
+    Step,
+    Pause,
     Terminate,
+    Threads,
+    StackTrace(i64),
+    Scopes,
+    Variables(i64),
+    /// A watch expression, by the id of the watch.
+    Watch(u64),
+    /// An expression typed in the console.
+    Repl,
+}
+
+impl Pending {
+    /// Whether the answer is about the program's state at one stop: it is
+    /// dropped, and never applied, once execution continues or the selected
+    /// frame changes.
+    fn is_state(self) -> bool {
+        matches!(
+            self,
+            Self::Threads
+                | Self::StackTrace(_)
+                | Self::Scopes
+                | Self::Variables(_)
+                | Self::Watch(_)
+        )
+    }
 }
 
 /// A running session.
@@ -50,8 +74,15 @@ pub(super) struct Session {
     initialized: bool,
     /// A `terminate` was sent and the adapter has not ended yet.
     stopping: bool,
-    thread: Option<i64>,
+    pub thread: Option<i64>,
     exit_code: Option<i64>,
+    /// A `continue` or step was sent and the adapter has not answered.
+    resuming: bool,
+    pub threads: Vec<ThreadInfo>,
+    pub frames: Vec<FrameInfo>,
+    /// The frame whose scopes and watches are shown: an index into `frames`.
+    pub selected: usize,
+    pub scopes: Vec<Node>,
 }
 
 impl Session {
@@ -77,6 +108,11 @@ impl Session {
             stopping: false,
             thread: None,
             exit_code: None,
+            resuming: false,
+            threads: Vec::new(),
+            frames: Vec::new(),
+            selected: 0,
+            scopes: Vec::new(),
         }
     }
 
@@ -112,7 +148,92 @@ impl Session {
 
     pub(super) fn resume(&mut self) {
         let thread = self.thread.unwrap_or(1);
+        self.invalidate();
+        self.resuming = true;
         self.request("continue", &json!({"threadId": thread}), Pending::Continue);
+    }
+
+    pub(super) fn step(&mut self, kind: StepKind) {
+        let thread = self.thread.unwrap_or(1);
+        self.invalidate();
+        self.resuming = true;
+        let command = match kind {
+            StepKind::Over => "next",
+            StepKind::Into => "stepIn",
+            StepKind::Out => "stepOut",
+        };
+        self.request(command, &json!({"threadId": thread}), Pending::Step);
+    }
+
+    pub(super) fn pause(&mut self) {
+        let thread = self.thread.unwrap_or(1);
+        self.request("pause", &json!({"threadId": thread}), Pending::Pause);
+    }
+
+    /// Whether the program is stopped and no resume is on its way.
+    pub(super) fn can_resume(&self) -> bool {
+        self.state == DebugState::Stopped && !self.resuming
+    }
+
+    /// Forgets everything about the program's state at the last stop, and
+    /// the requests still waiting for an answer about it: a late answer is
+    /// one nobody asked for. Execution moved on.
+    pub(super) fn invalidate(&mut self) {
+        self.pending.retain(|_, what| !what.is_state());
+        self.location = None;
+        self.threads.clear();
+        self.frames.clear();
+        self.selected = 0;
+        self.scopes.clear();
+    }
+
+    /// As [`Session::invalidate`] for a frame change: the call stack stays,
+    /// what depends on the frame goes.
+    pub(super) fn invalidate_frame(&mut self) {
+        self.pending.retain(|_, what| {
+            !matches!(
+                what,
+                Pending::Scopes | Pending::Variables(_) | Pending::Watch(_)
+            )
+        });
+        self.scopes.clear();
+    }
+
+    /// Sends a request about the program's state, unless too many requests
+    /// wait: an adapter that never answers cannot grow the table.
+    pub(super) fn request_state(
+        &mut self,
+        command: &str,
+        arguments: &Value,
+        what: Pending,
+    ) -> bool {
+        if self.pending.len() >= MAX_PENDING {
+            return false;
+        }
+        self.request(command, arguments, what);
+        true
+    }
+
+    /// Whether another request about the program's state may be sent.
+    pub(super) fn has_room(&self) -> bool {
+        self.pending.len() < MAX_PENDING
+    }
+
+    /// The id of the selected frame.
+    pub(super) fn frame_id(&self) -> Option<i64> {
+        self.frames.get(self.selected).map(|f| f.id)
+    }
+
+    /// Asks for the threads and the call stack of the stopped thread.
+    pub(super) fn refresh(&mut self) {
+        self.request_state("threads", &json!({}), Pending::Threads);
+        if let Some(thread) = self.thread {
+            self.request_state(
+                "stackTrace",
+                &json!({"threadId": thread, "startFrame": 0, "levels": model::MAX_FRAMES}),
+                Pending::StackTrace(thread),
+            );
+        }
     }
 
     /// Asks the adapter to end the program. Returns `true` when the
@@ -165,18 +286,6 @@ impl Session {
     }
 }
 
-/// `text` cut to what is worth showing.
-fn short(text: &str) -> String {
-    text.chars().take(MAX_TEXT).collect()
-}
-
-/// A thread id an adapter sent, if it is a sane one.
-fn thread_id(value: &Value) -> Option<i64> {
-    value
-        .as_i64()
-        .filter(|id| (0..=i64::from(i32::MAX)).contains(id))
-}
-
 impl Workspace {
     /// One message from the adapter.
     pub(super) fn dap_message(&mut self, message: &Value) {
@@ -221,39 +330,207 @@ impl Workspace {
         let why = response["message"]
             .as_str()
             .map_or_else(|| "no reason given".to_owned(), short);
+        let body = &response["body"];
+        match what {
+            Pending::Initialize | Pending::Launch | Pending::ConfigurationDone => {
+                self.dap_startup(what, success, body, &why);
+            }
+            Pending::Continue | Pending::Step | Pending::Pause => {
+                self.dap_resumed(what, success, &why);
+            }
+            Pending::Terminate => {
+                if !success {
+                    self.dap_end(Some(format!("cannot terminate: {why}")), false);
+                }
+            }
+            Pending::SetBreakpoints => {}
+            state => self.dap_state_reply(state, success.then_some(body), &why),
+        }
+    }
+
+    /// The answers of the start: `initialize`, `launch`, `configurationDone`.
+    fn dap_startup(&mut self, what: Pending, success: bool, body: &Value, why: &str) {
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
         match (what, success) {
             (Pending::Initialize, true) => {
-                let body = &response["body"];
                 session.config_done = body["supportsConfigurationDoneRequest"] == true;
                 session.terminate = body["supportsTerminateRequest"] == true;
                 let arguments = session.arguments.clone();
                 session.request("launch", &arguments, Pending::Launch);
             }
-            (Pending::Initialize | Pending::Launch | Pending::ConfigurationDone, false) => {
+            (_, false) => {
                 self.dap_end(Some(format!("the debug adapter refused: {why}")), false);
             }
-            (Pending::Continue, true) => {
+            _ => {}
+        }
+    }
+
+    /// The answers to `continue`, a step and `pause`.
+    fn dap_resumed(&mut self, what: Pending, success: bool, why: &str) {
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
+        match (what, success) {
+            (Pending::Continue | Pending::Step, true) => {
+                session.resuming = false;
                 session.state = DebugState::Running;
                 session.reason = None;
                 session.location = None;
             }
-            (Pending::Continue, false) => {
-                self.dap.message = Some(format!("cannot continue: {why}"));
+            (Pending::Continue | Pending::Step, false) => {
+                // Still stopped, and the views were emptied for nothing.
+                session.resuming = false;
+                session.refresh();
+                let verb = if what == Pending::Step {
+                    "step"
+                } else {
+                    "continue"
+                };
+                self.dap.message = Some(format!("cannot {verb}: {why}"));
             }
-            (Pending::StackTrace(thread), true) => {
-                let location = first_frame(&response["body"], &self.dap_root());
-                if let Some(session) = self.dap.session.as_mut()
-                    && session.state == DebugState::Stopped
-                    && session.thread == Some(thread)
-                {
-                    session.location = location;
-                }
-            }
-            (Pending::Terminate, false) => {
-                self.dap_end(Some(format!("cannot terminate: {why}")), false);
-            }
+            (_, false) => self.dap.message = Some(format!("cannot pause: {why}")),
             _ => {}
         }
+    }
+
+    /// The answers about the program's state at the stop: `body` is `None`
+    /// when the adapter failed or cancelled the request.
+    fn dap_state_reply(&mut self, what: Pending, body: Option<&Value>, why: &str) {
+        let root = self.dap_root();
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
+        match (what, body) {
+            (Pending::Threads, Some(body)) => session.threads = model::parse_threads(body),
+            (Pending::StackTrace(thread), Some(body))
+                if session.state == DebugState::Stopped && session.thread == Some(thread) =>
+            {
+                session.frames = model::parse_frames(body, &root);
+                session.selected = 0;
+                self.dap_frame_changed();
+            }
+            (Pending::Scopes, Some(body)) => self.dap_scopes(body),
+            (Pending::Variables(reference), body) => self.dap_variables(reference, body),
+            (Pending::Watch(id), body) => self.dap_watch_result(id, body, why),
+            (Pending::Repl, body) => self.dap_repl_result(body, why),
+            _ => {}
+        }
+    }
+
+    /// The selected frame changed: the editor goes to its line, its scopes
+    /// and the watch expressions are asked for.
+    pub(super) fn dap_frame_changed(&mut self) {
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
+        let frame = session.frames.get(session.selected).cloned();
+        session.location = frame.as_ref().and_then(|f| {
+            Some(StopLocation {
+                path: f.path.clone()?,
+                line: f.line,
+            })
+        });
+        let Some(frame) = frame else {
+            return;
+        };
+        session.request_state("scopes", &json!({"frameId": frame.id}), Pending::Scopes);
+        for watch in &mut self.dap.watches {
+            watch.reset();
+            session.request_state(
+                "evaluate",
+                &json!({"expression": watch.name, "frameId": frame.id, "context": "watch"}),
+                Pending::Watch(watch.id),
+            );
+        }
+        self.dap_reveal(frame.path.as_deref(), frame.line);
+    }
+
+    /// Opens the file of a frame in the editor, on its line, if it is a
+    /// reasonable file to open.
+    fn dap_reveal(&mut self, path: Option<&std::path::Path>, line: usize) {
+        const LARGEST: u64 = 64 * 1024 * 1024;
+        let Some(path) = path else {
+            return;
+        };
+        let reasonable = std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() <= LARGEST);
+        if reasonable && let Ok(id) = self.open(path) {
+            let _ = self.go_to_line(id, line + 1, None);
+        }
+    }
+
+    fn dap_scopes(&mut self, body: &Value) {
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
+        if session.state != DebugState::Stopped {
+            return;
+        }
+        let mut scopes = model::parse_scopes(body);
+        // The first scope that is cheap to read opens by itself, as in VS Code.
+        let first = scopes.iter().position(|(_, expensive)| !expensive);
+        let mut request = None;
+        if let Some(index) = first {
+            let node = &mut scopes[index].0;
+            node.expanded = true;
+            node.loading = true;
+            request = Some(node.reference);
+        }
+        session.scopes = scopes.into_iter().map(|(node, _)| node).collect();
+        if let Some(reference) = request {
+            session.request_state(
+                "variables",
+                &json!({"variablesReference": reference}),
+                Pending::Variables(reference),
+            );
+        }
+    }
+
+    fn dap_variables(&mut self, reference: i64, body: Option<&Value>) {
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
+        let used = model::count(&session.scopes).max(model::count(&self.dap.watches));
+        let budget = model::MAX_NODES.saturating_sub(used);
+        model::fill(&mut session.scopes, reference, body, budget);
+        model::fill(&mut self.dap.watches, reference, body, budget);
+    }
+
+    fn dap_watch_result(&mut self, id: u64, body: Option<&Value>, why: &str) {
+        if let Some(watch) = self.dap.watches.iter_mut().find(|w| w.id == id) {
+            if let Some(body) = body {
+                watch.value = short(body["result"].as_str().unwrap_or_default());
+                watch.kind = body["type"].as_str().map(short);
+                watch.reference = model::reference(&body["variablesReference"]);
+            } else {
+                why.clone_into(&mut watch.value);
+                watch.reference = 0;
+            }
+        }
+    }
+
+    fn dap_repl_result(&mut self, body: Option<&Value>, why: &str) {
+        match body {
+            Some(body) => {
+                let text = body["result"].as_str().unwrap_or_default();
+                self.dap_console(ConsoleKind::Result, text);
+            }
+            None => self.dap_console(ConsoleKind::Error, why),
+        }
+    }
+
+    /// Adds the lines of `text` to the debug console.
+    pub(super) fn dap_console(&mut self, kind: ConsoleKind, text: &str) {
+        let text = text.strip_suffix('\n').unwrap_or(text);
+        for line in text.split('\n').take(model::MAX_CONSOLE) {
+            self.dap.console.push(model::ConsoleLine {
+                kind,
+                text: short(line.trim_end_matches('\r')),
+            });
+        }
+        let extra = self.dap.console.len().saturating_sub(model::MAX_CONSOLE);
+        self.dap.console.drain(..extra);
     }
 
     fn dap_root(&self) -> PathBuf {
@@ -269,48 +546,23 @@ impl Workspace {
         };
         let body = &event["body"];
         match event["event"].as_str() {
-            Some("initialized") => {
-                session.initialized = true;
-                let files: Vec<(PathBuf, BTreeSet<usize>)> = self
-                    .dap
-                    .breakpoints
-                    .iter()
-                    .map(|(path, lines)| (path.clone(), lines.clone()))
-                    .collect();
-                let Some(session) = self.dap.session.as_mut() else {
-                    return;
-                };
-                for (path, lines) in &files {
-                    session.send_breakpoints(path, Some(lines));
-                }
-                if session.config_done {
-                    session.request("configurationDone", &json!({}), Pending::ConfigurationDone);
-                }
-                session.state = DebugState::Running;
-            }
+            Some("initialized") => self.dap_initialized(),
             Some("stopped") => {
+                session.invalidate();
+                session.resuming = false;
                 session.state = DebugState::Stopped;
                 session.reason = Some(
                     body["reason"]
                         .as_str()
                         .map_or_else(|| "unknown".to_owned(), short),
                 );
-                session.location = None;
-                session.thread = thread_id(&body["threadId"]).or(session.thread);
-                if let Some(thread) = session.thread
-                    && session.pending.len() < MAX_PENDING
-                {
-                    session.request(
-                        "stackTrace",
-                        &json!({"threadId": thread, "startFrame": 0, "levels": 1}),
-                        Pending::StackTrace(thread),
-                    );
-                }
+                session.thread = model::id(&body["threadId"]).or(session.thread);
+                session.refresh();
             }
             Some("continued") if session.state == DebugState::Stopped => {
+                session.invalidate();
                 session.state = DebugState::Running;
                 session.reason = None;
-                session.location = None;
             }
             Some("exited") => session.exit_code = body["exitCode"].as_i64(),
             Some("terminated") => {
@@ -320,29 +572,45 @@ impl Workspace {
                 self.dap_end(message, false);
             }
             Some("output") => {
+                let kind = match body["category"].as_str() {
+                    Some("stderr") => ConsoleKind::Error,
+                    Some("telemetry") => return,
+                    _ => ConsoleKind::Output,
+                };
                 if let Some(text) = body["output"].as_str() {
-                    tracing::debug!(output = %short(text), "from the debuggee");
+                    self.dap_console(kind, text);
                 }
             }
             _ => {}
         }
     }
-}
 
-/// The first stack frame's file and line, from a `stackTrace` body.
-fn first_frame(body: &Value, root: &Path) -> Option<StopLocation> {
-    let frame = body["stackFrames"].as_array()?.first()?;
-    let path = resolve(root, frame["source"]["path"].as_str()?);
-    let line = frame["line"].as_u64().filter(|line| *line >= 1)?;
-    Some(StopLocation {
-        path,
-        line: usize::try_from(line - 1).ok()?,
-    })
+    /// The adapter is ready for the breakpoints and `configurationDone`.
+    fn dap_initialized(&mut self) {
+        let files: Vec<(PathBuf, BTreeSet<usize>)> = self
+            .dap
+            .breakpoints
+            .iter()
+            .map(|(path, lines)| (path.clone(), lines.clone()))
+            .collect();
+        let Some(session) = self.dap.session.as_mut() else {
+            return;
+        };
+        session.initialized = true;
+        for (path, lines) in &files {
+            session.send_breakpoints(path, Some(lines));
+        }
+        if session.config_done {
+            session.request("configurationDone", &json!({}), Pending::ConfigurationDone);
+        }
+        session.state = DebugState::Running;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn hostile_numbers_and_shapes_are_refused() {
@@ -353,29 +621,29 @@ mod tests {
             json!(1.5),
             Value::Null,
         ] {
-            assert_eq!(thread_id(&bad), None, "{bad}");
+            assert_eq!(model::id(&bad), None, "{bad}");
         }
-        assert_eq!(thread_id(&json!(7)), Some(7));
+        assert_eq!(model::id(&json!(7)), Some(7));
         let root = Path::new("/w");
         for bad in [
             json!(null),
             json!({"stackFrames": "x"}),
             json!({"stackFrames": []}),
-            json!({"stackFrames": [{"line": 0, "source": {"path": "/a"}}]}),
-            json!({"stackFrames": [{"line": -3, "source": {"path": "/a"}}]}),
-            json!({"stackFrames": [{"line": 2, "source": {"path": 5}}]}),
-            json!({"stackFrames": [{"line": u64::MAX, "source": {"name": "x"}}]}),
+            json!({"stackFrames": [{"id": 1, "line": 0, "source": {"path": "/a"}}]}),
+            json!({"stackFrames": [{"id": 1, "line": -3, "source": {"path": "/a"}}]}),
+            json!({"stackFrames": [{"id": -1, "line": 2, "source": {"path": "/a"}}]}),
         ] {
-            assert_eq!(first_frame(&bad, root), None, "{bad}");
+            let frames = model::parse_frames(&bad, root);
+            assert!(frames.iter().all(|f| f.path.is_none()), "{bad}");
         }
-        let frame = json!({"stackFrames": [{"line": 3, "source": {"path": "rel.txt"}}]});
+        let frame = json!({"stackFrames": [{"id": 4, "name": "f", "line": 3, "source": {"path": "rel.txt"}}]});
+        let frames = model::parse_frames(&frame, root);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].path.as_deref(), Some(Path::new("/w/rel.txt")));
+        assert_eq!(frames[0].line, 2);
         assert_eq!(
-            first_frame(&frame, root),
-            Some(StopLocation {
-                path: PathBuf::from("/w/rel.txt"),
-                line: 2
-            })
+            short(&"é".repeat(model::MAX_TEXT + 10)).chars().count(),
+            model::MAX_TEXT
         );
-        assert_eq!(short(&"é".repeat(MAX_TEXT + 10)).chars().count(), MAX_TEXT);
     }
 }

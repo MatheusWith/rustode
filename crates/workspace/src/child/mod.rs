@@ -73,16 +73,19 @@ pub(crate) struct Process {
 }
 
 impl Process {
-    /// Starts `command` with `args` in `root`.
+    /// Starts `command` with `args` in `root`, with `env` added to the
+    /// environment.
     pub(crate) fn spawn(
         command: &str,
         args: &[String],
         root: &Path,
+        env: &[(String, String)],
         name: &str,
         waker: &Waker,
     ) -> io::Result<Self> {
         let mut child = Command::new(command)
             .args(args)
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
