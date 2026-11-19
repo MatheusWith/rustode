@@ -1,6 +1,6 @@
 # ADR 0015: Language servers and debug adapters run as child processes over stdio, supervised by the workspace
 
-- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session); the LSP supervisor and diagnostics are implemented in `crates/workspace/src/lsp/` (ticket 29); hover, completion, navigation and the real servers follow (tickets 30 to 32); DAP is M7
+- **Status:** accepted (2026-11-16, decided by the owner in the Phase 1 grilling session); the LSP supervisor and diagnostics are implemented in `crates/workspace/src/lsp/` (ticket 29); hover and completion are implemented too (`crates/workspace/src/lsp/hover.rs`, `suggest.rs`, `filter.rs`; ticket 30); navigation and the real servers follow (tickets 31 and 32); DAP is M7
 - **Build:** rustode at `d6debfb`; studied: the source tree of the App (local VSCodium 1.147.0)
 
 ## Context
