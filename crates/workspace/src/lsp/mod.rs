@@ -18,16 +18,22 @@
 //! in the problems list, which covers every file a server reported.
 
 mod encoding;
+mod filter;
+mod hover;
 mod markers;
 mod process;
+mod requests;
 mod rpc;
 mod server;
 mod settings;
+mod suggest;
 mod sync;
 mod uri;
 
+pub use hover::Hover;
 pub use markers::{Marker, MarkerSeverity, Problem, ProblemCounts};
 pub use server::{ServerState, ServerStatus};
+pub use suggest::{CompletionKind, CompletionList, CompletionMove, CompletionRow};
 
 use crate::{Document, DocumentId, Error, Event, Position, Range, Selection, Workspace};
 use encoding::PositionEncoding;
@@ -71,6 +77,10 @@ pub(crate) struct LanguageServers {
     files: BTreeMap<PathBuf, Vec<Published>>,
     tracked: HashMap<DocumentId, Tracked>,
     waker: Waker,
+    /// Requests sent and not answered yet (hover, completion).
+    pending: HashMap<(ServerId, i64), requests::Kind>,
+    hover: Option<hover::State>,
+    suggest: Option<suggest::Session>,
 }
 
 impl LanguageServers {
@@ -264,6 +274,7 @@ impl Workspace {
             s.stop();
             s.forget_crashes();
         }
+        self.lsp_forget_requests(server);
         if self.lsp.clear(server) {
             self.problems_changed();
         }
@@ -372,6 +383,7 @@ impl Workspace {
                 stored.anchor = Anchor::Lines(start, end);
             }
         }
+        self.lsp_forget_document(id);
         let Some(tracked) = self.lsp.tracked.remove(&id) else {
             return;
         };
@@ -423,6 +435,10 @@ impl Workspace {
         }
         server.stop();
         server.forget_crashes();
+        self.lsp_forget_requests(id);
+        let Some(server) = self.lsp.server_mut(id) else {
+            return;
+        };
         server.message = Some(if config.is_some() {
             "restarted: its settings changed".to_owned()
         } else {
@@ -543,6 +559,9 @@ impl Workspace {
     }
 
     fn lsp_message(&mut self, id: ServerId, message: &Value) {
+        if message.get("method").is_none() && self.lsp_response(id, message) {
+            return;
+        }
         let Some(server) = self.lsp.server(id) else {
             return;
         };
@@ -634,6 +653,10 @@ impl Workspace {
         };
         let how = process.reap();
         tracing::warn!(server = %server.name(), %how, "language server crashed");
+        self.lsp_forget_requests(id);
+        let Some(server) = self.lsp.server_mut(id) else {
+            return;
+        };
         let restart = server.crashed(&how, Instant::now());
         let language = server.language.clone();
         if self.lsp.clear(id) {

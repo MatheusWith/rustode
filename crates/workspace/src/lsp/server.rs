@@ -124,6 +124,43 @@ impl Capabilities {
     }
 }
 
+/// The language features a server offers beyond syncing documents.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Features {
+    /// `hoverProvider`.
+    pub hover: bool,
+    /// `completionProvider`: its trigger characters, `None` without one.
+    pub completion: Option<Vec<char>>,
+}
+
+impl Features {
+    /// Reads `hoverProvider` (a flag or an options object) and
+    /// `completionProvider`'s `triggerCharacters`.
+    pub(crate) fn from_lsp(capabilities: &Value) -> Self {
+        let hover = match &capabilities["hoverProvider"] {
+            Value::Bool(on) => *on,
+            Value::Object(_) => true,
+            _ => false,
+        };
+        let completion = capabilities["completionProvider"]
+            .as_object()
+            .map(|options| {
+                options
+                    .get("triggerCharacters")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter_map(|s| {
+                        let mut chars = s.chars();
+                        chars.next().filter(|_| chars.next().is_none())
+                    })
+                    .collect()
+            });
+        Self { hover, completion }
+    }
+}
+
 /// One supervised server.
 #[derive(Debug)]
 pub(crate) struct Server {
@@ -136,6 +173,7 @@ pub(crate) struct Server {
     pub restarts: usize,
     pub process: Option<Process>,
     pub capabilities: Capabilities,
+    pub features: Features,
     /// The id of the `initialize` request in flight.
     pub initialize: Option<i64>,
     crashes: VecDeque<Instant>,
@@ -154,6 +192,7 @@ impl Server {
             restarts: 0,
             process: None,
             capabilities: Capabilities::default(),
+            features: Features::default(),
             initialize: None,
             crashes: VecDeque::new(),
             next_request: 1,
@@ -189,6 +228,7 @@ impl Server {
     /// or [`ServerState::Crashed`] when it cannot start.
     pub(crate) fn start(&mut self, waker: &Waker) {
         self.capabilities = Capabilities::default();
+        self.features = Features::default();
         match Process::spawn(&self.config, &self.root, &self.name(), waker) {
             Ok(process) => {
                 let id = self.request_id();
@@ -227,6 +267,20 @@ impl Server {
                 "textDocument": {
                     "synchronization": {"dynamicRegistration": false, "didSave": true},
                     "publishDiagnostics": {"relatedInformation": false},
+                    "hover": {
+                        "dynamicRegistration": false,
+                        "contentFormat": ["markdown", "plaintext"],
+                    },
+                    "completion": {
+                        "dynamicRegistration": false,
+                        "contextSupport": true,
+                        "completionItem": {
+                            "snippetSupport": false,
+                            "documentationFormat": ["markdown", "plaintext"],
+                            "insertReplaceSupport": false,
+                            "commitCharactersSupport": false,
+                        },
+                    },
                 },
                 "workspace": {"workspaceFolders": true, "configuration": true},
             },
@@ -236,10 +290,25 @@ impl Server {
     /// The `initialize` result arrived: running, with these capabilities.
     pub(crate) fn initialized(&mut self, result: &Value) {
         self.capabilities = Capabilities::from_lsp(&result["capabilities"]);
+        self.features = Features::from_lsp(&result["capabilities"]);
         self.initialize = None;
         self.state = ServerState::Running;
         self.message = None;
         self.send(&json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+    }
+
+    /// Sends a request and returns its id; `None` when the process is not
+    /// running.
+    pub(crate) fn request(&mut self, method: &str, params: &Value) -> Option<i64> {
+        self.process.as_ref()?;
+        let id = self.request_id();
+        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        Some(id)
+    }
+
+    /// Asks the server to drop request `id` (`$/cancelRequest`).
+    pub(crate) fn cancel(&self, id: i64) {
+        self.send(&json!({"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": id}}));
     }
 
     /// Sends a message if the process runs.
@@ -323,6 +392,20 @@ mod tests {
         );
         let save = Capabilities::from_lsp(&json!({"textDocumentSync": {"save": true}}));
         assert_eq!(save.save, Some(false));
+    }
+
+    #[test]
+    fn features_read_hover_and_completion() {
+        let none = Features::from_lsp(&json!({}));
+        assert_eq!((none.hover, none.completion), (false, None));
+        let all = Features::from_lsp(&json!({
+            "hoverProvider": {"workDoneProgress": true},
+            "completionProvider": {"triggerCharacters": [".", "::", ":"]},
+        }));
+        assert!(all.hover);
+        assert_eq!(all.completion, Some(vec!['.', ':']), "only single chars");
+        let off = Features::from_lsp(&json!({"hoverProvider": false, "completionProvider": {}}));
+        assert_eq!((off.hover, off.completion), (false, Some(vec![])));
     }
 
     #[test]

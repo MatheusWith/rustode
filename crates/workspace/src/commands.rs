@@ -22,6 +22,11 @@
 //! "View: Toggle Problems" on Ctrl+Shift+M
 //! (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`,
 //! titled by `src/vs/workbench/services/views/browser/viewsService.ts:481-489`).
+//! "Trigger Suggest" on Ctrl+Space
+//! (`src/vs/editor/contrib/suggest/browser/suggestController.ts:797-812`) and
+//! "Show or Focus Hover" on Ctrl+K Ctrl+I
+//! (`src/vs/editor/contrib/hover/browser/hoverActions.ts:28-70`); both return
+//! `false` when the document's server cannot answer.
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
@@ -185,6 +190,18 @@ pub const COMMANDS: &[CommandInfo] = &[
         "View: Toggle Problems",
         Workbench,
         Some("Ctrl+Shift+M"),
+    ),
+    command(
+        "editor.action.triggerSuggest",
+        "Trigger Suggest",
+        Editor,
+        Some("Ctrl+Space"),
+    ),
+    command(
+        "editor.action.showHover",
+        "Show or Focus Hover",
+        Editor,
+        Some("Ctrl+K Ctrl+I"),
     ),
     command(
         "rustode.restartLanguageServer",
@@ -355,6 +372,11 @@ impl Workspace {
             "editor.action.insertCursorBelow" => drop(self.add_cursor_below(id)?),
             "cursorTop" => self.move_cursor(id, Movement::DocumentStart, false)?,
             "cursorBottom" => self.move_cursor(id, Movement::DocumentEnd, false)?,
+            "editor.action.triggerSuggest" => return self.request_completion(id),
+            "editor.action.showHover" => {
+                let cursor = self.document(id).map_or(0, crate::Document::cursor);
+                return self.request_hover(id, cursor);
+            }
             "rustode.restartLanguageServer" => return self.restart_language_server(id),
             _ => return Ok(false),
         }

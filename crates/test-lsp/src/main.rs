@@ -7,7 +7,16 @@
 //!   source `test-lsp`; every `EMPTY` gets a warning with an empty range at
 //!   the word's start;
 //! - a change whose text contains `CRASH` makes the server exit at once with
-//!   code 3, without answering anything.
+//!   code 3, without answering anything;
+//! - `textDocument/hover` answers the identifier under the position with a
+//!   markdown hover (its name in bold, then a fenced `let` line) and that
+//!   word's range; the word `NOHOVER`, or no word, answers `null`;
+//! - `textDocument/completion` answers a fixed vocabulary (see [`ITEMS`]):
+//!   `label`, `kind`, `detail`, `sortText` and either a `textEdit` over the
+//!   identifier before the position or only an `insertText`; right after a
+//!   `.` it answers the member items instead ([`MEMBERS`]), and `.` and `:`
+//!   are its trigger characters;
+//! - a request for something else gets error -32601.
 //!
 //! Options:
 //!
@@ -21,15 +30,23 @@
 //! - `--crash-on-open`: also crash when an opened document contains `CRASH`;
 //! - `--report PATH`: after `initialized`, publish diagnostics for the file at
 //!   PATH, read from disk, as a project-wide checker would;
+//! - `--slow MS`: answer hover and completion requests MS milliseconds late,
+//!   so a client can cancel them or see the document change first. A
+//!   `$/cancelRequest` for one that waits answers it with error -32800;
+//! - `--incomplete`: mark completion lists `isIncomplete`;
+//! - `--no-hover`, `--no-completion`: do not offer that capability;
 //! - `--log PATH`: append every message received, one JSON object per line,
 //!   then `{"synced": URI, "text": TEXT}` after each change it applies.
 
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// What the command line asked for.
 #[derive(Debug, Default)]
+#[allow(clippy::struct_excessive_bools)] // one bool per command-line flag
 struct Options {
     full_sync: bool,
     encoding: Option<String>,
@@ -37,6 +54,10 @@ struct Options {
     crash_on_open: bool,
     report: Option<String>,
     log: Option<String>,
+    slow: Option<Duration>,
+    incomplete: bool,
+    no_hover: bool,
+    no_completion: bool,
 }
 
 fn options(mut args: impl Iterator<Item = String>) -> Options {
@@ -52,6 +73,15 @@ fn options(mut args: impl Iterator<Item = String>) -> Options {
             "--crash-on-open" => options.crash_on_open = true,
             "--report" => options.report = args.next(),
             "--log" => options.log = args.next(),
+            "--slow" => {
+                options.slow = args
+                    .next()
+                    .and_then(|ms| ms.parse().ok())
+                    .map(Duration::from_millis);
+            }
+            "--incomplete" => options.incomplete = true,
+            "--no-hover" => options.no_hover = true,
+            "--no-completion" => options.no_completion = true,
             other => eprintln!("rustode-test-lsp: ignoring {other}"),
         }
     }
@@ -66,6 +96,8 @@ struct Server {
     documents: HashMap<String, String>,
     shutdown: bool,
     out: io::Stdout,
+    /// Answers waiting for their time: when, the request id, the result.
+    delayed: Vec<(Instant, Value, Value)>,
 }
 
 fn main() {
@@ -76,11 +108,36 @@ fn main() {
         documents: HashMap::new(),
         shutdown: false,
         out: io::stdout(),
+        delayed: Vec::new(),
     };
-    let mut input = BufReader::new(io::stdin().lock());
-    while let Some(message) = read_message(&mut input) {
-        server.log(&message);
-        server.handle(&message);
+    // A reader thread feeds the loop, so that late answers are sent on time
+    // and a cancel arrives while an answer waits.
+    let (messages, incoming) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut input = BufReader::new(io::stdin().lock());
+        while let Some(message) = read_message(&mut input) {
+            if messages.send(message).is_err() {
+                break;
+            }
+        }
+    });
+    loop {
+        server.flush_delayed();
+        let next = server.delayed.iter().map(|(due, ..)| *due).min();
+        let received = match next {
+            Some(due) => incoming.recv_timeout(due.saturating_duration_since(Instant::now())),
+            None => incoming
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
+        match received {
+            Ok(message) => {
+                server.log(&message);
+                server.handle(&message);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => server.flush_delayed(),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
     }
     std::process::exit(i32::from(!server.shutdown));
 }
@@ -149,6 +206,15 @@ impl Server {
                 self.documents.remove(uri);
                 self.send_diagnostics(uri, &[]);
             }
+            "textDocument/hover" if !self.options.no_hover => {
+                let result = self.hover(params);
+                self.reply_later(message, result);
+            }
+            "textDocument/completion" if !self.options.no_completion => {
+                let result = self.completion(params);
+                self.reply_later(message, result);
+            }
+            "$/cancelRequest" => self.cancel(&params["id"]),
             _ if message.get("id").is_some() && !method.is_empty() => {
                 let error =
                     json!({"code": -32601, "message": format!("{method} is not supported")});
@@ -164,6 +230,41 @@ impl Server {
         self.send(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
     }
 
+    /// Answers now, or after `--slow` milliseconds.
+    fn reply_later(&mut self, request: &Value, result: Value) {
+        match self.options.slow {
+            Some(wait) => {
+                self.delayed
+                    .push((Instant::now() + wait, request["id"].clone(), result));
+            }
+            None => self.reply(request, &result),
+        }
+    }
+
+    fn flush_delayed(&mut self) {
+        let now = Instant::now();
+        let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.delayed)
+            .into_iter()
+            .partition(|(at, ..)| *at <= now);
+        self.delayed = waiting;
+        for (_, id, result) in due {
+            self.send(&json!({"jsonrpc": "2.0", "id": id, "result": result}));
+        }
+    }
+
+    /// Cancels a waiting answer: LSP's `RequestCancelled`.
+    fn cancel(&mut self, id: &Value) {
+        if let Some(at) = self
+            .delayed
+            .iter()
+            .position(|(_, waiting, _)| waiting == id)
+        {
+            self.delayed.remove(at);
+            let error = json!({"code": -32800, "message": "cancelled"});
+            self.send(&json!({"jsonrpc": "2.0", "id": id, "error": error}));
+        }
+    }
+
     fn initialize(&mut self, params: &Value) -> Value {
         let offered: Vec<&str> = params["capabilities"]["general"]["positionEncodings"]
             .as_array()
@@ -177,6 +278,12 @@ impl Server {
                 "save": {"includeText": false},
             },
         });
+        if !self.options.no_hover {
+            capabilities["hoverProvider"] = json!(true);
+        }
+        if !self.options.no_completion {
+            capabilities["completionProvider"] = json!({"triggerCharacters": [".", ":"]});
+        }
         if let Some(wanted) = &self.options.encoding
             && offered.contains(&wanted.as_str())
         {
@@ -232,6 +339,92 @@ impl Server {
         if self.options.publish_on_change {
             self.publish(&uri);
         }
+    }
+
+    /// The text of `params`' document and the line and byte of its position.
+    fn locate<'a>(&'a self, params: &Value) -> Option<(&'a str, usize, usize)> {
+        let text = self
+            .documents
+            .get(params["textDocument"]["uri"].as_str()?)?;
+        let at = byte_offset(text, &params["position"], &self.encoding);
+        let line = lines(text)
+            .into_iter()
+            .rev()
+            .find(|(start, _)| *start <= at)?;
+        Some((line.1, line.0, at - line.0))
+    }
+
+    /// The `textDocument/hover` result.
+    fn hover(&self, params: &Value) -> Value {
+        let Some((line, _, column)) = self.locate(params) else {
+            return Value::Null;
+        };
+        let Some((start, end)) = word_around(line, column) else {
+            return Value::Null;
+        };
+        let word = &line[start..end];
+        if word == "NOHOVER" {
+            return Value::Null;
+        }
+        let number = params["position"]["line"].clone();
+        let units_to =
+            |byte: usize| -> usize { line[..byte].chars().map(|c| units(c, &self.encoding)).sum() };
+        json!({
+            "contents": {
+                "kind": "markdown",
+                "value": format!("**{word}**\n\n```rust\nlet {word}\n```"),
+            },
+            "range": {
+                "start": {"line": number, "character": units_to(start)},
+                "end": {"line": number, "character": units_to(end)},
+            },
+        })
+    }
+
+    /// The `textDocument/completion` result.
+    fn completion(&self, params: &Value) -> Value {
+        let Some((line, _, column)) = self.locate(params) else {
+            return Value::Null;
+        };
+        let start = line[..column]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| is_word(*c))
+            .last()
+            .map_or(column, |(at, _)| at);
+        let members = line[..start].ends_with('.');
+        let number = params["position"]["line"].clone();
+        let units_to =
+            |byte: usize| -> usize { line[..byte].chars().map(|c| units(c, &self.encoding)).sum() };
+        let range = json!({
+            "start": {"line": number, "character": units_to(start)},
+            "end": {"line": number, "character": units_to(column)},
+        });
+        let vocabulary = if members { MEMBERS } else { ITEMS };
+        let items: Vec<Value> = vocabulary
+            .iter()
+            .map(|item| {
+                let mut value = json!({
+                    "label": item.label,
+                    "kind": item.kind,
+                    "detail": item.detail,
+                    "sortText": item.sort,
+                });
+                if item.edit {
+                    value["textEdit"] = json!({"range": range, "newText": item.insert});
+                } else {
+                    value["insertText"] = json!(item.insert);
+                }
+                if let Some(filter) = item.filter {
+                    value["filterText"] = json!(filter);
+                }
+                if item.snippet {
+                    value["insertTextFormat"] = json!(2);
+                }
+                value
+            })
+            .collect();
+        json!({"isIncomplete": self.options.incomplete, "items": items})
     }
 
     fn publish(&mut self, uri: &String) {
@@ -339,4 +532,103 @@ fn diagnostics(text: &str, encoding: &str) -> Vec<Value> {
         }
     }
     found
+}
+
+/// One completion the server offers.
+struct Item {
+    label: &'static str,
+    /// LSP `CompletionItemKind`.
+    kind: u8,
+    detail: &'static str,
+    sort: &'static str,
+    insert: &'static str,
+    /// Whether it carries a `textEdit` over the word; else only `insertText`.
+    edit: bool,
+    filter: Option<&'static str>,
+    snippet: bool,
+}
+
+const fn item(
+    label: &'static str,
+    kind: u8,
+    detail: &'static str,
+    sort: &'static str,
+    insert: &'static str,
+    edit: bool,
+) -> Item {
+    Item {
+        label,
+        kind,
+        detail,
+        sort,
+        insert,
+        edit,
+        filter: None,
+        snippet: false,
+    }
+}
+
+/// The vocabulary offered anywhere but after a `.`.
+const ITEMS: &[Item] = &[
+    item("println", 3, "macro println!", "1", "println!()", true),
+    item("print", 3, "fn print()", "2", "print", false),
+    item("process", 3, "fn process()", "3", "process", true),
+    item("Point", 22, "struct Point", "4", "Point", true),
+    item(
+        "point_count",
+        6,
+        "let point_count: usize",
+        "5",
+        "point_count",
+        true,
+    ),
+    item(
+        "PrimaryKey",
+        7,
+        "trait PrimaryKey",
+        "6",
+        "PrimaryKey",
+        false,
+    ),
+    Item {
+        filter: Some("tuple"),
+        ..item("pair", 6, "let pair: (i32, i32)", "7", "pair", true)
+    },
+    Item {
+        snippet: true,
+        ..item(
+            "fmt",
+            15,
+            "snippet",
+            "8",
+            "fmt(${1:value}, ${2|a,b|}$0)",
+            true,
+        )
+    },
+];
+
+/// The vocabulary offered right after a `.`.
+const MEMBERS: &[Item] = &[
+    item("len", 2, "fn len(&self) -> usize", "1", "len()", true),
+    item("push", 2, "fn push(&mut self, value)", "2", "push", true),
+    item("pop", 2, "fn pop(&mut self)", "3", "pop", true),
+];
+
+fn is_word(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The identifier around byte `column` of `line`, as byte bounds.
+fn word_around(line: &str, column: usize) -> Option<(usize, usize)> {
+    let start = line[..column]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_word(*c))
+        .last()
+        .map_or(column, |(at, _)| at);
+    let end = line[column..]
+        .char_indices()
+        .find(|(_, c)| !is_word(*c))
+        .map_or(line.len(), |(at, _)| column + at);
+    (start < end).then_some((start, end))
 }
