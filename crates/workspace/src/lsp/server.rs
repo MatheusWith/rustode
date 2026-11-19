@@ -8,7 +8,7 @@
 //! tree, so the numbers are not a verified VS Code fact.
 
 use super::encoding::{self, PositionEncoding};
-use super::process::{Process, Waker};
+use crate::child::{Process, Waker};
 use super::settings::ServerConfig;
 use super::uri;
 use serde_json::{Value, json};
@@ -229,7 +229,13 @@ impl Server {
     pub(crate) fn start(&mut self, waker: &Waker) {
         self.capabilities = Capabilities::default();
         self.features = Features::default();
-        match Process::spawn(&self.config, &self.root, &self.name(), waker) {
+        match Process::spawn(
+            &self.config.command,
+            &self.config.args,
+            &self.root,
+            &self.name(),
+            waker,
+        ) {
             Ok(process) => {
                 let id = self.request_id();
                 process.send(&json!({

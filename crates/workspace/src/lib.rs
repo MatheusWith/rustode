@@ -1,5 +1,6 @@
 //! The single in-process API that every frontend uses.
 
+mod child;
 mod commands;
 mod config;
 mod document;

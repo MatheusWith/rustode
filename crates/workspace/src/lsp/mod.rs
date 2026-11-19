@@ -21,9 +21,7 @@ mod encoding;
 mod filter;
 mod hover;
 mod markers;
-mod process;
 mod requests;
-mod rpc;
 mod server;
 mod settings;
 mod suggest;
@@ -38,7 +36,7 @@ pub use suggest::{CompletionKind, CompletionList, CompletionMove, CompletionRow}
 use crate::{Document, DocumentId, Error, Event, Position, Range, Selection, Workspace};
 use encoding::PositionEncoding;
 use markers::{Anchor, Stored};
-use process::{Incoming, Waker};
+use crate::child::{Incoming, Waker};
 use rustode_trace::spans::{self, Direction};
 use serde_json::{Value, json};
 use server::{Server, ServerId, SyncKind};
