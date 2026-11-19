@@ -19,7 +19,7 @@ const SAMPLE: &str = "fn main() {\n    let x = ERROR;\n    WARN\n}\n";
 /// The test server, built next to this test binary: in one of the folders
 /// above it, whatever layout cargo gives its build folder. When only this
 /// crate's tests were built, it is built now.
-fn server() -> PathBuf {
+pub(super) fn server() -> PathBuf {
     let exe = std::env::current_exe().expect("test binary");
     if let Some(path) = exe
         .ancestors()

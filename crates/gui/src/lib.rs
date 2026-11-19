@@ -38,6 +38,10 @@
 //!   (`quick_input.rs`). Ctrl+F and Ctrl+H open the find widget at the
 //!   editor's top right, with every match in view highlighted (`find.rs`).
 //!
+//! - **Hover and suggest** overlays anchored to the text: the hover after the
+//!   pointer rests on a char for 300 ms or on Ctrl+K Ctrl+I, the suggest list
+//!   on Ctrl+Space and while typing (`suggest.rs`).
+//!
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
 
@@ -58,6 +62,7 @@ mod quick_input;
 mod run;
 mod search;
 mod status;
+mod suggest;
 mod tabs;
 mod text;
 

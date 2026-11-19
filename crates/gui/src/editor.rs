@@ -39,6 +39,7 @@
 //! `src/vs/editor/browser/viewParts/viewCursors/viewCursor.ts:182-199`).
 
 use crate::keys::{self, Command};
+use crate::suggest;
 use crate::text::DisplayLine;
 use eframe::egui::{
     self, Align2, Color32, EventFilter, FontId, Id, Key, Pos2, Rect, Response, Sense, Ui, Vec2,
@@ -47,7 +48,8 @@ use eframe::egui::{
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
 use rustode_workspace::{
-    Document, DocumentId, Highlight, Marker, Position, Range, Selection, TokenKind, Workspace,
+    CompletionMove, Document, DocumentId, Highlight, Marker, Position, Range, Selection, TokenKind,
+    Workspace,
 };
 use std::sync::Arc;
 
@@ -181,7 +183,7 @@ fn count(value: f32) -> usize {
 
 /// A count of lines or columns in view (at most a few thousand) as a float.
 #[allow(clippy::cast_precision_loss)] // exact below 2^24
-fn float(count: usize) -> f32 {
+pub(crate) fn float(count: usize) -> f32 {
     count as f32
 }
 
@@ -229,22 +231,56 @@ struct Screen<'a> {
     matches: &'a [Range],
 }
 
+impl Screen<'_> {
+    /// The top left of the char at `offset`, if its line is in view.
+    fn point_of(&self, offset: usize) -> Option<Pos2> {
+        let position = self.doc.position_of(offset);
+        let row = self.rows.iter().find(|row| row.line == position.line)?;
+        Some(Pos2::new(
+            row.x(self.layout, self.view, position.column),
+            row.top,
+        ))
+    }
+
+    /// The char under `pos`, when `pos` is over text: not past the end of its
+    /// line, nor outside the text area.
+    fn char_at(&self, ui: &Ui, pos: Pos2) -> Option<usize> {
+        if !self.layout.text.contains(pos) {
+            return None;
+        }
+        let offset = offset_at(ui, self.doc, self.layout, self.view, pos);
+        let position = self.doc.position_of(offset);
+        let row = self.rows.iter().find(|row| row.line == position.line)?;
+        let end = row.x(self.layout, self.view, row.text.chars().count());
+        (position.column < row.text.chars().count() && pos.x < end).then_some(offset)
+    }
+}
+
 impl Row {
     fn top_of(layout: &Layout, view: &View, line: usize) -> f32 {
         layout.origin(view).y + float(line - view.top) * layout.line_height
     }
 }
 
+/// What is shown with the editor: its accessible name and the find matches.
+pub(crate) struct Shown<'a> {
+    /// The accessible name of the editor.
+    pub label: &'a str,
+    /// Find matches to highlight, sorted.
+    pub matches: &'a [Range],
+}
+
 /// Shows the editor in `ui`, running the commands its input asks for, with
-/// `matches` (sorted find matches) highlighted.
+/// the find matches highlighted.
 pub(crate) fn show(
     ui: &mut Ui,
     workspace: &mut Workspace,
     document: DocumentId,
     view: &mut View,
-    label: &str,
-    matches: &[Range],
+    overlay: &mut suggest::State,
+    shown: &Shown<'_>,
 ) -> Outcome {
+    let Shown { label, matches } = *shown;
     let mut outcome = Outcome::default();
     let rect = ui.available_rect_before_wrap();
     let response = ui.interact(rect, id(), Sense::click_and_drag());
@@ -258,6 +294,9 @@ pub(crate) fn show(
     }
     if ui.memory(|memory| memory.has_focus(id())) {
         let arrived = response.gained_focus();
+        let keys = suggest::keys(ui, workspace, overlay);
+        outcome.changed |= keys.acted;
+        outcome.error = keys.error;
         keyboard(
             ui,
             workspace,
@@ -266,6 +305,8 @@ pub(crate) fn show(
             arrived,
             &mut outcome,
         );
+    } else if !suggest::pointer_on_list(ui) {
+        workspace.dismiss_completion();
     }
     pointer(ui, &response, workspace, document, &layout, view);
     let Some(doc) = workspace.document(document) else {
@@ -289,7 +330,43 @@ pub(crate) fn show(
     };
     paint(ui, &screen);
     expose(ui, &response, &screen, label);
+    let (pointer, clicked) = overlays(ui, &response, workspace, document, &screen, overlay);
+    match pointer {
+        suggest::Pointer::Idle => {}
+        suggest::Pointer::Hide => workspace.hide_hover(),
+        suggest::Pointer::Ask(offset) => drop(workspace.request_hover(document, offset)),
+    }
+    if let Some(row) = clicked {
+        workspace.completion_move(CompletionMove::To(row));
+        outcome.error = workspace.completion_accept().err().map(|e| e.to_string());
+        outcome.changed = true;
+    }
     outcome
+}
+
+/// The hover and suggest overlays over the painted text: what the pointer
+/// wants of the hover, and the list row that was clicked.
+fn overlays(
+    ui: &Ui,
+    response: &Response,
+    workspace: &Workspace,
+    document: DocumentId,
+    screen: &Screen<'_>,
+    state: &mut suggest::State,
+) -> (suggest::Pointer, Option<usize>) {
+    let target = response
+        .hovered()
+        .then(|| ui.input(|input| input.pointer.hover_pos()))
+        .flatten()
+        .and_then(|pos| screen.char_at(ui, pos));
+    let pointer = suggest::pointer(ui, workspace, state, target);
+    let at = |offset: usize| screen.point_of(offset);
+    let anchors = suggest::Anchors {
+        clip: screen.layout.text,
+        at: &at,
+        line_height: LINE_HEIGHT,
+    };
+    (pointer, suggest::show(ui, workspace, document, &anchors))
 }
 
 fn keyboard(
