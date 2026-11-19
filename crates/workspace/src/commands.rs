@@ -22,6 +22,9 @@
 //! "View: Toggle Problems" on Ctrl+Shift+M
 //! (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`,
 //! titled by `src/vs/workbench/services/views/browser/viewsService.ts:481-489`).
+//! "Change Language Mode" on Ctrl+K M
+//! (`src/vs/workbench/browser/parts/editor/editorStatus.ts:1110-1131`; the
+//! frontends open the picker, [`Workspace::language_picks`]).
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
@@ -187,6 +190,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         Some("Ctrl+Shift+M"),
     ),
     command(
+        "workbench.action.editor.changeLanguageMode",
+        "Change Language Mode",
+        Workbench,
+        Some("Ctrl+K M"),
+    ),
+    command(
         "rustode.restartLanguageServer",
         "Language Server: Restart",
         Editor,
@@ -206,7 +215,7 @@ pub struct CommandMatch {
 }
 
 /// `query`'s space-separated words found in `label`, case-insensitively.
-fn match_label(label: &str, query: &str) -> Option<Vec<usize>> {
+pub(crate) fn match_label(label: &str, query: &str) -> Option<Vec<usize>> {
     let lower: Vec<char> = label.chars().flat_map(char::to_lowercase).collect();
     let mut positions = Vec::new();
     for word in query.split_whitespace() {

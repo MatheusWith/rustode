@@ -36,3 +36,7 @@ Measured at `d6debfb` on 2026-11-17, from the project root: `cargo deny --locked
 - Measured: 6 direct third-party crates, and 56 third-party packages in the resolved graph for all targets. Command, from the project root: `cargo metadata --format-version 1 --locked --offline`.
 - `unused-allowed-license = "allow"` keeps licenses that no crate uses yet on the list, as policy for future crates (`deny.toml:12-13`, commit `7ee96c3`).
 - A crate whose license is not on the list (for example a GPL crate) needs a new decision, not an edit of `deny.toml`.
+
+## Addendum (2026-11-18): grammar crates
+
+Ticket 28 adds one `tree-sitter-*` grammar crate per common language to `rustode-syntax` (bash, c, cpp, css, go, html, javascript, json, md, python, toml-ng, typescript, yaml), each pinned to its published version in `[workspace.dependencies]` and listed in `ATTRIBUTION.md`. All of them are MIT, and `cargo deny --locked check` passes with them. A grammar whose license is not in `deny.toml` is not added; the language stays Plain Text.

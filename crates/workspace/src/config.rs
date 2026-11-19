@@ -16,6 +16,7 @@ impl Workspace {
         let change = self.config.load(settings, keybindings);
         log_change(&self.config, &change);
         self.lsp_config_changed();
+        self.associations_changed();
         change
     }
 
@@ -26,6 +27,7 @@ impl Workspace {
         log_change(&self.config, &change);
         if !change.settings.is_empty() {
             self.lsp_config_changed();
+            self.associations_changed();
         }
         change
     }

@@ -14,7 +14,7 @@ The Cargo workspace has one crate per module (`Cargo.toml:3`: members `crates/*`
 | Crate | Role | State at `d6debfb` |
 |---|---|---|
 | `rustode-core` | text buffer (ropey), selections and multi-cursor, edit operations, undo/redo with VS Code-like grouping; no I/O | M1 part done |
-| `rustode-syntax` | Tree-sitter parsing, incremental reparse, highlight queries, language detection | placeholder |
+| `rustode-syntax` | Tree-sitter parsing, incremental reparse, one grammar and highlight query per language (language detection by name and first line is the workspace's, `crates/workspace/src/language.rs`) | placeholder |
 | `rustode-fs` | file reading and writing, encoding detection and conversion, line endings, file watching; workspace search later (ignore-aware, streaming, cancellable) | done except search |
 | `rustode-config` | `settings.json` and `keybindings.json` in VS Code's format; schema validation that reports errors instead of failing | done for M1 |
 | `rustode-workspace` | the single in-process API for every frontend. It orchestrates core, syntax, fs and config, and later the LSP client, the DAP client and extension management. It owns documents, editor groups and splits, and the command registry, and it emits state-change events | M1 part done |

@@ -14,6 +14,7 @@ rustode-core.workspace = true
 rustode-fs.workspace = true
 rustode-syntax.workspace = true
 rustode-trace.workspace = true
+globset.workspace = true
 regex.workspace = true
 rustls-native-certs.workspace = true
 serde.workspace = true
