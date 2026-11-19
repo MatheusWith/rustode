@@ -8,9 +8,9 @@
 //! tree, so the numbers are not a verified VS Code fact.
 
 use super::encoding::{self, PositionEncoding};
-use crate::child::{Process, Waker};
 use super::settings::ServerConfig;
 use super::uri;
+use crate::child::{Process, Waker};
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
