@@ -69,10 +69,11 @@ pub(crate) struct Navigator {
 pub(crate) fn keys(ctx: &Context) -> Option<&'static str> {
     ctx.input_mut(|input| {
         let none = Modifiers::NONE;
-        if input.consume_key(none, Key::F12) {
-            Some(REVEAL_DEFINITION)
-        } else if input.consume_key(Modifiers::SHIFT, Key::F12) {
+        // The chords with Shift first: a plain F12 would match them too.
+        if input.consume_key(Modifiers::SHIFT, Key::F12) {
             Some(GO_TO_REFERENCES)
+        } else if input.consume_key(none, Key::F12) {
+            Some(REVEAL_DEFINITION)
         } else if input.consume_key(none, Key::F2) {
             Some(RENAME)
         } else if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::I) {

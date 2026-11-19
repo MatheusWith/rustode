@@ -16,6 +16,7 @@ mod language;
 mod layout;
 mod lsp;
 mod minimap;
+mod navigate;
 mod quick_input;
 mod scale;
 mod search;
