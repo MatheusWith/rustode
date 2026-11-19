@@ -1,0 +1,12 @@
+ program.txt │
+   1 loop 3
+   2 inc i
+◆  3 print tick
+   4 end
+   5
+
+
+
+
+
+ program.txt                                                     Ln 3, Col 1  UTF-8  LF  Plain Text

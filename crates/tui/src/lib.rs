@@ -7,6 +7,7 @@
 //! below 40×10.
 
 mod app;
+mod breakpoint;
 mod debug;
 mod extensions;
 mod find;

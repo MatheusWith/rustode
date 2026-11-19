@@ -1,0 +1,12 @@
+ program.txt │
+   1 loop ┌──────────────────────────────────────────────────────────────────────────────┐
+   2 inc i│ i == 2                                                                       │
+   3 print│ Expression: Break when the expression is true                                │
+   4 end  │ Tab: next, Enter: accept, Escape: cancel                                     │
+   5      └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+ program.txt                                                     Ln 3, Col 1  UTF-8  LF  Plain Text

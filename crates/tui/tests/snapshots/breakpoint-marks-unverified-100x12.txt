@@ -1,0 +1,12 @@
+ program.txt │
+▶  1 print a
+◆  2 print b
+◇  3 print c
+○  4
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ CALL STACK                    VARIABLES                WATCH               DEBUG CONSOLE
+ main  PAUSED ON BREAKPOINT
+  ▶main  program.txt:1
+ worker
+                                                                            >
+ program.txt  Debug: stopped (Run program)                       Ln 1, Col 1  UTF-8  LF  Plain Text

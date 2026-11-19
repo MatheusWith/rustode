@@ -96,6 +96,8 @@ pub(crate) struct QuickInput {
     pub locations: bool,
     /// Typing the new name of the symbol of this document ("Rename Symbol").
     pub rename: Option<DocumentId>,
+    /// Editing a breakpoint's condition, hit count or log message.
+    pub breakpoint: Option<rustode_workspace::BreakpointDraft>,
 }
 
 /// One row of the quick input list.
@@ -495,7 +497,7 @@ impl App {
             self.run_command(command);
             return;
         }
-        if self.run_debug_view(id) || self.run_language(id) {
+        if self.run_debug_view(id) || self.run_language(id) || self.run_breakpoint_command(id) {
             return;
         }
         match self.workspace.execute(id) {
@@ -871,6 +873,9 @@ impl App {
         if let Some(items) = self.language_items(&text) {
             return items;
         }
+        if let Some(items) = self.breakpoint_items() {
+            return items;
+        }
         if let Some(items) = self.navigate_items(&text) {
             return items;
         }
@@ -919,6 +924,7 @@ impl App {
             KeyCode::Char('p') if ctrl => {
                 quick.selected = (quick.selected + 1).min(count.saturating_sub(1));
             }
+            KeyCode::Tab if quick.breakpoint.is_some() => self.next_breakpoint_input(),
             KeyCode::Backspace => {
                 quick.text.pop();
                 quick.selected = 0;
@@ -935,6 +941,10 @@ impl App {
         let selected = self.quick.as_ref().map_or(0, |q| q.selected);
         if let Some(quick) = self.quick.take_if(|q| q.rename.is_some()) {
             self.rename_to(&quick.text);
+            return;
+        }
+        if let Some(quick) = self.quick.take_if(|q| q.breakpoint.is_some()) {
+            self.finish_breakpoint(quick);
             return;
         }
         let item = self.quick_items().into_iter().nth(selected);
