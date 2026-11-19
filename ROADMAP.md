@@ -80,7 +80,7 @@ The scope of each milestone is fixed by [ADR 0018](docs/adr/0018-phase-1-milesto
 | M4, syntax | Tree-sitter highlighting, language detection, Dark Modern token colors | not started | `crates/syntax/src/lib.rs` is a one-line placeholder |
 | M5, LSP client | diagnostics, hover, completion, definition, references, rename, format; rust-analyzer and typescript-language-server | not started | — |
 | M6, layout and search | global search with streaming and replace preview; split editors; minimap (GUI only) | not started | — |
-| M7, DAP client | `launch.json`, breakpoints including conditional, run and step, call stack, variables, watch, debug console; lldb-dap and debugpy | not started | — |
+| M7, DAP client | `launch.json`, breakpoints including conditional, run and step, call stack, variables, watch, debug console; lldb-dap and debugpy | **in progress.** Done (ticket 37): the tracer, `launch.json` in VS Code's format, gutter breakpoints, start, stop and continue in the TUI and the GUI, adapter crashes reported, tested with `rustode-test-dap`. Not done: stepping and the views (ticket 38), attach, conditional breakpoints, lldb-dap and debugpy | [ADR 0030](docs/adr/0030-dap-client.md), `crates/workspace/src/dap/`, `crates/workspace/tests/dap.rs` |
 | M8, extension management | Open VSX search, install, uninstall, enable, disable, list; nothing loaded; VS Code-format manifest and storage | not started | — |
 | M9, Phase 1 report | full comparison with the App; complete Gap Analysis | not started | — |
 

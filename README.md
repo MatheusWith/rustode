@@ -78,7 +78,7 @@ rustode behaves like the editor your hands already know: VS Code's command ids, 
   - A problems panel (`Ctrl+Shift+M`).
   - Error and warning counts in the status bar.
 - **A crash is survivable.** A server whose output ends is restarted up to four times in three minutes, then stays down until you run "Language Server: Restart". Editing carries on throughout.
-- **Tested without the network.** The tests use `rustode-test-lsp`, a scripted server that is never shipped (`crates/test-lsp`).
+- **Tested without the network.** The tests use `rustode-test-lsp` and `rustode-test-dap`, scripted servers that are never shipped (`crates/test-lsp`, `crates/test-dap`).
 - **Not yet:** hover, completion, go to definition, references, rename and format.
 
 ## Extensions
@@ -234,7 +234,7 @@ A layered Cargo workspace. Each crate may depend only on a layer below its own:
 | L1 | `rustode-syntax` · `rustode-fs` · `rustode-config` · `rustode-trace` · `rustode-protocol` |
 | L2 | `rustode-workspace`: **the single API for every frontend**: documents, commands, search, language servers, extensions |
 | L3 | `rustode-cli` · `rustode-tui` · `rustode-gui` |
-| tools | `xtask` (hooks, coverage, the benchmark gate) · `rustode-test-lsp` |
+| tools | `xtask` (hooks, coverage, the benchmark gate) · `rustode-test-lsp` · `rustode-test-dap` |
 
 The same checks run on every commit and in CI ([ADR 0023](docs/adr/0023-same-checks-local-and-ci.md)):
 - formatting;
