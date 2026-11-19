@@ -39,6 +39,7 @@
 //! `src/vs/editor/browser/viewParts/viewCursors/viewCursor.ts:182-199`).
 
 use crate::keys::{self, Command};
+use crate::minimap;
 use crate::suggest;
 use crate::text::DisplayLine;
 use eframe::egui::{
@@ -111,12 +112,28 @@ pub(crate) struct View {
     /// outside the editor moved it (the quick input, the find widget, going
     /// to a problem).
     reveal: bool,
+    /// The minimap's drag and cached blocks.
+    minimap: crate::minimap::State,
 }
 
 impl View {
     /// Scrolls the primary caret into view on the next frame.
     pub(crate) fn reveal(&mut self) {
         self.reveal = true;
+    }
+
+    /// How far the view is scrolled, in lines.
+    fn scroll_lines(&self, line_height: f32) -> f32 {
+        float(self.top) + self.offset / line_height
+    }
+
+    /// Scrolls to `lines` lines from the top, on a whole pixel.
+    fn set_scroll_lines(&mut self, lines: f32, line_height: f32, pixels_per_point: f32) {
+        let lines = lines.max(0.0);
+        self.top = count(lines.floor());
+        self.offset = ((lines - lines.floor()) * line_height)
+            .round_to_pixels(pixels_per_point)
+            .clamp(0.0, line_height - 1.0 / pixels_per_point);
     }
 }
 
@@ -144,7 +161,7 @@ struct Layout {
 impl Layout {
     fn new(ui: &Ui, rect: Rect, line_count: usize, tab_size: usize) -> Self {
         let font = FontId::monospace(FONT_SIZE);
-        let char_width = ui.fonts_mut(|fonts| fonts.glyph_width(&font, ' '));
+        let char_width = char_width(ui);
         let digits = u8::try_from(line_count.max(1).ilog10() + 1).unwrap_or(u8::MAX);
         let gutter_width = char_width * (f32::from(digits.max(3)) + 2.0);
         let pixels_per_point = ui.pixels_per_point();
@@ -175,9 +192,89 @@ impl Layout {
     }
 }
 
+/// One char's width in the editor's font.
+fn char_width(ui: &Ui) -> f32 {
+    let font = FontId::monospace(FONT_SIZE);
+    ui.fonts_mut(|fonts| fonts.glyph_width(&font, ' '))
+}
+
+/// Splits the editor's `area` into the text's and, when the minimap is on
+/// and fits, its own.
+fn split_minimap(
+    ui: &Ui,
+    workspace: &Workspace,
+    area: Rect,
+) -> (Rect, Option<(Rect, minimap::Metrics)>) {
+    let ppp = ui.pixels_per_point();
+    let metrics = workspace
+        .minimap_enabled()
+        .then(|| minimap::Metrics::new(ppp, char_width(ui), area.width()))
+        .flatten();
+    match metrics {
+        Some(metrics) => {
+            let (text, bar) = minimap::split(area, metrics.width, ppp);
+            (text, Some((bar, metrics)))
+        }
+        None => (area, None),
+    }
+}
+
+/// Runs the minimap's input, which may scroll the view, and paints it.
+fn show_minimap(
+    ui: &Ui,
+    workspace: &Workspace,
+    document: DocumentId,
+    view: &mut View,
+    layout: &Layout,
+    (bar, metrics): (Rect, minimap::Metrics),
+) {
+    let Some(doc) = workspace.document(document) else {
+        return;
+    };
+    let scroll = view.scroll_lines(layout.line_height);
+    let placed = minimap_layout(metrics, doc, layout, bar, scroll);
+    let scroll =
+        minimap::interact(ui, bar, &placed, scroll, &mut view.minimap).map_or(scroll, |to| {
+            view.set_scroll_lines(to, layout.line_height, layout.pixels_per_point);
+            view.scroll_lines(layout.line_height)
+        });
+    let placed = minimap_layout(metrics, doc, layout, bar, scroll);
+    let paint = minimap::Paint {
+        workspace,
+        document,
+        rect: bar,
+        metrics,
+        layout: placed,
+        scroll,
+    };
+    minimap::paint(ui, &paint, &mut view.minimap);
+}
+
+/// Where the minimap's slider and lines are for the editor `layout`
+/// scrolled `scroll` lines.
+fn minimap_layout(
+    metrics: minimap::Metrics,
+    doc: &Document,
+    layout: &Layout,
+    bar: Rect,
+    scroll: f32,
+) -> minimap::Layout {
+    minimap::Layout::new(
+        metrics,
+        minimap::Inputs {
+            line_count: doc.line_count(),
+            line_height: layout.line_height,
+            viewport: layout.text.height(),
+            scroll,
+            height: bar.height(),
+            pixels_per_point: layout.pixels_per_point,
+        },
+    )
+}
+
 /// A whole, non-negative float as a count.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // float to int casts saturate
-fn count(value: f32) -> usize {
+pub(crate) fn count(value: f32) -> usize {
     value.max(0.0) as usize
 }
 
@@ -282,11 +379,12 @@ pub(crate) fn show(
 ) -> Outcome {
     let Shown { label, matches } = *shown;
     let mut outcome = Outcome::default();
-    let rect = ui.available_rect_before_wrap();
-    let response = ui.interact(rect, id(), Sense::click_and_drag());
+    let area = ui.available_rect_before_wrap();
     let Some(line_count) = workspace.document(document).map(Document::line_count) else {
         return outcome;
     };
+    let (rect, minimap_area) = split_minimap(ui, workspace, area);
+    let response = ui.interact(rect, id(), Sense::click_and_drag());
     let tab_size = workspace.tab_size(document).unwrap_or(4);
     let layout = Layout::new(ui, rect, line_count, tab_size);
     if response.is_pointer_button_down_on() {
@@ -312,11 +410,18 @@ pub(crate) fn show(
     let Some(doc) = workspace.document(document) else {
         return outcome;
     };
-    if response.contains_pointer() {
+    let over_minimap = minimap_area.is_some_and(|(bar, _)| {
+        ui.input(|input| input.pointer.hover_pos())
+            .is_some_and(|pos| bar.contains(pos))
+    });
+    if response.contains_pointer() || over_minimap {
         wheel(ui, view, doc.line_count(), layout.line_height);
     }
     if std::mem::take(&mut view.reveal) || outcome.changed {
         reveal(ui, doc, &layout, view);
+    }
+    if let Some(area) = minimap_area {
+        show_minimap(ui, workspace, document, view, &layout, area);
     }
     let mut markers = workspace.markers(document);
     markers.sort_by_key(|m| m.severity);

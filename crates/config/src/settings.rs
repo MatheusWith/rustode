@@ -92,6 +92,17 @@ impl Schema {
     ///   `search.maxResults` is a number or `null` in VS Code; any value is accepted here.
     #[must_use]
     pub fn builtin() -> Self {
+        let mut schema = Self::files_and_search();
+        schema.register(SettingSchema {
+            key: "editor.minimap.enabled".to_owned(),
+            kind: SettingType::Boolean,
+            default: Value::Bool(true),
+        });
+        schema
+    }
+
+    /// The `editor.tab*`, `files.*` and `search.*` settings of [`Self::builtin`].
+    fn files_and_search() -> Self {
         let mut schema = Self::empty();
         let number = |minimum, maximum| SettingType::Number { minimum, maximum };
         let enumeration =
@@ -109,11 +120,6 @@ impl Schema {
                 "editor.tabSize",
                 number(Some(1.0), Some(100.0)),
                 Value::Number(4.0),
-            ),
-            (
-                "editor.minimap.enabled",
-                SettingType::Boolean,
-                Value::Bool(true),
             ),
             (
                 "editor.insertSpaces",
