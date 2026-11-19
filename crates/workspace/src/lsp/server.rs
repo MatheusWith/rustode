@@ -254,6 +254,7 @@ impl Server {
             &self.config.command,
             &self.config.args,
             &self.root,
+            &[],
             &self.name(),
             waker,
         ) {

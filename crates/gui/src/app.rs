@@ -221,7 +221,8 @@ impl EditorApp {
             .workspace
             .load_config(&dir.join("settings.json"), &dir.join("keybindings.json"));
         let problems = self.workspace.config().diagnostics().count()
-            + self.workspace.language_server_problems().len();
+            + self.workspace.language_server_problems().len()
+            + self.workspace.debug_problems().len();
         if problems > 0 {
             self.notice = Some(format!(
                 "{problems} problem(s) in settings.json or keybindings.json"
@@ -516,13 +517,37 @@ impl EditorApp {
             Workbench::QuickOpen => self.open_quick(ctx, ""),
             Workbench::ShowCommands => self.open_quick(ctx, ">"),
             Workbench::GotoLine => self.open_quick(ctx, ":"),
+            Workbench::DebugKey
+            | Workbench::DebugStop
+            | Workbench::ToggleBreakpoint
+            | Workbench::StepOver
+            | Workbench::StepInto
+            | Workbench::StepOut
+            | Workbench::FocusCallStack
+            | Workbench::FocusVariables
+            | Workbench::FocusWatch
+            | Workbench::FocusConsole
+            | Workbench::RemoveWatch => self.run_debug_workbench(ctx, command),
+            Workbench::Find
+            | Workbench::Replace
+            | Workbench::FindNext
+            | Workbench::FindPrevious => self.run_find(ctx, command),
+        }
+    }
+
+    /// The steps and the debug panel's commands. F6 pauses while the program
+    /// runs (`debugState == 'running'` wins over moving the focus, as in VS
+    /// Code); see `Workbench::FocusNextPart`.
+    fn run_debug_workbench(&mut self, ctx: &Context, command: Workbench) {
+        match command {
             Workbench::DebugKey => {
                 let id = self.workspace.debug_key_command();
                 self.run_command(ctx, id);
             }
             Workbench::DebugStop => self.run_command(ctx, "workbench.action.debug.stop"),
-            // F6 pauses while the program runs: `debugState == 'running'`
-            // wins over moving the focus, as in VS Code.
+            Workbench::ToggleBreakpoint => {
+                self.run_command(ctx, "editor.debug.action.toggleBreakpoint");
+            }
             Workbench::StepOver => self.debug_key(ctx, rustode_workspace::STEP_OVER_COMMAND),
             Workbench::StepInto => self.debug_key(ctx, rustode_workspace::STEP_INTO_COMMAND),
             Workbench::StepOut => self.debug_key(ctx, rustode_workspace::STEP_OUT_COMMAND),
@@ -530,18 +555,14 @@ impl EditorApp {
             Workbench::FocusVariables => self.debug.focus(debug::Column::Variables),
             Workbench::FocusWatch => self.debug.focus(debug::Column::Watch),
             Workbench::FocusConsole => self.debug.focus(debug::Column::Console),
-            Workbench::RemoveWatch => {
-                if !self.debug.remove_focused_watch(&mut self.workspace) {
-                    self.message = Some("Select a watch expression first".to_owned());
-                }
-            }
-            Workbench::ToggleBreakpoint => {
-                self.run_command(ctx, "editor.debug.action.toggleBreakpoint");
-            }
-            Workbench::Find
-            | Workbench::Replace
-            | Workbench::FindNext
-            | Workbench::FindPrevious => self.run_find(ctx, command),
+            Workbench::RemoveWatch => self.remove_watch(),
+            _ => {}
+        }
+    }
+
+    fn remove_watch(&mut self) {
+        if !self.debug.remove_focused_watch(&mut self.workspace) {
+            self.message = Some("Select a watch expression first".to_owned());
         }
     }
 

@@ -518,7 +518,8 @@ impl App {
 
     fn report_config_problems(&mut self) {
         let problems = self.workspace.config().diagnostics().count()
-            + self.workspace.language_server_problems().len();
+            + self.workspace.language_server_problems().len()
+            + self.workspace.debug_problems().len();
         if problems > 0 {
             self.message = Some(format!(
                 "{problems} problem(s) in settings.json or keybindings.json"

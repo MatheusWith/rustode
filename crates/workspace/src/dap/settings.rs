@@ -11,9 +11,16 @@
 //! }
 //! ```
 //!
-//! `command` is required and `args` (strings) is optional. An entry with a
+//! `command` is required; `args` (strings) and `env` (an object of strings
+//! added to the adapter's environment) are optional. An entry with a
 //! problem is reported and, when it cannot be used, skipped; the other
-//! entries still work.
+//! entries still work. An entry set to `null` switches that type's adapter
+//! off, which is how a user turns off a built-in one as for
+//! `rustode.languageServers`; rustode has no built-in debug adapter, so
+//! today the user's entries are all there is and `null` just leaves the
+//! type without one. The setting is read again whenever the settings
+//! change (`Workspace::dap_config_changed`); a running session keeps the
+//! adapter it started with and the new value is used at the next start.
 
 use rustode_config::Value;
 use std::collections::BTreeMap;
@@ -26,6 +33,7 @@ pub(crate) const KEY: &str = "rustode.debugAdapters";
 pub(crate) struct AdapterConfig {
     pub command: String,
     pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
 }
 
 /// The usable entries by configuration type, and a sentence for each problem.
@@ -36,6 +44,9 @@ pub(crate) fn parse(value: Option<&Value>) -> (BTreeMap<String, AdapterConfig>, 
         return (adapters, problems);
     };
     for (kind, entry) in entries {
+        if matches!(entry, Value::Null) {
+            continue;
+        }
         let mut report = |what: String| problems.push(format!("{KEY}[\"{kind}\"]: {what}"));
         if let Some(config) = parse_entry(entry, &mut report) {
             adapters.insert(kind.clone(), config);
@@ -50,7 +61,7 @@ fn parse_entry(entry: &Value, report: &mut impl FnMut(String)) -> Option<Adapter
         return None;
     };
     for key in fields.keys() {
-        if !matches!(key.as_str(), "command" | "args") {
+        if !matches!(key.as_str(), "command" | "args" | "env") {
             report(format!("unknown property \"{key}\""));
         }
     }
@@ -95,7 +106,36 @@ fn parse_entry(entry: &Value, report: &mut impl FnMut(String)) -> Option<Adapter
             Vec::new()
         }
     };
-    Some(AdapterConfig { command, args })
+    let env = parse_env(fields.get("env"), report);
+    Some(AdapterConfig { command, args, env })
+}
+
+/// The `env` entries that are strings, by name; the rest are reported.
+fn parse_env(value: Option<&Value>, report: &mut impl FnMut(String)) -> Vec<(String, String)> {
+    match value {
+        None => Vec::new(),
+        Some(Value::Object(vars)) => vars
+            .iter()
+            .filter(|(name, _)| !name.is_empty() && !name.contains(['=', '\0']))
+            .filter_map(|(name, var)| match var {
+                Value::String(text) if !text.contains('\0') => Some((name.clone(), text.clone())),
+                other => {
+                    report(format!(
+                        "\"env\" entry \"{name}\" must be a string, not {}; skipped",
+                        other.type_name()
+                    ));
+                    None
+                }
+            })
+            .collect(),
+        Some(other) => {
+            report(format!(
+                "\"env\" must be an object, not {}; ignored",
+                other.type_name()
+            ));
+            Vec::new()
+        }
+    }
 }
 
 #[cfg(test)]

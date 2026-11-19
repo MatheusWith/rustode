@@ -1027,3 +1027,176 @@ fn a_cycle_of_objects_expands_only_to_the_depth_limit() {
     assert_eq!(deepest, 8, "the arrow stops at depth 8");
     assert!(rows.iter().filter(|r| r.depth == 8).all(|r| !r.expandable));
 }
+
+// ---- the owner's decision on `rustode.debugAdapters`: freely editable, live ----
+
+impl Fixture {
+    /// Rewrites `settings.json` and reads it again, as an edit and a save do.
+    fn edit_settings(&self, ws: &mut Workspace, settings: &serde_json::Value) {
+        std::fs::write(self.dir.join("user/settings.json"), settings.to_string())
+            .expect("settings");
+        ws.reload_config();
+    }
+
+    /// An entry for the test adapter that logs to `name`.
+    fn entry(&self, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "command": adapter().display().to_string(),
+            "args": ["--log", self.dir.join(name).display().to_string()],
+        })
+    }
+}
+
+fn adapter_ran(f: &Fixture, log: &str) -> bool {
+    std::fs::read_to_string(f.dir.join(log)).is_ok_and(|text| text.contains("initialize"))
+}
+
+#[test]
+fn a_changed_adapter_setting_applies_at_the_next_start_without_a_restart() {
+    let f = Fixture::new("adapter-live-idle");
+    f.simple_launch();
+    f.program("print one\n");
+    let mut ws = f.workspace(&[]);
+    ws.reload_launch_configurations();
+
+    // Another command line, applied live while idle.
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": f.entry("second.log")}}),
+    );
+    assert_eq!(ws.debug_problems().len(), 0);
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the end", ended);
+    assert!(adapter_ran(&f, "second.log"), "the new args were used");
+
+    // Env too: only a changed environment makes the wrapper log here.
+    let wrapper = serde_json::json!({
+        "command": "sh",
+        "args": ["-c", "exec \"$0\" --log \"$ADAPTER_LOG\"", adapter().display().to_string()],
+        "env": {"ADAPTER_LOG": f.dir.join("env.log").display().to_string()},
+    });
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": wrapper}}),
+    );
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the end", ended);
+    assert!(adapter_ran(&f, "env.log"), "the env was applied");
+
+    // An entry that goes away leaves the type without an adapter; `null`
+    // does the same; adding it back works again.
+    f.edit_settings(&mut ws, &serde_json::json!({}));
+    assert_eq!(
+        ws.start_debugging(),
+        Err(DebugError::NoAdapter("test".to_owned()))
+    );
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": null}}),
+    );
+    assert_eq!(ws.debug_problems().len(), 0, "null is not a problem");
+    assert_eq!(
+        ws.start_debugging(),
+        Err(DebugError::NoAdapter("test".to_owned()))
+    );
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": f.entry("back.log")}}),
+    );
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the end", ended);
+    assert!(adapter_ran(&f, "back.log"));
+}
+
+#[test]
+fn a_session_keeps_its_adapter_when_the_setting_changes() {
+    let f = Fixture::new("adapter-live-running");
+    f.simple_launch();
+    let mut ws = f.workspace(&[]);
+    with_breakpoint(&f, &mut ws);
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", stopped);
+
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": {"command": "/no/such/adapter"}}}),
+    );
+    assert_eq!(
+        ws.debug_status().state,
+        DebugState::Stopped,
+        "the session goes on"
+    );
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the end", ended);
+    assert_eq!(
+        ws.debug_status().message.as_deref(),
+        Some("the program exited with code 0")
+    );
+
+    // The next start uses the new value: a command that cannot run is an
+    // error to read, not a crash.
+    assert!(matches!(ws.start_debugging(), Err(DebugError::Spawn(_))));
+
+    // Removing the entry while a session runs does not end it either.
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": f.entry("again.log")}}),
+    );
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", stopped);
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {"test": null}}),
+    );
+    assert_eq!(ws.debug_status().state, DebugState::Stopped);
+    ws.step_debugging(StepKind::Over).expect("step");
+    wait(&mut ws, "the next stop", |ws| {
+        stopped(ws) && ws.debug_status().reason.as_deref() == Some("step")
+    });
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn invalid_adapter_entries_are_reported_and_the_valid_ones_still_work() {
+    let f = Fixture::new("adapter-invalid");
+    f.simple_launch();
+    f.program("print one\n");
+    let mut ws = f.workspace(&[]);
+    let mut good = f.entry("good.log");
+    good["env"] = serde_json::json!({"OK": "1", "NUM": 3});
+    f.edit_settings(
+        &mut ws,
+        &serde_json::json!({"rustode.debugAdapters": {
+            "test": good,
+            "nocommand": {},
+            "number": 7,
+            "badenv": {"command": "x", "env": [1]},
+            "badargs": {"command": "x", "args": "no"},
+        }}),
+    );
+    let problems = ws.debug_problems();
+    assert!(
+        problems.iter().any(|p| p.contains("\"nocommand\"")),
+        "{problems:?}"
+    );
+    assert!(
+        problems.iter().any(|p| p.contains("\"number\"")),
+        "{problems:?}"
+    );
+    assert!(problems.iter().any(|p| p.contains("env")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("NUM")), "{problems:?}");
+    assert_eq!(problems.len(), 5, "{problems:?}");
+    ws.start_debugging().expect("the valid entry works");
+    wait(&mut ws, "the end", ended);
+    assert!(adapter_ran(&f, "good.log"));
+
+    // The whole setting of the wrong type is ignored and then reported
+    // by the settings schema (an object is expected).
+    f.edit_settings(&mut ws, &serde_json::json!({"rustode.debugAdapters": 5}));
+    assert_eq!(
+        ws.start_debugging(),
+        Err(DebugError::NoAdapter("test".to_owned()))
+    );
+    assert!(ws.config().diagnostics().count() > 0);
+}

@@ -364,6 +364,7 @@ impl Workspace {
             &adapter.command,
             &adapter.args,
             &root,
+            &adapter.env,
             &configuration.adapter_type,
             &self.dap.waker,
         )
