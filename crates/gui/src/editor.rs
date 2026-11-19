@@ -65,6 +65,11 @@ const FOREGROUND: Color32 = Color32::from_rgb(0xcc, 0xcc, 0xcc);
 const LINE_NUMBER: Color32 = Color32::from_rgb(0x6e, 0x76, 0x81);
 const ACTIVE_LINE_NUMBER: Color32 = Color32::from_rgb(0xcc, 0xcc, 0xcc);
 const SELECTION: Color32 = Color32::from_rgb(0x26, 0x4f, 0x78);
+/// `debugIcon.breakpointForeground`
+/// (`src/vs/workbench/contrib/debug/browser/breakpointEditorContribution.ts:874`).
+const BREAKPOINT: Color32 = Color32::from_rgb(0xe5, 0x14, 0x00);
+/// `debugIcon.breakpointCurrentStackframeForeground`, dark (`:877` of the same file).
+const STOPPED_ARROW: Color32 = Color32::from_rgb(0xff, 0xcc, 0x00);
 const CARET: Color32 = Color32::from_rgb(0xae, 0xaf, 0xad);
 /// Dark Modern's `editor.findMatchBackground`, the current match.
 const FIND_MATCH: Color32 = Color32::from_rgb(0x9e, 0x6a, 0x03);
@@ -324,6 +329,10 @@ struct Screen<'a> {
     rows: Vec<Row>,
     /// The document's diagnostics, the most severe last.
     markers: Vec<Marker>,
+    /// The zero-based lines with a breakpoint.
+    breakpoints: Vec<usize>,
+    /// The line the program is stopped on, in this document.
+    stopped: Option<usize>,
     /// Find matches to highlight, sorted (`find.rs`).
     matches: &'a [Range],
 }
@@ -431,6 +440,8 @@ pub(crate) fn show(
         view,
         rows: rows(ui, doc, &layout, view),
         markers,
+        breakpoints: workspace.breakpoints(document),
+        stopped: workspace.stopped_line(document),
         matches,
     };
     paint(ui, &screen);
@@ -545,6 +556,10 @@ fn pointer(
         return;
     };
     let offset = offset_at(ui, doc, layout, view, pos);
+    if layout.gutter.contains(pos) {
+        gutter_press(ui, workspace, document, layout, view, pos);
+        return;
+    }
     let press = ui.input(|input| {
         input.events.iter().find_map(|event| match event {
             egui::Event::PointerButton {
@@ -570,6 +585,43 @@ fn pointer(
             workspace.set_selections(document, vec![Selection::new(anchor, offset)], 0)
     {
         tracing::warn!(%err, "cannot place the caret");
+    }
+}
+
+/// A press on the gutter sets or clears a breakpoint, as a click on VS
+/// Code's glyph margin does, and does not move the caret.
+fn gutter_press(
+    ui: &Ui,
+    workspace: &mut Workspace,
+    document: DocumentId,
+    layout: &Layout,
+    view: &mut View,
+    pos: Pos2,
+) {
+    view.drag_anchor = None;
+    let pressed = ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                }
+            )
+        })
+    });
+    let below_top = pos.y - layout.origin(view).y;
+    let Some(doc) = workspace.document(document) else {
+        return;
+    };
+    if pressed && below_top >= 0.0 {
+        let line = view.top + whole_lines(below_top, layout.line_height);
+        if line < doc.line_count()
+            && let Err(err) = workspace.toggle_breakpoint(document, line)
+        {
+            tracing::warn!(%err, "cannot toggle the breakpoint");
+        }
     }
 }
 
@@ -773,6 +825,22 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
     if ui.memory(|memory| memory.has_focus(id())) {
         for caret in carets {
             text_painter.rect_filled(caret, 0.0, CARET);
+        }
+    }
+    for row in rows {
+        let color = if screen.stopped == Some(row.line) {
+            Some(STOPPED_ARROW)
+        } else if screen.breakpoints.contains(&row.line) {
+            Some(BREAKPOINT)
+        } else {
+            None
+        };
+        if let Some(color) = color {
+            let center = Pos2::new(
+                layout.gutter.left() + layout.char_width,
+                row.top + layout.line_height / 2.0,
+            );
+            gutter_painter.circle_filled(center, layout.line_height * 0.3, color);
         }
     }
     let active = doc.position_of(doc.primary_selection().head).line;

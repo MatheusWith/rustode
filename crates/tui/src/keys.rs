@@ -59,6 +59,10 @@ pub(crate) enum Command {
     FindPrevious,
     ToggleProblems,
     ChangeLanguage,
+    DebugStart,
+    DebugContinue,
+    DebugStop,
+    ToggleBreakpoint,
 }
 
 /// What a key does while the explorer has focus.
@@ -157,6 +161,10 @@ pub(crate) fn id_of(command: &Command) -> Option<&'static str> {
         Command::FindPrevious => "editor.action.previousMatchFindAction",
         Command::ToggleProblems => "workbench.actions.view.problems",
         Command::ChangeLanguage => "workbench.action.editor.changeLanguageMode",
+        Command::DebugStart => "workbench.action.debug.start",
+        Command::DebugContinue => "workbench.action.debug.continue",
+        Command::DebugStop => "workbench.action.debug.stop",
+        Command::ToggleBreakpoint => "editor.debug.action.toggleBreakpoint",
         Command::Undo => "undo",
         Command::Redo => "redo",
         Command::SelectAll => "editor.action.selectAll",
@@ -231,6 +239,10 @@ pub(crate) fn from_id(id: &str) -> Option<Command> {
         Command::FindPrevious,
         Command::ToggleProblems,
         Command::ChangeLanguage,
+        Command::DebugStart,
+        Command::DebugContinue,
+        Command::DebugStop,
+        Command::ToggleBreakpoint,
         Command::Undo,
         Command::Redo,
         Command::SelectAll,
@@ -348,7 +360,9 @@ pub(crate) fn command(key: KeyEvent) -> Option<Command> {
         KeyCode::Enter if plain => Some(Command::Enter),
         KeyCode::Tab if plain && !shift => Some(Command::Tab),
         KeyCode::Esc => Some(Command::Escape),
+        KeyCode::F(5) if shift => Some(Command::DebugStop),
         KeyCode::F(5) => Some(Command::Reload),
+        KeyCode::F(9) => Some(Command::ToggleBreakpoint),
         _ => None,
     }
 }

@@ -4,7 +4,7 @@
 //! to their problem. The server is `rustode-test-lsp`, which reports every
 //! `ERROR` and `WARN`. Going to a problem opens or activates its file's tab.
 
-use super::{press, status, type_text};
+use super::{press, quiet, status, type_text};
 use eframe::egui::{self, Key, Modifiers, ViewportId, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -80,7 +80,7 @@ fn open_with(name: &str, others: &[(&str, &str)]) -> Harness<'static, EditorApp>
             rustode_gui::fonts::install(&cc.egui_ctx);
             app
         });
-    harness.run();
+    quiet(&mut harness);
     // The window is idle now; the settings start the server.
     harness.state_mut().load_user_config(&base.join("user"));
     harness
@@ -104,7 +104,7 @@ fn wait(
             std::thread::sleep(Duration::from_millis(5));
         }
     }
-    harness.run();
+    quiet(harness);
     woken
 }
 
@@ -184,11 +184,11 @@ fn a_click_on_the_counts_toggles_the_panel_and_a_row_click_goes_to_it() {
     harness
         .get_by(|node| node.label().is_some_and(|l| l.starts_with("Errors")))
         .click();
-    harness.run();
+    quiet(&mut harness);
     harness
         .get_by(|node| node.label().is_some_and(|l| l.starts_with("Error: ERROR")))
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert!(
         status(&harness)
             .iter()
@@ -274,7 +274,7 @@ fn the_counts_drop_out_of_a_status_bar_too_narrow_for_them() {
         counts(h).is_some_and(|c| c.starts_with("Errors"))
     });
     harness.set_size(egui::Vec2::new(30.0, 360.0));
-    harness.run();
+    quiet(&mut harness);
     assert!(counts(&harness).is_none(), "{:?}", counts(&harness));
 }
 
@@ -286,6 +286,6 @@ fn find_highlights_squiggles_and_token_colors_are_drawn_together() {
     });
     press(&mut harness, Modifiers::COMMAND, Key::F);
     type_text(&mut harness, "ar");
-    harness.run();
+    quiet(&mut harness);
     harness.snapshot("lsp_find_squiggles");
 }

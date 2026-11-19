@@ -1,7 +1,9 @@
 //! The single in-process API that every frontend uses.
 
+mod child;
 mod commands;
 mod config;
+mod dap;
 mod document;
 mod explorer;
 pub mod extensions;
@@ -22,6 +24,10 @@ pub use config::{
 };
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
+pub use dap::{
+    CONTINUE_COMMAND, DebugError, DebugState, DebugStatus, LaunchConfiguration, START_COMMAND,
+    StopLocation,
+};
 pub use document::{Document, DocumentId, Highlight};
 pub use explorer::{Explorer, ExplorerRow};
 pub use extensions::{
@@ -84,6 +90,8 @@ pub enum Error {
     NoConflict(DocumentId),
     /// [`Workspace::set_language`] was given an id that is no language.
     UnknownLanguage(String),
+    /// A debug command was refused.
+    Debug(DebugError),
 }
 
 /// Something that happened in the workspace, for frontends to react to.
@@ -149,6 +157,9 @@ pub enum Event {
     /// Search results arrived, or the search ended
     /// ([`Workspace::poll_search`]).
     Search(SearchEvent),
+    /// The debug session started, stopped, continued or ended, or a
+    /// breakpoint was set or cleared ([`Workspace::debug_status`]).
+    DebugChanged,
     /// A hover arrived or went away ([`Workspace::hover`]).
     HoverChanged,
     /// The suggest list opened, changed or closed
@@ -170,6 +181,7 @@ impl fmt::Display for Error {
             ),
             Self::NoConflict(id) => write!(f, "{id:?} has no conflict to resolve"),
             Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
+            Self::Debug(err) => err.fmt(f),
         }
     }
 }
@@ -196,6 +208,8 @@ pub struct Workspace {
     extensions: extensions::Extensions,
     /// The language servers and their diagnostics.
     lsp: lsp::LanguageServers,
+    /// The debug session, its breakpoints and `launch.json`.
+    dap: dap::Debug,
     /// Search across the folder: the running search and its results.
     search: search::Searches,
     /// `files.associations`, read again whenever the settings load.
@@ -331,6 +345,7 @@ impl Workspace {
         })?;
         self.explorer = Some(explorer);
         self.files = None;
+        self.reload_launch_configurations();
         Ok(())
     }
 

@@ -1,11 +1,16 @@
-//! One language server process: its stdin fed by a writer thread, its stdout
-//! read by a reader thread into a channel, its stderr logged. The workspace
-//! never blocks on the server: it sends through a channel and drains the
-//! incoming one when a frontend polls. The reader calls the [`Waker`] after
-//! each message, so an idle frontend need not poll on a timer.
+//! One supervised child process that speaks `Content-Length`-framed JSON
+//! over stdio, shared by the language servers (LSP) and the debug adapters
+//! (DAP), which frame their messages the same way: its stdin fed by a
+//! writer thread, its stdout read by a reader thread into a channel, its
+//! stderr logged. The workspace never blocks on the child: it sends through
+//! a channel and drains the incoming one when a frontend polls. The reader
+//! calls the [`Waker`] after each message, so an idle frontend need not poll
+//! on a timer. What a message means, and how the child is asked to end, is
+//! the caller's: [`Process::shutdown`] is LSP's lifecycle, and
+//! [`Process::finish`] is the generic part of it.
 
-use super::rpc;
-use super::settings::ServerConfig;
+pub(crate) mod rpc;
+
 use rustode_trace::spans::{self, Direction};
 use serde_json::{Value, json};
 use std::fmt;
@@ -68,15 +73,16 @@ pub(crate) struct Process {
 }
 
 impl Process {
-    /// Starts `config`'s command in `root`.
+    /// Starts `command` with `args` in `root`.
     pub(crate) fn spawn(
-        config: &ServerConfig,
+        command: &str,
+        args: &[String],
         root: &Path,
         name: &str,
         waker: &Waker,
     ) -> io::Result<Self> {
-        let mut child = Command::new(&config.command)
-            .args(&config.args)
+        let mut child = Command::new(command)
+            .args(args)
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -88,15 +94,15 @@ impl Process {
         let stderr = child.stderr.take().ok_or_else(missing)?;
         let (outgoing, to_write) = mpsc::channel();
         let (received, incoming) = mpsc::channel();
-        spawn_thread(format!("lsp-{name}-writer"), move || {
+        spawn_thread(format!("child-{name}-writer"), move || {
             write_all(stdin, &to_write);
         })?;
         let waker = waker.clone();
-        spawn_thread(format!("lsp-{name}-reader"), move || {
+        spawn_thread(format!("child-{name}-reader"), move || {
             read_all(BufReader::new(stdout), &received, &waker);
         })?;
         let log_name = name.to_owned();
-        spawn_thread(format!("lsp-{name}-stderr"), move || {
+        spawn_thread(format!("child-{name}-stderr"), move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 tracing::debug!(server = %log_name, "{line}");
             }
@@ -111,10 +117,13 @@ impl Process {
 
     /// Sends a message, traced as a `child_message` span.
     pub(crate) fn send(&self, message: &Value) {
-        let method = message["method"].as_str().unwrap_or("response");
+        let method = ["method", "command", "event"]
+            .iter()
+            .find_map(|key| message[key].as_str())
+            .unwrap_or("response");
         let span = spans::child_message(&self.name, Direction::Outgoing, method);
         let _entered = span.enter();
-        tracing::trace!(%message, "to the server");
+        tracing::trace!(%message, "to the child");
         if let Some(outgoing) = &self.outgoing {
             let _ = outgoing.send(rpc::frame(message));
         }
@@ -136,20 +145,32 @@ impl Process {
     /// server that does not comply in time is killed.
     pub(crate) fn shutdown(mut self, request: i64) {
         self.send(&json!({"jsonrpc": "2.0", "id": request, "method": "shutdown"}));
+        self.wait_reply(|reply| reply["id"] == request);
+        self.send(&json!({"jsonrpc": "2.0", "method": "exit"}));
+        self.finish();
+    }
+
+    /// Waits up to a second for a message `is_reply` accepts, dropping the
+    /// others; gives up when the child's output ends.
+    pub(crate) fn wait_reply(&mut self, is_reply: impl Fn(&Value) -> bool) {
         let deadline = Instant::now() + SHUTDOWN_WAIT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.incoming.recv_timeout(left) {
-                Ok(Incoming::Message(reply)) if reply["id"] == request => break,
+                Ok(Incoming::Message(reply)) if is_reply(&reply) => break,
                 Ok(Incoming::Message(_)) => {}
                 Ok(Incoming::Closed)
                 | Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
             }
         }
-        self.send(&json!({"jsonrpc": "2.0", "method": "exit"}));
+    }
+
+    /// Closes the child's input and gives it a second to exit, then kills
+    /// it.
+    pub(crate) fn finish(mut self) {
         self.outgoing = None;
         let status = self.wait_until(Instant::now() + SHUTDOWN_WAIT);
-        tracing::debug!(server = %self.name, status = %describe(status), "stopped");
+        tracing::debug!(child = %self.name, status = %describe(status), "stopped");
     }
 
     /// Waits for the process until `deadline`, then kills it.

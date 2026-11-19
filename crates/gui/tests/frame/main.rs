@@ -7,6 +7,7 @@
 //! Snapshots live in `tests/snapshots/`. Regenerate them with
 //! `UPDATE_SNAPSHOTS=1 cargo nextest run -p rustode-gui`.
 
+mod debug;
 mod editor;
 mod extensions;
 mod find;
@@ -59,7 +60,7 @@ fn window(app: EditorApp, size: Vec2, pixels_per_point: f32) -> Harness<'static,
             rustode_gui::fonts::install(&cc.egui_ctx);
             app
         });
-    harness.run();
+    quiet(&mut harness);
     harness
 }
 
@@ -71,14 +72,32 @@ fn open_text(name: &str, text: &str) -> Harness<'static, EditorApp> {
     open(&fixture(name, "f.txt", text))
 }
 
+/// Steps the window until it asks for no more frames, at most 200 times.
+///
+/// `Harness::run` panics after four steps, but a background thread (the
+/// search worker, a language server) that answers while the window runs
+/// asks for a repaint through the workspace's waker, and on a slow machine
+/// that can outlast four steps. A window that is truly stuck repainting
+/// still fails here, after 200 steps.
+#[track_caller]
+fn quiet(harness: &mut Harness<'_, EditorApp>) {
+    for _ in 0..200 {
+        harness.step();
+        if !harness.ctx.has_requested_repaint() {
+            return;
+        }
+    }
+    panic!("the window is still asking for repaints after 200 steps");
+}
+
 fn type_text(harness: &mut Harness<'_, EditorApp>, text: &str) {
     harness.event(eframe::egui::Event::Text(text.to_owned()));
-    harness.run();
+    quiet(harness);
 }
 
 fn press(harness: &mut Harness<'_, EditorApp>, modifiers: Modifiers, key: Key) {
     harness.key_press_modifiers(modifiers, key);
-    harness.run();
+    quiet(harness);
 }
 
 /// The status bar items, in the order they are drawn.

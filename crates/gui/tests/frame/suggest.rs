@@ -6,7 +6,7 @@
 //! What is asked of the server, filtered and put in is tested at the
 //! workspace seam (`crates/workspace/tests/lsp.rs`).
 
-use super::{lsp, press, type_text};
+use super::{lsp, press, quiet, type_text};
 use eframe::egui::{Event, FontId, Key, Modifiers, Pos2, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -44,7 +44,7 @@ fn open(name: &str) -> Harness<'static, EditorApp> {
             rustode_gui::fonts::install(&cc.egui_ctx);
             app
         });
-    harness.run();
+    quiet(&mut harness);
     harness.state_mut().load_user_config(&base.join("user"));
     wait(&mut harness, |h| {
         h.state()
@@ -68,7 +68,7 @@ fn wait(harness: &mut Harness<'_, EditorApp>, done: impl Fn(&Harness<'_, EditorA
             std::thread::sleep(Duration::from_millis(5));
         }
     }
-    harness.run();
+    quiet(harness);
 }
 
 fn options(harness: &Harness<'_, EditorApp>) -> Vec<String> {
@@ -185,7 +185,7 @@ fn a_click_on_a_row_accepts_it() {
                 .is_some_and(|l| l.starts_with("print, function"))
         })
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert!(harness.query_by_role(Role::ListBox).is_none());
     assert!(text(&harness).contains("    print\n"), "{}", text(&harness));
 }

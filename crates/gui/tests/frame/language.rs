@@ -4,7 +4,7 @@
 //! Detection and the list are tested at the workspace seam
 //! (`crates/workspace/tests/languages.rs`).
 
-use super::{assert_status, fixture, open, press, status, type_text};
+use super::{assert_status, fixture, open, press, quiet, status, type_text};
 use eframe::egui::{Key, Modifiers, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -40,7 +40,7 @@ fn a_click_on_the_language_opens_the_picker_and_a_pick_highlights() {
     assert!(!picker_is_open(&harness));
 
     harness.get_by_value("Plain Text").click();
-    harness.run();
+    quiet(&mut harness);
     assert!(picker_is_open(&harness), "the picker is open");
     harness.get_by_role_and_label(Role::Button, "Rust (rust)");
     harness.snapshot("language_picker");
@@ -84,7 +84,7 @@ fn ctrl_k_then_m_opens_it_and_a_click_on_a_row_picks() {
     harness
         .get_by_role_and_label(Role::Button, "Markdown (markdown)")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert_status(&harness, "Markdown");
     assert!(!picker_is_open(&harness));
 }
@@ -93,14 +93,14 @@ fn ctrl_k_then_m_opens_it_and_a_click_on_a_row_picks() {
 fn escape_closes_the_picker_and_down_moves_the_selection() {
     let mut harness = window("lang-escape");
     harness.get_by_value("Plain Text").click();
-    harness.run();
+    quiet(&mut harness);
     assert!(picker_is_open(&harness));
     press(&mut harness, Modifiers::NONE, Key::Escape);
     assert!(!picker_is_open(&harness));
     assert_status(&harness, "Plain Text");
 
     harness.get_by_value("Plain Text").click();
-    harness.run();
+    quiet(&mut harness);
     type_text(&mut harness, "script");
     press(&mut harness, Modifiers::NONE, Key::ArrowDown);
     press(&mut harness, Modifiers::NONE, Key::Enter);

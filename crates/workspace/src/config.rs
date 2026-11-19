@@ -16,6 +16,7 @@ impl Workspace {
         let change = self.config.load(settings, keybindings);
         log_change(&self.config, &change);
         self.lsp_config_changed();
+        self.dap_config_changed();
         self.associations_changed();
         change
     }
@@ -34,6 +35,7 @@ impl Workspace {
         }
         if !change.settings.is_empty() {
             self.lsp_config_changed();
+            self.dap_config_changed();
             self.associations_changed();
         }
         change

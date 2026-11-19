@@ -424,6 +424,14 @@ impl EditorApp {
             Workbench::QuickOpen => self.open_quick(ctx, ""),
             Workbench::ShowCommands => self.open_quick(ctx, ">"),
             Workbench::GotoLine => self.open_quick(ctx, ":"),
+            Workbench::DebugKey => {
+                let id = self.workspace.debug_key_command();
+                self.run_command(ctx, id);
+            }
+            Workbench::DebugStop => self.run_command(ctx, "workbench.action.debug.stop"),
+            Workbench::ToggleBreakpoint => {
+                self.run_command(ctx, "editor.debug.action.toggleBreakpoint");
+            }
             Workbench::Find
             | Workbench::Replace
             | Workbench::FindNext
@@ -729,6 +737,7 @@ impl eframe::App for EditorApp {
         self.workspace.poll_external_changes();
         self.workspace.poll_extensions();
         self.workspace.poll_language_servers();
+        self.workspace.poll_debug();
         self.workspace.poll_search();
         self.note();
         let tab = focus::tab_pressed(&ctx);

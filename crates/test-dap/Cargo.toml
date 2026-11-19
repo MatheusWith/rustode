@@ -1,0 +1,19 @@
+[package]
+name = "rustode-test-dap"
+description = "A stdio debug adapter for rustode's tests; never shipped"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "rustode-test-dap"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
