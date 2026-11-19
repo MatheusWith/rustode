@@ -36,7 +36,8 @@ use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::quick_input::QuickInput;
 use crate::{
-    editor, explorer, extensions, find, focus, language, layout, problems, search, status, tabs,
+    editor, explorer, extensions, find, focus, language, layout, navigate, problems, search,
+    status, tabs,
 };
 use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, Sense, UiBuilder, Vec2, ViewportCommand,
@@ -108,6 +109,8 @@ pub struct EditorApp {
     confirm_quit: bool,
     /// The "Change Language Mode" picker.
     language: language::Picker,
+    /// The list of locations and the rename box.
+    navigator: navigate::Navigator,
 }
 
 fn file_name(document: &Document) -> String {
@@ -190,6 +193,7 @@ impl EditorApp {
             waker_set: false,
             search: search::Panel::default(),
             language: language::Picker::default(),
+            navigator: navigate::Navigator::default(),
             problems: problems::Panel::default(),
             focus_editor_next: false,
             quick: None,
@@ -264,6 +268,17 @@ impl EditorApp {
                     Some(format!("The file was moved to {}.", to.display()))
                 }
                 Event::Restored { .. } | Event::Reloaded { .. } => None,
+                Event::Notice(text) => Some(text),
+                Event::Navigated { id } => {
+                    self.views.entry(id).or_default().reveal();
+                    continue;
+                }
+                Event::LocationsChanged => {
+                    if let Some(text) = self.navigator.locations_changed(&self.workspace) {
+                        self.notice = Some(text);
+                    }
+                    continue;
+                }
                 Event::Extension(event) => match extension_notice(&event) {
                     Some(notice) => Some(notice),
                     None => continue,

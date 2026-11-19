@@ -5,7 +5,9 @@
 //! never waits for a server. A request that is superseded is cancelled with
 //! `$/cancelRequest` and forgotten: if its answer comes anyway, nobody is
 //! waiting for it and it is dropped. An answer for a document that changed
-//! since the request is dropped too.
+//! since the request is dropped too. The same goes for definitions,
+//! references, renames and formatting ([`Op`] remembers the document and its
+//! version).
 
 use super::encoding::PositionEncoding;
 use super::server::{Features, ServerId};
@@ -17,6 +19,23 @@ use serde_json::{Value, json};
 pub(crate) enum Kind {
     Hover,
     Completion,
+    Definition,
+    References,
+    Rename,
+    Format,
+}
+
+/// What an edit or navigation request was asked about: the document as it
+/// was, so an answer for a changed document is dropped, and the words the
+/// outcome is told in.
+#[derive(Debug, Clone)]
+pub(crate) struct Op {
+    pub document: DocumentId,
+    pub version: u64,
+    /// The word under the cursor (the old name of a rename).
+    pub word: String,
+    /// The new name of a rename.
+    pub name: String,
 }
 
 /// A request on its way: the server it went to and its id.
@@ -63,6 +82,7 @@ impl Workspace {
     /// is dropped when it comes.
     pub(super) fn lsp_cancel(&mut self, request: Request) {
         self.lsp.pending.remove(&request);
+        self.lsp.ops.remove(&request);
         if let Some(server) = self.lsp.server(request.0) {
             server.cancel(request.1);
         }
@@ -84,14 +104,25 @@ impl Workspace {
         );
         let _entered = span.enter();
         tracing::trace!(%message, "from the server");
-        let result = if message.get("error").is_some() {
+        let failure = message.get("error").map(|error| {
+            error["message"]
+                .as_str()
+                .unwrap_or("the language server failed")
+                .to_owned()
+        });
+        let result = if failure.is_some() {
             Value::Null
         } else {
             message["result"].clone()
         };
+        let request = (server, request);
         match kind {
-            Kind::Hover => self.hover_answered((server, request), &result),
-            Kind::Completion => self.completion_answered((server, request), &result),
+            Kind::Hover => self.hover_answered(request, &result),
+            Kind::Completion => self.completion_answered(request, &result),
+            Kind::Definition | Kind::References => {
+                self.locations_answered(request, kind, &result, failure);
+            }
+            Kind::Rename | Kind::Format => self.edits_answered(request, kind, &result, failure),
         }
         true
     }
@@ -100,6 +131,7 @@ impl Workspace {
     /// not answer.
     pub(super) fn lsp_forget_requests(&mut self, server: ServerId) {
         self.lsp.pending.retain(|(s, _), _| *s != server);
+        self.lsp.ops.retain(|(s, _), _| *s != server);
         if self
             .lsp
             .hover
@@ -120,6 +152,7 @@ impl Workspace {
     pub(super) fn lsp_forget_document(&mut self, id: DocumentId) {
         self.hide_hover_of(id);
         self.dismiss_completion_of(id);
+        self.lsp.ops.retain(|_, op| op.document != id);
     }
 
     /// After a document's text changed: its hover is out of date, and its

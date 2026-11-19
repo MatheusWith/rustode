@@ -1,0 +1,14 @@
+ main.rs │
+   1 fn helper() {}┌──────────────────────────────────────────────────────────────────────────────┐
+   2 fn main() {   │ helper                                                                       │
+   3     helper(); │ Press Enter to rename to 'helper', Escape to cancel                          │
+   4 }             └──────────────────────────────────────────────────────────────────────────────┘
+   5
+
+
+
+
+
+
+
+ E 0 W 0  main.rs                                                       Ln 3, Col 7  UTF-8  LF  rustode-test-lsp  Rust

@@ -21,6 +21,7 @@ impl App {
             text: String::new(),
             selected: 0,
             language: Some(id),
+            ..QuickInput::default()
         });
     }
 

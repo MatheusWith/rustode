@@ -8,7 +8,7 @@ use super::{EditorApp, QUIT_PROMPT, focus};
 use crate::keys::Workbench;
 use crate::layout::Areas;
 use crate::quick_input::{self, Accepted, Close, QuickInput};
-use crate::{editor, explorer, find};
+use crate::{editor, explorer, find, navigate};
 use eframe::egui::{self, Context, ViewportCommand};
 use rustode_workspace::Document;
 
@@ -109,6 +109,10 @@ impl EditorApp {
             self.run_workbench(ctx, command);
             return;
         }
+        if let Some(outcome) = self.navigator.run(&mut self.workspace, id) {
+            self.navigate_outcome(ctx, outcome);
+            return;
+        }
         match self.workspace.execute(id) {
             Ok(true) => self.reveal(),
             Ok(false) => self.message = Some(format!("{id} is not available in the GUI")),
@@ -127,6 +131,14 @@ impl EditorApp {
         }
         let outcome = find::show(ui, &mut self.workspace, &mut self.find, areas.editor);
         changed |= self.find_outcome(&ctx, outcome);
+        if ctx.memory(|memory| memory.has_focus(editor::id()))
+            && let Some(id) = navigate::keys(&ctx)
+        {
+            self.run_command(&ctx, id);
+        }
+        let outcome = self.navigator.show(&ctx, &mut self.workspace);
+        changed |= !matches!(outcome, navigate::Outcome::None);
+        self.navigate_outcome(&ctx, outcome);
         if let Some(quick) = self.quick.as_mut() {
             let place = quick_input::Place {
                 group: areas.tabs.union(areas.editor),
@@ -138,6 +150,20 @@ impl EditorApp {
             }
         }
         changed
+    }
+
+    /// What the location list or the rename box did.
+    fn navigate_outcome(&mut self, ctx: &Context, outcome: navigate::Outcome) {
+        match outcome {
+            navigate::Outcome::None => {}
+            navigate::Outcome::Closed => self.focus_editor(ctx),
+            navigate::Outcome::Picked(id) => {
+                self.views.entry(id).or_default().reveal();
+                self.focus_editor_next = true;
+                ctx.request_repaint();
+            }
+            navigate::Outcome::Message(message) => self.message = Some(message),
+        }
     }
 
     fn find_outcome(&mut self, ctx: &Context, outcome: find::Outcome) -> bool {

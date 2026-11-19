@@ -105,6 +105,7 @@ impl Schema {
     }
 
     /// The `editor.tab*`, `files.*` and `search.*` settings of [`Self::builtin`].
+    #[allow(clippy::too_many_lines)] // one table row per setting
     fn files_and_search() -> Self {
         let mut schema = Self::empty();
         let number = |minimum, maximum| SettingType::Number { minimum, maximum };

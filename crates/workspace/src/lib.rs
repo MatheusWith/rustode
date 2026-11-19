@@ -40,8 +40,9 @@ pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
 pub use languages::LanguagePick;
 pub use lsp::{
-    CompletionKind, CompletionList, CompletionMove, CompletionRow, Hover, Marker, MarkerSeverity,
-    Problem, ProblemCounts, ServerState, ServerStatus,
+    CompletionKind, CompletionList, CompletionMove, CompletionRow, Hover, Locations, LocationsKind,
+    Marker, MarkerSeverity, Problem, ProblemCounts, RenameTarget, ServerState, ServerStatus,
+    SymbolLocation,
 };
 pub use minimap::{MINIMAP_SETTING, MinimapRun};
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
@@ -165,6 +166,20 @@ pub enum Event {
     /// The suggest list opened, changed or closed
     /// ([`Workspace::completion_list`]).
     CompletionChanged,
+    /// A definition or references request found several places to pick from
+    /// ([`Workspace::locations`]), or the list closed.
+    LocationsChanged,
+    /// The selection moved to a place in another part of a document, in
+    /// another document or not: a definition or a picked location. The
+    /// frontend scrolls to it.
+    Navigated {
+        /// The document.
+        id: DocumentId,
+    },
+    /// Something a language request did or could not do, in a sentence for
+    /// the status bar: "No definition found for 'x'", what a rename changed,
+    /// why a format was refused.
+    Notice(String),
 }
 
 impl fmt::Display for Error {
