@@ -72,7 +72,7 @@ impl Position {
 /// All selections of an editor, sorted by position and never overlapping,
 /// plus which one is primary (the one a frontend scrolls to).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Selections {
+pub struct Selections {
     list: Vec<Selection>,
     primary: usize,
 }
@@ -84,6 +84,8 @@ impl Default for Selections {
 }
 
 impl Selections {
+    /// One selection, which is the primary.
+    #[must_use]
     pub fn single(selection: Selection) -> Self {
         Self {
             list: vec![selection],
@@ -93,6 +95,7 @@ impl Selections {
 
     /// Normalizes `list`: sorted, overlapping or coinciding selections merged.
     /// `primary` indexes `list` before sorting. `list` must not be empty.
+    #[must_use]
     pub fn from_list(list: Vec<Selection>, primary: usize) -> Self {
         let mut indexed: Vec<(Selection, bool)> = list
             .into_iter()
@@ -124,19 +127,26 @@ impl Selections {
         }
     }
 
+    /// The selections, sorted and never overlapping.
+    #[must_use]
     pub fn as_slice(&self) -> &[Selection] {
         &self.list
     }
 
+    /// The primary selection.
+    #[must_use]
     pub fn primary(&self) -> Selection {
         self.list[self.primary]
     }
 
+    /// Where the primary selection is in [`Selections::as_slice`].
+    #[must_use]
     pub fn primary_index(&self) -> usize {
         self.primary
     }
 
     /// Maps every offset through `f`, e.g. to follow an edit.
+    #[must_use]
     pub fn map(&self, f: impl Fn(usize) -> usize) -> Self {
         Self::from_list(self.list.iter().map(|s| s.map(&f)).collect(), self.primary)
     }

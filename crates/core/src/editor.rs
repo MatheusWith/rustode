@@ -124,6 +124,38 @@ pub struct Editor {
     /// Every change to the text since the last [`Editor::take_byte_edits`],
     /// once [`Editor::record_byte_edits`] turned the log on.
     byte_edits: Option<Vec<ByteEdit>>,
+    /// Every change to the text since the last [`Editor::take_char_edits`],
+    /// once [`Editor::record_char_edits`] turned the log on.
+    char_edits: Option<Vec<CharEdit>>,
+}
+
+/// One change to the text in chars: `removed` chars from `start` were
+/// replaced by `inserted` chars. A second view of the same text maps its own
+/// cursors through these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharEdit {
+    /// Where the change starts, in the old and the new text alike.
+    pub start: usize,
+    /// How many chars were replaced.
+    pub removed: usize,
+    /// How many chars replaced them.
+    pub inserted: usize,
+}
+
+impl CharEdit {
+    /// Where char `offset` of the old text sits in the new text. A point
+    /// before the change, or at its start, stays; one after it moves by the
+    /// change's size; one inside the replaced text lands at the start.
+    #[must_use]
+    pub fn map(self, offset: usize) -> usize {
+        if offset <= self.start {
+            offset
+        } else if offset >= self.start + self.removed {
+            offset - self.removed + self.inserted
+        } else {
+            self.start
+        }
+    }
 }
 
 impl Editor {
@@ -157,8 +189,35 @@ impl Editor {
             .map_or_else(Default::default, std::mem::take)
     }
 
-    /// Replaces `range` with `text`, logging the change if the log is on.
+    /// Starts logging every change to the text in chars (edits, undo and
+    /// redo alike), for other views of the text to follow with
+    /// [`Editor::take_char_edits`].
+    pub fn record_char_edits(&mut self) {
+        self.char_edits.get_or_insert_with(Vec::new);
+    }
+
+    /// Stops the char log and drops what it holds.
+    pub fn stop_char_edits(&mut self) {
+        self.char_edits = None;
+    }
+
+    /// The changes logged since the last call, oldest first; empty when the
+    /// log is off.
+    pub fn take_char_edits(&mut self) -> Vec<CharEdit> {
+        self.char_edits
+            .as_mut()
+            .map_or_else(Default::default, std::mem::take)
+    }
+
+    /// Replaces `range` with `text`, logging the change if a log is on.
     fn splice(&mut self, range: Range, text: &str) {
+        if let Some(log) = self.char_edits.as_mut() {
+            log.push(CharEdit {
+                start: range.start,
+                removed: range.end - range.start,
+                inserted: text.chars().count(),
+            });
+        }
         let edit = self.buffer.splice(range, text);
         if let Some(log) = self.byte_edits.as_mut() {
             log.push(edit);
@@ -175,6 +234,21 @@ impl Editor {
     #[must_use]
     pub fn primary(&self) -> Selection {
         self.selections.primary()
+    }
+
+    /// A copy of the selections with the primary one, to keep as a view's
+    /// own and give back with [`Editor::set_selection_set`].
+    #[must_use]
+    pub fn selection_set(&self) -> Selections {
+        self.selections.clone()
+    }
+
+    /// Replaces the selections with `set`, its offsets clamped to the text.
+    /// Ends the current undo step.
+    pub fn set_selection_set(&mut self, set: &Selections) {
+        let len = self.buffer.len_chars();
+        let clamped = set.map(|o| o.min(len));
+        self.select(clamped);
     }
 
     /// The primary cursor, as a char offset.
@@ -729,6 +803,47 @@ mod tests {
         assert_eq!(spans, [(4, 4, 5), (4, 5, 4), (4, 4, 5)]);
         assert_eq!((edits[0].new_end.line, edits[0].new_end.column), (1, 0));
         assert!(editor.take_byte_edits().is_empty(), "taken");
+    }
+
+    #[test]
+    fn the_char_edit_log_maps_offsets_through_edits_undo_and_redo() {
+        let mut editor = Editor::new("hello world");
+        editor.type_text("x");
+        assert!(editor.take_char_edits().is_empty(), "off by default");
+        editor.record_char_edits();
+        assert_eq!(editor.replace(Range::new(0, 5), "hi"), Ok(true));
+        assert!(editor.undo());
+        assert!(editor.redo());
+        let edits = editor.take_char_edits();
+        let spans: Vec<_> = edits
+            .iter()
+            .map(|e| (e.start, e.removed, e.inserted))
+            .collect();
+        assert_eq!(spans, [(0, 5, 2), (0, 2, 5), (0, 5, 2)]);
+        let edit = edits[0];
+        assert_eq!(
+            (edit.map(0), edit.map(3), edit.map(5), edit.map(8)),
+            (0, 0, 2, 5)
+        );
+        editor.stop_char_edits();
+        editor.type_text("y");
+        assert!(editor.take_char_edits().is_empty(), "stopped");
+    }
+
+    #[test]
+    fn a_selection_set_comes_back_clamped_to_the_text() {
+        let mut editor = Editor::new("abcdef");
+        editor
+            .set_selections(vec![Selection::new(1, 2), Selection::new(4, 5)], 1)
+            .expect("two");
+        let set = editor.selection_set();
+        editor.replace(Range::new(2, 6), "").expect("shrink");
+        editor.set_selection_set(&set);
+        assert_eq!(
+            editor.selections(),
+            [Selection::new(1, 2)].as_slice(),
+            "the clamped cursor touches the first selection"
+        );
     }
 
     #[test]
