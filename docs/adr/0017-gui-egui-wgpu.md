@@ -58,3 +58,10 @@ A frame costs the GUI only the visible lines, whatever the file size, and an idl
   - the find widget covers the editor's first lines, where VS Code adds space above line 1 while it is shown (`editor.find.addExtraSpaceOnTop`, on by default: `src/vs/editor/common/config/editorOptions.ts:1811`, `:1853`), and it has no Find in Selection or Preserve Case, no narrow layouts and no resizing;
   - the go-to-line prompts and the "No results" count with an empty find field follow VS Code, where the TUI words them its own way;
   - its buttons and the quick input's rows take clicks but not focus, and the fields keep Tab, the arrows and Escape, so keyboard users reach every action through its key.
+- The minimap (`crates/gui/src/minimap.rs`, data from `crates/workspace/src/minimap.rs`) makes its own choices:
+  - it draws the blocks VS Code draws with `editor.minimap.renderCharacters` off, not the glyphs it draws by default, and a full-width char is one column, not two;
+  - only `editor.minimap.enabled` is a setting; side, size, scale, `maxColumn` and `showSlider` are VS Code's defaults, fixed, and there is no selection, find-match or diagnostic mark, section header or fade of the slider;
+  - `editor.action.toggleMinimap` flips a session override of the setting, which a later edit of the setting replaces, because rustode does not write `settings.json` yet; the command is in the palette and has no default key, as in VS Code;
+  - there is no vertical scrollbar, so none of the width is kept for one, and VS Code's rule against the start line flickering between frames is not done;
+  - it is not in the AccessKit tree: it repeats what the editor already exposes;
+  - the blocks are a mesh cached per document version, language, lines drawn and size, so a frame without a change only moves and paints it, and the slider's 500 ms is one scheduled frame, not a timer loop (`crates/gui/tests/frame/minimap.rs`).

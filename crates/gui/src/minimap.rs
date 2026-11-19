@@ -173,7 +173,11 @@ impl Layout {
         };
         let slider_height = ((viewport_lines * ml * ppp).floor() / ppp).max(1.0 / ppp);
         let last = float(line_count.saturating_sub(1));
-        let scroll = scroll.clamp(0.0, last);
+        let scroll = if scroll.is_finite() {
+            scroll.clamp(0.0, last)
+        } else {
+            0.0
+        };
         let fit = count((height / ml + 1e-3).floor());
         let extra = (viewport_lines - 1.0).max(0.0);
         let (start, per_line, slider_top) = if float(fit) >= float(line_count) + extra {
@@ -231,7 +235,7 @@ pub(crate) struct State {
     drag: Option<Drag>,
     /// The scroll last frame, and when it last changed, for the slider.
     scroll: Option<f32>,
-    scrolled_at: f64,
+    scrolled_at: Option<f64>,
     cache: Option<Cache>,
 }
 
@@ -272,7 +276,7 @@ pub(crate) fn interact(
 ) -> Option<f32> {
     let ctx = ui.ctx();
     let had_focus = ctx.memory(|memory| memory.has_focus(crate::editor::id()));
-    let response = ui.interact(rect, id(), Sense::click_and_drag());
+    let response = ui.interact(rect, id(), Sense::CLICK | Sense::DRAG);
     let (pressed_at, latest, down) = ui.input(|input| {
         let pressed = input
             .pointer
@@ -411,18 +415,20 @@ fn paint_slider(ui: &Ui, paint: &Paint<'_>, state: &mut State, scroll: f32) {
         .scroll
         .is_some_and(|before| (before - scroll).abs() > 1e-4)
     {
-        state.scrolled_at = now;
+        state.scrolled_at = Some(now);
     }
     state.scroll = Some(scroll);
     let slider = slider_rect(*rect, layout);
     let pointer = ui.input(|input| input.pointer.hover_pos());
     let over = pointer.is_some_and(|pos| rect.contains(pos));
-    let remaining = state.scrolled_at + SLIDER_AFTER_SCROLL - now;
-    if remaining > 0.0 && state.scrolled_at > 0.0 {
+    let remaining = state
+        .scrolled_at
+        .map_or(0.0, |at| at + SLIDER_AFTER_SCROLL - now);
+    let scrolling = remaining > 0.0;
+    if scrolling {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_secs_f64(remaining));
     }
-    let scrolling = remaining > 0.0 && state.scrolled_at > 0.0;
     if layout.per_line <= 0.0 || !(over || state.drag.is_some() || scrolling) {
         return;
     }
@@ -475,10 +481,8 @@ mod tests {
         let at = |ppp| Metrics::new(ppp, 8.0, 800.0).expect("fits");
         assert_eq!(at(1.0).line_height, 2.0);
         assert!((at(1.25).line_height - 1.6).abs() < 1e-5, "2 px at 1.25");
-        assert!(
-            (at(1.5).line_height - 2.0 / 1.5 * 2.0).abs() < 1e-5,
-            "scale 2"
-        );
+        assert!((at(1.5).line_height - 2.0 / 1.5).abs() < 1e-5, "scale 1");
+        assert!((at(1.9).line_height - 4.0 / 1.9).abs() < 1e-5, "scale 2");
         assert!(
             (at(2.0).line_height - 2.0).abs() < 1e-5,
             "scale 2 at ratio 2"
@@ -547,7 +551,7 @@ mod tests {
         );
         assert_eq!(layout.centering(20), 15.5, "10 lines in view: 5 above");
         assert_eq!(layout.centering(1), 0.0, "never above the top");
-        assert_eq!(layout.centering(49), 49.0, "never past the last line");
+        assert_eq!(layout.centering(49), 44.5, "the last line in the middle");
         assert_eq!(layout.dragged(4.0, 20.0), Some(14.0), "2 points a line");
         assert_eq!(layout.dragged(4.0, -1000.0), Some(0.0));
         let single = Layout::new(metrics(), inputs(1, 0.0));
@@ -558,7 +562,7 @@ mod tests {
 
     #[test]
     fn blocks_are_halfway_to_the_background_and_tile_on_pixels() {
-        assert_eq!(block_color(None), Color32::from_rgb(0x95, 0x95, 0x95));
+        assert_eq!(block_color(None), Color32::from_rgb(0x75, 0x75, 0x75));
         let runs = vec![
             vec![MinimapRun {
                 column: 1,

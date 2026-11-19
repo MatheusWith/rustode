@@ -37,6 +37,10 @@
 //!   box of files, commands from the workspace's registry, or a line
 //!   (`quick_input.rs`). Ctrl+F and Ctrl+H open the find widget at the
 //!   editor's top right, with every match in view highlighted (`find.rs`).
+//! - **Minimap** at the editor's right edge: colored blocks for the whole
+//!   document, a slider over the lines in view, a press or a drag of the
+//!   slider to scroll; `editor.minimap.enabled` and the palette's
+//!   "Toggle Minimap" show or hide it (`minimap.rs`).
 //! - **Change Language Mode** from a click on the status bar's language or
 //!   Ctrl+K M: a list picker over the editor (`language.rs`).
 //!
