@@ -3536,6 +3536,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustode-test-dap"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "rustode-test-lsp"
 version = "0.1.0"
 dependencies = [
