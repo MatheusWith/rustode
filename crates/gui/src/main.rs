@@ -69,6 +69,10 @@ fn open(paths: &[PathBuf]) -> ExitCode {
         }
     };
     app.load_user_config(&user_dir());
+    // The user's own settings are loaded, so a built-in server starts only
+    // for a language they leave alone.
+    app.workspace_mut()
+        .use_default_language_servers(&std::env::var_os("PATH").unwrap_or_default());
     match rustode_gui::run(app) {
         Ok(latency) => {
             if let Some(report) = latency {

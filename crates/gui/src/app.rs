@@ -224,6 +224,12 @@ impl EditorApp {
         &self.workspace
     }
 
+    /// The workspace holding the documents, for the settings made once at
+    /// startup (the extension folders, the built-in language servers).
+    pub fn workspace_mut(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+
     /// The window title: `● ` while the active document has unsaved
     /// changes, then its file name, the folder's name and the app name.
     #[must_use]
