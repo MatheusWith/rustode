@@ -402,6 +402,18 @@ impl Workspace {
             "workbench.action.nextEditor" => self.next_tab(),
             "workbench.action.previousEditor" => self.previous_tab(),
             "editor.action.toggleMinimap" => drop(self.toggle_minimap()),
+            "workbench.action.debug.start" => {
+                return self.start_debugging().map(|()| true).map_err(Error::Debug);
+            }
+            "workbench.action.debug.continue" => {
+                return self
+                    .continue_debugging()
+                    .map(|()| true)
+                    .map_err(Error::Debug);
+            }
+            "workbench.action.debug.stop" => {
+                return self.stop_debugging().map(|()| true).map_err(Error::Debug);
+            }
             _ => {
                 let Some(document) = self.active_document() else {
                     return Ok(false);
