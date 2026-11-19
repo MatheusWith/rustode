@@ -60,6 +60,7 @@ mod extensions;
 mod find;
 mod focus;
 pub mod fonts;
+mod groups;
 mod input;
 mod keys;
 mod language;

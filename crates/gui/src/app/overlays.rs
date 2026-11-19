@@ -5,6 +5,7 @@
 //! window runs itself), and showing both above the workbench.
 
 use super::{EditorApp, QUIT_PROMPT, focus};
+use crate::groups;
 use crate::keys::Workbench;
 use crate::layout::Areas;
 use crate::quick_input::{self, Accepted, Close, QuickInput};
@@ -35,17 +36,19 @@ impl EditorApp {
     /// Scrolls the active editor to its caret on the next frame.
     pub(super) fn reveal(&mut self) {
         if let Some(id) = self.workspace.active_document() {
-            self.views.entry(id).or_default().reveal();
+            self.view_of(id).reveal();
         }
     }
 
     /// Ctrl+Q: closes the window; with unsaved changes, only when asked twice.
     pub(super) fn quit(&mut self, ctx: &Context) {
-        let dirty = self
-            .workspace
-            .tabs()
-            .iter()
-            .any(|&id| self.workspace.document(id).is_some_and(Document::is_dirty));
+        let dirty = self.workspace.group_ids().into_iter().any(|group| {
+            self.workspace.group_by_id(group).is_some_and(|g| {
+                g.tabs()
+                    .iter()
+                    .any(|&id| self.workspace.document(id).is_some_and(Document::is_dirty))
+            })
+        });
         if dirty && !self.confirm_quit {
             self.confirm_quit = true;
             self.message = Some(QUIT_PROMPT.to_owned());
@@ -109,6 +112,10 @@ impl EditorApp {
             self.run_workbench(ctx, command);
             return;
         }
+        if groups::is_group_command(id) {
+            self.run_group_command(ctx, id);
+            return;
+        }
         if let Some(outcome) = self.navigator.run(&mut self.workspace, id) {
             self.navigate_outcome(ctx, outcome);
             return;
@@ -158,7 +165,7 @@ impl EditorApp {
             navigate::Outcome::None => {}
             navigate::Outcome::Closed => self.focus_editor(ctx),
             navigate::Outcome::Picked(id) => {
-                self.views.entry(id).or_default().reveal();
+                self.view_of(id).reveal();
                 self.focus_editor_next = true;
                 ctx.request_repaint();
             }

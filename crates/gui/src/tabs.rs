@@ -38,7 +38,7 @@ use eframe::egui::{
     Color32, EventFilter, FontId, Id, Key, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
     accesskit, pos2,
 };
-use rustode_workspace::{DocumentId, Workspace};
+use rustode_workspace::{DocumentId, EditorGroup, GroupId, Workspace};
 
 /// Height of the tab strip, in points.
 pub const TAB_HEIGHT: f32 = 35.0;
@@ -55,6 +55,11 @@ const ACTIVE_BACKGROUND: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
 const ACTIVE_FOREGROUND: Color32 = Color32::from_rgb(0xff, 0xff, 0xff);
 const INACTIVE_FOREGROUND: Color32 = Color32::from_rgb(0x9d, 0x9d, 0x9d);
 const ACTIVE_BORDER_TOP: Color32 = Color32::from_rgb(0x00, 0x78, 0xd4);
+/// `tab.unfocusedActiveBorderTop` (`dark_modern.json:114`).
+const UNFOCUSED_BORDER_TOP: Color32 = Color32::from_rgb(0x2b, 0x2b, 0x2b);
+/// `tab.unfocusedActiveForeground`: the active foreground at half opacity,
+/// blended over the active background.
+const UNFOCUSED_FOREGROUND: Color32 = Color32::from_rgb(0x8f, 0x8f, 0x8f);
 
 /// What a tab says to screen readers when its file has unsaved changes.
 pub(crate) const UNSAVED: &str = "Unsaved changes";
@@ -81,11 +86,23 @@ struct Tab {
     name: String,
     dirty: bool,
     active: bool,
+    /// Whether the tab's group lacks the focus: its active tab is dimmed.
+    unfocused: bool,
     width: f32,
 }
 
-/// Draws the strip over the whole of `ui` and returns what a click asked.
-pub(crate) fn show(ui: &mut Ui, workspace: &Workspace, strip: &mut Strip) -> Option<Action> {
+/// Draws the strip of `group` over the whole of `ui` and returns what a
+/// click asked. The active group's strip is the interactive one (it takes
+/// focus and the keys); another group's strip only draws and takes clicks,
+/// with ids of its own so a document shown twice has two sets of tabs.
+pub(crate) fn show(
+    ui: &mut Ui,
+    workspace: &Workspace,
+    group: GroupId,
+    strip: &mut Strip,
+) -> Option<Action> {
+    let focused = workspace.active_group() == group;
+    let salt = (!focused).then_some(group);
     let rect = ui.max_rect();
     // Tabs scrolled out of the strip neither draw nor take clicks.
     ui.shrink_clip_rect(rect);
@@ -96,7 +113,7 @@ pub(crate) fn show(ui: &mut Ui, workspace: &Workspace, strip: &mut Strip) -> Opt
         rect.bottom() - 0.5,
         Stroke::new(focus::hairline(ui.pixels_per_point()), BORDER),
     );
-    let tabs = measure(ui, workspace);
+    let tabs = measure(ui, workspace, group);
     strip.reveal(&tabs, rect.width());
     ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
         node.set_role(accesskit::Role::TabList);
@@ -107,11 +124,11 @@ pub(crate) fn show(ui: &mut Ui, workspace: &Workspace, strip: &mut Strip) -> Opt
     for tab in &tabs {
         let place = Rect::from_min_size(pos2(x, rect.top()), Vec2::new(tab.width, TAB_HEIGHT));
         x += tab.width;
-        if let Some(clicked) = show_tab(ui, tab, place) {
+        if let Some(clicked) = show_tab(ui, tab, place, salt) {
             action = Some(clicked);
         }
     }
-    if ui.memory(|memory| memory.has_focus(tab_id_of(workspace.active_document()))) {
+    if focused && ui.memory(|memory| memory.has_focus(tab_id_of(workspace.active_document()))) {
         action = keyboard(ui, &tabs).or(action);
     }
     action
@@ -162,10 +179,11 @@ fn font() -> FontId {
     FontId::proportional(LABEL_SIZE)
 }
 
-fn measure(ui: &Ui, workspace: &Workspace) -> Vec<Tab> {
-    let active = workspace.active_document();
-    workspace
-        .tabs()
+fn measure(ui: &Ui, workspace: &Workspace, group: GroupId) -> Vec<Tab> {
+    let shown = workspace.group_by_id(group);
+    let active = shown.and_then(EditorGroup::active);
+    shown
+        .map_or(&[][..], EditorGroup::tabs)
         .iter()
         .filter_map(|&id| workspace.document(id).map(|doc| (id, doc)))
         .map(|(id, doc)| {
@@ -183,6 +201,7 @@ fn measure(ui: &Ui, workspace: &Workspace) -> Vec<Tab> {
                 name,
                 dirty: doc.is_dirty(),
                 active: Some(id) == active,
+                unfocused: workspace.active_group() != group,
                 width: (PADDING + label + ACTIONS).ceil().max(MIN_WIDTH),
             }
         })
@@ -221,10 +240,11 @@ fn tab_id_of(id: Option<DocumentId>) -> Id {
 }
 
 /// Draws one tab and its close button, exposes them, and returns a click.
-/// Only the active tab and its close button take focus.
-fn show_tab(ui: &mut Ui, tab: &Tab, place: Rect) -> Option<Action> {
-    let id = tab_id(tab.id);
-    let sense = if tab.active {
+/// Only the active tab and its close button take focus. `salt` is the
+/// group of a strip that is not the active one.
+fn show_tab(ui: &mut Ui, tab: &Tab, place: Rect, salt: Option<GroupId>) -> Option<Action> {
+    let id = salt.map_or_else(|| tab_id(tab.id), |g| Id::new(("rustode-tab", g, tab.id)));
+    let sense = if tab.active && salt.is_none() {
         Sense::click()
     } else {
         Sense::CLICK
@@ -243,7 +263,10 @@ fn show_tab(ui: &mut Ui, tab: &Tab, place: Rect) -> Option<Action> {
         pos2(place.right() - ACTIONS, place.top()),
         Vec2::new(ACTIONS, TAB_HEIGHT),
     );
-    let close_id = Id::new(("rustode-tab-close", tab.id));
+    let close_id = salt.map_or_else(
+        || Id::new(("rustode-tab-close", tab.id)),
+        |g| Id::new(("rustode-tab-close", g, tab.id)),
+    );
     let close = ui
         .scope_builder(
             UiBuilder::new()
@@ -293,7 +316,9 @@ fn expose(ui: &Ui, id: Id, rect: Rect, fill: impl FnOnce(&mut accesskit::Node)) 
 
 fn paint(ui: &Ui, tab: &Tab, place: Rect, hovered: bool, close_hovered: bool) {
     let painter = ui.painter_at(ui.clip_rect().intersect(place));
-    let (background, foreground) = if tab.active {
+    let (background, foreground) = if tab.active && tab.unfocused {
+        (ACTIVE_BACKGROUND, UNFOCUSED_FOREGROUND)
+    } else if tab.active {
         (ACTIVE_BACKGROUND, ACTIVE_FOREGROUND)
     } else {
         (STRIP, INACTIVE_FOREGROUND)
@@ -304,7 +329,14 @@ fn paint(ui: &Ui, tab: &Tab, place: Rect, hovered: bool, close_hovered: bool) {
         painter.hline(
             place.x_range(),
             place.top() + 0.5,
-            Stroke::new(hairline, ACTIVE_BORDER_TOP),
+            Stroke::new(
+                hairline,
+                if tab.unfocused {
+                    UNFOCUSED_BORDER_TOP
+                } else {
+                    ACTIVE_BORDER_TOP
+                },
+            ),
         );
     } else {
         painter.hline(

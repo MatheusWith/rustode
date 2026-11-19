@@ -219,6 +219,9 @@ pub(crate) enum Workbench {
     FocusConsole,
     /// "Debug: Remove Watch Expression".
     RemoveWatch,
+    /// An editor group command, by VS Code id: Ctrl+\\ splits, Ctrl+1 to
+    /// Ctrl+3 focus a group, Ctrl+Alt+Left and Right move the editor.
+    Group(&'static str),
 }
 
 impl Workbench {
@@ -269,6 +272,9 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         return None;
     };
     let ctrl = modifiers.command || modifiers.ctrl;
+    if let Some(id) = crate::groups::key_command(*key, ctrl, modifiers.shift, modifiers.alt) {
+        return Some(Workbench::Group(id));
+    }
     Some(match (key, ctrl, modifiers.shift, modifiers.alt) {
         (Key::S, true, false, false) => Workbench::Save,
         (Key::PageDown, true, false, false) => Workbench::NextTab,
