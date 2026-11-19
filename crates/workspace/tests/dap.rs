@@ -238,13 +238,13 @@ fn start_without_a_folder_is_refused() {
 }
 
 #[test]
-fn attach_requests_are_not_supported_yet() {
-    let f = Fixture::new("attach");
-    f.launch_json(r#"{"configurations": [{"name": "A", "type": "test", "request": "attach"}]}"#);
+fn requests_other_than_launch_and_attach_are_refused() {
+    let f = Fixture::new("other-request");
+    f.launch_json(r#"{"configurations": [{"name": "A", "type": "test", "request": "restart"}]}"#);
     let mut ws = f.workspace(&[]);
     assert_eq!(
         ws.start_debugging(),
-        Err(DebugError::UnsupportedRequest("attach".to_owned()))
+        Err(DebugError::UnsupportedRequest("restart".to_owned()))
     );
 }
 
@@ -1199,4 +1199,572 @@ fn invalid_adapter_entries_are_reported_and_the_valid_ones_still_work() {
         Err(DebugError::NoAdapter("test".to_owned()))
     );
     assert!(ws.config().diagnostics().count() > 0);
+}
+
+// ---- ticket 39: conditional breakpoints, hit counts, logpoints, real adapters ----
+
+use rustode_workspace::{BreakpointInput, BreakpointKind, BreakpointSpec};
+
+/// A loop that runs its body five times; `i` is 1 on the first.
+const LOOP: &str = "loop 5\ninc i\nprint tick\nend\nprint done\n";
+
+fn spec(condition: &str, hit: &str, log: &str) -> BreakpointSpec {
+    let some = |t: &str| (!t.is_empty()).then(|| t.to_owned());
+    BreakpointSpec {
+        condition: some(condition),
+        hit_condition: some(hit),
+        log_message: some(log),
+    }
+}
+
+/// Starts the loop program with `spec` on its `print tick` line (index 2) and
+/// waits for the first stop, if there is one.
+fn loop_with(f: &Fixture, args: &[&str], spec: BreakpointSpec) -> (Workspace, DocumentId) {
+    f.simple_launch();
+    let mut ws = f.workspace(args);
+    let id = ws.open(&f.program(LOOP)).expect("open");
+    ws.set_breakpoint(id, 2, spec).expect("set");
+    ws.start_debugging().expect("start");
+    (ws, id)
+}
+
+/// The value of the local `name` in the stopped frame.
+fn local(ws: &Workspace, name: &str) -> Option<String> {
+    ws.debug_rows(DebugTree::Variables)
+        .into_iter()
+        .find(|r| r.name.trim() == name)
+        .map(|r| r.value)
+}
+
+fn wait_local(ws: &mut Workspace, name: &str, value: &str) {
+    wait(ws, "the local", |ws| {
+        stopped(ws) && local(ws, name).as_deref() == Some(value)
+    });
+}
+
+#[test]
+fn a_conditional_breakpoint_stops_only_when_its_condition_holds() {
+    let f = Fixture::new("condition");
+    let (mut ws, id) = loop_with(&f, &[], spec("i == 3", "", ""));
+    wait_local(&mut ws, "i", "3");
+    assert_eq!(ws.stopped_line(id), Some(2));
+    assert_eq!(ws.debug_status().reason.as_deref(), Some("breakpoint"));
+    let sent = f
+        .log()
+        .into_iter()
+        .find(|m| m["command"] == "setBreakpoints")
+        .expect("breakpoints");
+    assert_eq!(sent["arguments"]["breakpoints"][0]["condition"], "i == 3");
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the end", ended);
+    assert_eq!(
+        ws.debug_status().message.as_deref(),
+        Some("the program exited with code 0"),
+        "it did not stop again"
+    );
+}
+
+#[test]
+fn a_hit_count_breakpoint_stops_on_the_nth_hit_and_after() {
+    let f = Fixture::new("hit-count");
+    let (mut ws, _id) = loop_with(&f, &[], spec("", "> 3", ""));
+    wait_local(&mut ws, "i", "4");
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the next stop", |ws| {
+        stopped(ws) && local(ws, "i").as_deref() == Some("5")
+    });
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the end", ended);
+    let sent = f
+        .log()
+        .into_iter()
+        .find(|m| m["command"] == "setBreakpoints")
+        .expect("breakpoints");
+    assert_eq!(sent["arguments"]["breakpoints"][0]["hitCondition"], "> 3");
+}
+
+#[test]
+fn a_condition_and_a_hit_count_count_only_the_hits_where_the_condition_holds() {
+    let f = Fixture::new("both");
+    // Hits where i > 1 are i = 2, 3, 4, 5; the second of them is i = 3.
+    let (mut ws, _id) = loop_with(&f, &[], spec("i > 1", "2", ""));
+    wait_local(&mut ws, "i", "3");
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn a_logpoint_prints_its_message_and_never_stops() {
+    let f = Fixture::new("logpoint");
+    let (mut ws, id) = loop_with(&f, &[], spec("", "", "tick {i}"));
+    wait(&mut ws, "the end", ended);
+    let console: Vec<String> = ws
+        .debug_console()
+        .iter()
+        .filter(|l| l.text.starts_with("tick "))
+        .map(|l| l.text.clone())
+        .collect();
+    assert_eq!(console, ["tick 1", "tick 2", "tick 3", "tick 4", "tick 5"]);
+    assert_eq!(ws.stopped_line(id), None);
+    assert_eq!(
+        ws.breakpoint_at(id, 2).expect("kept").kind,
+        BreakpointKind::LogPoint
+    );
+}
+
+#[test]
+fn an_adapter_without_the_capability_gets_a_plain_breakpoint_and_it_shows_unverified() {
+    let f = Fixture::new("unsupported");
+    f.simple_launch();
+    let mut ws = f.workspace(&["--no-conditions", "--no-hit-conditions", "--no-logpoints"]);
+    let id = ws.open(&f.program(LOOP)).expect("open");
+    ws.set_breakpoint(id, 2, spec("i == 3", "", ""))
+        .expect("condition");
+    ws.set_breakpoint(id, 1, spec("", "2", ""))
+        .expect("hit count");
+    ws.set_breakpoint(id, 0, spec("", "", "hello"))
+        .expect("log");
+    // Before a session every breakpoint looks fine.
+    assert!(ws.breakpoint_details(id).iter().all(|b| b.verified));
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the first stop", stopped);
+    let details = ws.breakpoint_details(id);
+    assert!(details.iter().all(|b| !b.verified), "{details:?}");
+    let reasons: Vec<&str> = details
+        .iter()
+        .map(|b| b.message.as_deref().expect("a reason"))
+        .collect();
+    assert!(reasons[0].contains("logpoints"), "{reasons:?}");
+    assert!(reasons[1].contains("hit count"), "{reasons:?}");
+    assert!(reasons[2].contains("conditional"), "{reasons:?}");
+    // The kinds are kept, so the gutter can still tell them apart.
+    let kinds: Vec<BreakpointKind> = details.iter().map(|b| b.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            BreakpointKind::LogPoint,
+            BreakpointKind::HitCount,
+            BreakpointKind::Condition
+        ]
+    );
+    // None of the texts was sent, so each one stopped as a plain breakpoint.
+    for message in f.log().iter().filter(|m| m["command"] == "setBreakpoints") {
+        for bp in message["arguments"]["breakpoints"]
+            .as_array()
+            .expect("list")
+        {
+            assert_eq!(bp.as_object().expect("object").len(), 1, "{bp}");
+        }
+    }
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+    assert!(
+        ws.breakpoint_details(id).iter().all(|b| b.verified),
+        "the state belongs to the session"
+    );
+}
+
+#[test]
+fn verification_comes_from_the_response_and_from_breakpoint_events() {
+    let f = Fixture::new("verify");
+    f.simple_launch();
+    let mut ws = f.workspace(&["--late-verify"]);
+    let id = ws.open(&f.program("WAIT\nprint done\n")).expect("open");
+    assert!(ws.toggle_breakpoint(id, 1).expect("code"));
+    assert!(ws.toggle_breakpoint(id, 40).expect("past the end"));
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the answer", |ws| {
+        ws.breakpoint_at(id, 1).is_some_and(|b| !b.verified)
+    });
+    assert_eq!(
+        ws.breakpoint_at(id, 1).and_then(|b| b.message).as_deref(),
+        Some("waiting for the program")
+    );
+    // The adapter verifies the ones with code when asked (`!verify`).
+    ws.evaluate_in_console("!verify").expect("evaluate");
+    wait(&mut ws, "the event", |ws| {
+        ws.breakpoint_at(id, 1).is_some_and(|b| b.verified)
+    });
+    assert!(!ws.breakpoint_at(id, 40).expect("kept").verified);
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+
+    // Without the option the response itself says which one has no code.
+    let f = Fixture::new("verify-response");
+    f.simple_launch();
+    let mut ws = f.workspace(&[]);
+    let id = ws.open(&f.program(LOOP)).expect("open");
+    ws.toggle_breakpoint(id, 2).expect("code");
+    ws.toggle_breakpoint(id, 40).expect("past the end");
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the answer", |ws| {
+        ws.breakpoint_at(id, 40).is_some_and(|b| !b.verified)
+    });
+    assert_eq!(
+        ws.breakpoint_at(id, 40).and_then(|b| b.message).as_deref(),
+        Some("no code on this line")
+    );
+    assert!(ws.breakpoint_at(id, 2).expect("code").verified);
+}
+
+#[test]
+fn editing_a_breakpoint_while_running_sends_the_file_again_and_keeps_the_other_texts() {
+    let f = Fixture::new("edit");
+    let (mut ws, id) = loop_with(&f, &[], spec("i == 5", "", ""));
+    wait_local(&mut ws, "i", "5");
+
+    let mut draft = ws.begin_breakpoint_edit(id, 2, None).expect("draft");
+    assert_eq!(draft.input, BreakpointInput::Expression);
+    assert_eq!(draft.text(), "i == 5");
+    draft.next_input();
+    assert_eq!(draft.input, BreakpointInput::HitCount);
+    assert_eq!(draft.text(), "");
+    draft.set_text(" 2 ");
+    draft.next_input();
+    draft.set_text("hit {i}");
+    draft.next_input();
+    assert_eq!(
+        draft.input,
+        BreakpointInput::Expression,
+        "three choices in a ring"
+    );
+    ws.finish_breakpoint_edit(&draft).expect("apply");
+    let info = ws.breakpoint_at(id, 2).expect("still there");
+    assert_eq!(info.spec.condition.as_deref(), Some("i == 5"));
+    assert_eq!(info.spec.hit_condition.as_deref(), Some("2"), "trimmed");
+    assert_eq!(info.spec.log_message.as_deref(), Some("hit {i}"));
+    assert_eq!(info.kind, BreakpointKind::LogPoint);
+    let sends = eventually(&f, "the second send", |log| {
+        let sends = log
+            .iter()
+            .filter(|m| m["command"] == "setBreakpoints")
+            .count();
+        (sends >= 2).then_some(sends)
+    });
+    assert_eq!(sends, 2, "once at the start, once for the edit");
+
+    // The editor on the edited line shows the breakpoint's own kind.
+    assert_eq!(
+        ws.begin_breakpoint_edit(id, 2, None).expect("draft").input,
+        BreakpointInput::LogMessage
+    );
+    ws.set_breakpoint(id, 2, spec("", "", "")).expect("plain");
+    assert_eq!(
+        ws.breakpoint_at(id, 2).expect("plain").kind,
+        BreakpointKind::Plain
+    );
+    assert!(
+        !ws.toggle_breakpoint(id, 2).expect("clear"),
+        "toggle removes any kind"
+    );
+    assert!(ws.breakpoint_at(id, 2).is_none());
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn breakpoint_texts_are_checked_and_hostile_ones_are_refused_or_cut() {
+    let f = Fixture::new("hostile-text");
+    let mut ws = f.workspace(&[]);
+    let id = ws.open(&f.program(LOOP)).expect("open");
+    for bad in ["a\nb", "a\rb", "a\0b"] {
+        assert!(
+            ws.set_breakpoint(id, 0, spec(bad, "", "")).is_err(),
+            "{bad:?}"
+        );
+    }
+    assert!(ws.breakpoint_at(id, 0).is_none(), "refused means unchanged");
+    ws.set_breakpoint(id, 0, spec(&"x".repeat(100_000), "", ""))
+        .expect("long ones are cut");
+    let kept = ws
+        .breakpoint_at(id, 0)
+        .expect("set")
+        .spec
+        .condition
+        .expect("text");
+    assert_eq!(kept.chars().count(), rustode_workspace::MAX_BREAKPOINT_TEXT);
+    ws.set_breakpoint(id, 0, spec("   ", "", ""))
+        .expect("blank is none");
+    assert_eq!(
+        ws.breakpoint_at(id, 0).expect("set").kind,
+        BreakpointKind::Plain
+    );
+    assert!(
+        ws.begin_breakpoint_edit(id, 3, None).is_err(),
+        "nothing to edit"
+    );
+    assert!(
+        ws.begin_breakpoint_edit(id, 3, Some(BreakpointInput::Expression))
+            .is_ok()
+    );
+    // A nonsense condition is the adapter's to judge: it stops with a message.
+    f.simple_launch();
+    ws.set_breakpoint(id, 2, spec("nope ==== 1", "", ""))
+        .expect("set");
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", stopped);
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn the_breakpoint_editor_commands_are_registered_with_vs_codes_ids() {
+    for (id, label) in [
+        (
+            "editor.debug.action.conditionalBreakpoint",
+            "Debug: Add Conditional Breakpoint...",
+        ),
+        ("editor.debug.action.addLogPoint", "Debug: Add Logpoint..."),
+        (
+            "editor.debug.action.editBreakpoint",
+            "Debug: Edit Breakpoint",
+        ),
+    ] {
+        let info = rustode_workspace::COMMANDS
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap_or_else(|| panic!("{id} is registered"));
+        assert_eq!(info.label, label);
+    }
+}
+
+// ---- compatibility with real adapters ----
+
+/// A `launch.json` with an `attach` configuration.
+fn attach_launch(f: &Fixture) {
+    f.launch_json(
+        r#"{"configurations": [{"name": "Attach", "type": "test", "request": "attach",
+            "program": "${workspaceFolder}/program.txt"}]}"#,
+    );
+}
+
+#[test]
+fn an_attach_configuration_sends_attach_and_stopping_leaves_the_program_alone() {
+    let f = Fixture::new("attach-request");
+    attach_launch(&f);
+    let mut ws = f.workspace(&[]);
+    let id = ws.open(&f.program("print one\nprint two\n")).expect("open");
+    ws.toggle_breakpoint(id, 1).expect("toggle");
+    ws.start_debugging().expect("attach starts");
+    wait(&mut ws, "the stop", stopped);
+    let commands = f.commands();
+    assert!(commands.iter().any(|c| c == "attach"), "{commands:?}");
+    assert!(!commands.iter().any(|c| c == "launch"), "{commands:?}");
+    ws.stop_debugging().expect("stop");
+    let disconnect = eventually(&f, "the disconnect", |log| {
+        log.iter().find(|m| m["command"] == "disconnect").cloned()
+    });
+    assert_eq!(disconnect["arguments"]["terminateDebuggee"], false);
+    assert!(
+        !f.commands().iter().any(|c| c == "terminate"),
+        "an attached program is not ours to terminate"
+    );
+    // A launch does terminate and disconnects with terminateDebuggee true.
+    let f = Fixture::new("launch-terminates");
+    f.simple_launch();
+    let mut ws = f.workspace(&[]);
+    with_breakpoint(&f, &mut ws);
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", stopped);
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+    assert!(f.commands().iter().any(|c| c == "terminate"));
+}
+
+#[test]
+fn initialized_before_the_initialize_response_or_right_after_it_is_survived() {
+    for (mode, name) in [
+        ("--initialized-first", "first"),
+        ("--initialized-early", "early"),
+    ] {
+        let f = Fixture::new(&format!("initialized-{name}"));
+        f.simple_launch();
+        let mut ws = f.workspace(&[mode]);
+        let id = with_breakpoint(&f, &mut ws);
+        ws.start_debugging().expect("start");
+        wait(&mut ws, "the stop", |ws| {
+            stopped(ws) && ws.stopped_line(id) == Some(1)
+        });
+        let commands = f.commands();
+        let position = |n: &str| commands.iter().position(|c| c == n).expect(n);
+        assert!(
+            position("launch") < position("setBreakpoints"),
+            "{mode}: {commands:?}"
+        );
+        assert!(
+            position("setBreakpoints") < position("configurationDone"),
+            "{mode}"
+        );
+        ws.continue_debugging().expect("continue");
+        wait(&mut ws, "the end", ended);
+    }
+}
+
+#[test]
+fn the_adapters_own_requests_are_refused_with_a_reason_and_the_session_goes_on() {
+    let f = Fixture::new("reverse");
+    f.simple_launch();
+    let mut ws = f.workspace(&["--reverse-requests"]);
+    with_breakpoint(&f, &mut ws);
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", stopped);
+    let init = f
+        .log()
+        .into_iter()
+        .find(|m| m["command"] == "initialize")
+        .expect("initialize");
+    assert_eq!(init["arguments"]["supportsRunInTerminalRequest"], false);
+    assert_eq!(init["arguments"]["supportsStartDebuggingRequest"], false);
+    let replies = eventually(&f, "both refusals", |log| {
+        let replies: Vec<serde_json::Value> = log
+            .iter()
+            .filter(|m| m["type"] == "response" && m["success"] == false)
+            .cloned()
+            .collect();
+        (replies.len() >= 2).then_some(replies)
+    });
+    let messages: Vec<&str> = replies
+        .iter()
+        .filter_map(|r| r["message"].as_str())
+        .collect();
+    assert!(
+        messages.iter().any(|m| m.contains("terminal")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("subprocess")),
+        "{messages:?}"
+    );
+    let console: Vec<&str> = ws.debug_console().iter().map(|l| l.text.as_str()).collect();
+    assert!(
+        console.iter().any(|l| l.starts_with("runInTerminal:")),
+        "{console:?}"
+    );
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn an_adapter_that_exits_after_exited_ends_the_session_normally() {
+    let f = Fixture::new("exit-without-terminated");
+    f.simple_launch();
+    let mut ws = f.workspace(&["--exit-without-terminated"]);
+    with_breakpoint(&f, &mut ws);
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", stopped);
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the end", ended);
+    assert_eq!(
+        ws.debug_status().message.as_deref(),
+        Some("the program exited with code 0"),
+        "not 'the debug adapter exited'"
+    );
+}
+
+#[test]
+fn a_stop_without_a_thread_id_uses_the_first_thread() {
+    let f = Fixture::new("no-thread");
+    f.simple_launch();
+    let mut ws = f.workspace(&["--stop-without-thread"]);
+    let id = with_breakpoint(&f, &mut ws);
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stack", |ws| {
+        stopped(ws) && !ws.debug_frames().is_empty()
+    });
+    assert_eq!(ws.stopped_line(id), Some(1));
+    assert_eq!(ws.debug_status().thread, Some(1));
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn the_stop_is_found_in_a_file_the_adapter_names_through_a_symlink() {
+    let f = Fixture::new("symlink");
+    f.simple_launch();
+    let mut ws = f.workspace(&[]);
+    let id = ws
+        .open(&f.program("print one\nprint two\nprint three\n"))
+        .expect("open");
+    ws.toggle_breakpoint(id, 1).expect("toggle");
+    // The adapter is told the program through a link to the folder, and says
+    // so in its frames: the document is open by the real path.
+    let link = f.dir.join("link");
+    std::os::unix::fs::symlink(f.project(), &link).expect("symlink");
+    f.launch_json(&format!(
+        r#"{{"configurations": [{{"name": "L", "type": "test", "request": "launch",
+            "program": "{}/program.txt"}}]}}"#,
+        link.display()
+    ));
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop", |ws| {
+        stopped(ws) && ws.stopped_line(id) == Some(1)
+    });
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
+}
+
+#[test]
+fn hostile_breakpoint_answers_and_events_change_nothing() {
+    let f = Fixture::new("hostile-breakpoints");
+    f.simple_launch();
+    let mut ws = f.workspace(&["--hostile-replies"]);
+    let id = ws
+        .open(&f.program("print a\nHOSTILE\nprint c\n"))
+        .expect("open");
+    for line in [0, 2] {
+        assert!(ws.toggle_breakpoint(id, line).expect("toggle"));
+    }
+    ws.set_breakpoint(id, 1, spec("a", "", "")).expect("set");
+    ws.start_debugging().expect("start");
+    // The adapter stops at the first line; its answers to setBreakpoints
+    // were garbage, and the garbage `breakpoint` events come when the
+    // program goes on past the HOSTILE line.
+    wait(&mut ws, "the stop", stopped);
+    let kinds: Vec<BreakpointKind> = ws.breakpoint_details(id).iter().map(|b| b.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            BreakpointKind::Plain,
+            BreakpointKind::Condition,
+            BreakpointKind::Plain
+        ]
+    );
+    ws.continue_debugging().expect("continue");
+    wait(&mut ws, "the garbage events", |ws| {
+        ws.debug_console()
+            .iter()
+            .any(|l| l.kind == ConsoleKind::Error)
+            || ended(ws)
+            || stopped(ws)
+    });
+    let details = ws.breakpoint_details(id);
+    assert_eq!(details.len(), 3, "no breakpoint was added or lost");
+    assert!(
+        details
+            .iter()
+            .all(|b| b.message.as_ref().is_none_or(|m| m.chars().count() <= 500)),
+        "{details:?}"
+    );
+    ws.stop_debugging().ok();
+}
+
+#[test]
+fn a_relative_path_in_a_frame_is_resolved_against_the_configurations_cwd() {
+    let f = Fixture::new("cwd");
+    std::fs::create_dir_all(f.project().join("sub")).expect("sub");
+    let file = f.project().join("sub/program.txt");
+    std::fs::write(&file, "print one\nprint two\n").expect("program");
+    f.launch_json(
+        r#"{"configurations": [{"name": "Sub", "type": "test", "request": "launch",
+            "program": "${workspaceFolder}/sub/program.txt", "cwd": "${workspaceFolder}/sub"}]}"#,
+    );
+    let mut ws = f.workspace(&["--relative-paths"]);
+    let id = ws.open(&file).expect("open");
+    ws.toggle_breakpoint(id, 1).expect("toggle");
+    ws.start_debugging().expect("start");
+    wait(&mut ws, "the stop in the right file", |ws| {
+        stopped(ws) && ws.stopped_line(id) == Some(1)
+    });
+    ws.stop_debugging().expect("stop");
+    wait(&mut ws, "the end", ended);
 }

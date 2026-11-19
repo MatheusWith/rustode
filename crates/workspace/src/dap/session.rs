@@ -3,13 +3,14 @@
 //! hostile input: a field of the wrong type is skipped, a number is checked
 //! before it is used, and a message nobody asked for is ignored.
 
+use super::breakpoints::{Breakpoint, Capabilities};
 use super::launch::LaunchConfiguration;
 use super::model::{self, ConsoleKind, FrameInfo, Node, ThreadInfo, short};
 use super::{DebugState, StepKind, StopLocation};
 use crate::Workspace;
 use crate::child::Process;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Requests allowed to wait for an answer; past it, new stack trace
@@ -72,6 +73,17 @@ pub(super) struct Session {
     terminate: bool,
     /// The files whose breakpoints were sent: only they are sent again.
     initialized: bool,
+    /// What the adapter does with breakpoints, once `initialize` answered.
+    caps: Option<Capabilities>,
+    /// The `setBreakpoints` requests in flight: the file and the lines
+    /// (zero-based) they carried, by sequence number.
+    sent: HashMap<i64, (PathBuf, Vec<usize>)>,
+    /// The request is `attach`, so the program is not ours to terminate.
+    attach: bool,
+    /// `launch` or `attach` was sent; `initialized` before that waits.
+    started: bool,
+    /// `initialized` came before `launch` was sent.
+    initialized_early: bool,
     /// A `terminate` was sent and the adapter has not ended yet.
     stopping: bool,
     pub thread: Option<i64>,
@@ -90,8 +102,14 @@ impl Session {
         configuration: &LaunchConfiguration,
         process: Process,
         arguments: Value,
-        root: PathBuf,
+        root: &Path,
     ) -> Self {
+        // Relative paths in the adapter's frames are relative to where it
+        // runs the program: the configuration's `cwd`, else the folder.
+        let root = arguments["cwd"]
+            .as_str()
+            .filter(|cwd| !cwd.is_empty())
+            .map_or_else(|| root.to_owned(), |cwd| super::resolve(root, cwd));
         Self {
             name: configuration.name.clone(),
             state: DebugState::Initializing,
@@ -105,6 +123,11 @@ impl Session {
             config_done: false,
             terminate: false,
             initialized: false,
+            caps: None,
+            sent: HashMap::new(),
+            attach: configuration.request == "attach",
+            started: false,
+            initialized_early: false,
             stopping: false,
             thread: None,
             exit_code: None,
@@ -128,22 +151,45 @@ impl Session {
         }));
     }
 
-    /// Sends a file's breakpoints once the adapter is configured.
-    pub(super) fn send_breakpoints(&mut self, path: &Path, lines: Option<&BTreeSet<usize>>) {
+    /// What the adapter does with breakpoints, once it said.
+    pub(super) fn capabilities(&self) -> Option<Capabilities> {
+        self.caps
+    }
+
+    /// Sends a file's breakpoints once the adapter is configured: only the
+    /// condition, hit count and log message it supports (VS Code sends them
+    /// all and shows the unsupported ones as such,
+    /// `debugSession.ts:488-520`; here an unsupported text is not sent, the
+    /// breakpoint stays a plain one and shows as unverified).
+    pub(super) fn send_breakpoints(
+        &mut self,
+        path: &Path,
+        breakpoints: Option<&BTreeMap<usize, Breakpoint>>,
+    ) {
         if !self.initialized {
             return;
         }
-        let lines: Vec<usize> = lines.map_or_else(Vec::new, |l| l.iter().map(|n| n + 1).collect());
+        let caps = self.caps.unwrap_or_default();
+        let sent: Vec<(usize, &Breakpoint)> = breakpoints
+            .into_iter()
+            .flatten()
+            .map(|(line, bp)| (*line, bp))
+            .collect();
+        let lines: Vec<usize> = sent.iter().map(|(line, _)| *line).collect();
+        let seq = self.next_seq;
         self.request(
             "setBreakpoints",
             &json!({
                 "source": {"path": path.display().to_string()},
-                "breakpoints": lines.iter().map(|line| json!({"line": line})).collect::<Vec<_>>(),
-                "lines": lines,
+                "breakpoints": sent.iter().map(|(line, bp)| bp.to_dap(*line, caps)).collect::<Vec<_>>(),
+                "lines": lines.iter().map(|n| n + 1).collect::<Vec<_>>(),
                 "sourceModified": false,
             }),
             Pending::SetBreakpoints,
         );
+        if self.sent.len() < MAX_PENDING {
+            self.sent.insert(seq, (path.to_owned(), lines));
+        }
     }
 
     pub(super) fn resume(&mut self) {
@@ -227,6 +273,11 @@ impl Session {
     /// Asks for the threads and the call stack of the stopped thread.
     pub(super) fn refresh(&mut self) {
         self.request_state("threads", &json!({}), Pending::Threads);
+        self.refresh_stack();
+    }
+
+    /// Asks for the call stack of the stopped thread.
+    fn refresh_stack(&mut self) {
         if let Some(thread) = self.thread {
             self.request_state(
                 "stackTrace",
@@ -236,11 +287,17 @@ impl Session {
         }
     }
 
+    /// What the program's exit says, once the adapter reported it.
+    pub(super) fn exit_message(&self) -> Option<String> {
+        self.exit_code
+            .map(|code| format!("the program exited with code {code}"))
+    }
+
     /// Asks the adapter to end the program. Returns `true` when the
     /// session should be dropped now: the adapter was disconnected, or was
     /// already asked and has not obeyed.
     pub(super) fn stop(&mut self) -> bool {
-        if self.terminate && !self.stopping {
+        if self.terminate && !self.attach && !self.stopping {
             self.stopping = true;
             self.request("terminate", &json!({}), Pending::Terminate);
             return false;
@@ -275,7 +332,7 @@ impl Session {
             "seq": seq,
             "type": "request",
             "command": "disconnect",
-            "arguments": {"terminateDebuggee": true},
+            "arguments": {"terminateDebuggee": !self.attach},
         }));
         seq
     }
@@ -298,10 +355,24 @@ impl Workspace {
     }
 
     /// The adapter's own requests (`runInTerminal`, `startDebugging`) are
-    /// not supported: answering keeps it from waiting for us.
+    /// not supported: `initialize` says so (`supportsRunInTerminalRequest`
+    /// and `supportsStartDebuggingRequest` are false), and an adapter that
+    /// asks anyway gets a failure that says why, which it needs to go on:
+    /// debugpy and lldb-dap then run the program themselves. The console
+    /// shows what was refused.
     fn dap_refuse(&mut self, request: &Value) {
         let Some(session) = self.dap.session.as_mut() else {
             return;
+        };
+        let command = request["command"].as_str().unwrap_or_default();
+        let why = match command {
+            "runInTerminal" => {
+                "rustode has no integrated terminal: the program runs in the adapter's own console"
+            }
+            "startDebugging" => {
+                "rustode debugs one process at a time: the subprocess is not debugged"
+            }
+            _ => "unsupported request",
         };
         let seq = session.next_seq;
         session.next_seq += 1;
@@ -311,14 +382,16 @@ impl Workspace {
             "request_seq": request["seq"],
             "success": false,
             "command": request["command"],
-            "message": "unsupported request",
+            "message": why,
         }));
+        self.dap_console(ConsoleKind::Error, &format!("{}: {why}", short(command)));
     }
 
     fn dap_response(&mut self, response: &Value) {
         let Some(session) = self.dap.session.as_mut() else {
             return;
         };
+        let seq = response["request_seq"].as_i64().unwrap_or_default();
         let Some(what) = response["request_seq"]
             .as_i64()
             .and_then(|seq| session.pending.remove(&seq))
@@ -343,7 +416,7 @@ impl Workspace {
                     self.dap_end(Some(format!("cannot terminate: {why}")), false);
                 }
             }
-            Pending::SetBreakpoints => {}
+            Pending::SetBreakpoints => self.dap_breakpoints_reply(seq, success, body, &why),
             state => self.dap_state_reply(state, success.then_some(body), &why),
         }
     }
@@ -357,8 +430,14 @@ impl Workspace {
             (Pending::Initialize, true) => {
                 session.config_done = body["supportsConfigurationDoneRequest"] == true;
                 session.terminate = body["supportsTerminateRequest"] == true;
+                session.caps = Some(Capabilities::parse(body));
                 let arguments = session.arguments.clone();
-                session.request("launch", &arguments, Pending::Launch);
+                let command = if session.attach { "attach" } else { "launch" };
+                session.request(command, &arguments, Pending::Launch);
+                session.started = true;
+                if std::mem::take(&mut session.initialized_early) {
+                    self.dap_initialized();
+                }
             }
             (_, false) => {
                 self.dap_end(Some(format!("the debug adapter refused: {why}")), false);
@@ -403,7 +482,17 @@ impl Workspace {
             return;
         };
         match (what, body) {
-            (Pending::Threads, Some(body)) => session.threads = model::parse_threads(body),
+            (Pending::Threads, Some(body)) => {
+                session.threads = model::parse_threads(body);
+                // A `stopped` without a thread: the first one is the one.
+                if session.thread.is_none()
+                    && session.state == DebugState::Stopped
+                    && let Some(first) = session.threads.first()
+                {
+                    session.thread = Some(first.id);
+                    session.refresh_stack();
+                }
+            }
             (Pending::StackTrace(thread), Some(body))
                 if session.state == DebugState::Stopped && session.thread == Some(thread) =>
             {
@@ -533,6 +622,52 @@ impl Workspace {
         self.dap.console.drain(..extra);
     }
 
+    /// The answer to a `setBreakpoints`: each breakpoint takes what the
+    /// adapter said about the one at its index (`debugSession.ts:512-519`).
+    /// A refused request leaves them all unverified, with the reason.
+    fn dap_breakpoints_reply(&mut self, seq: i64, success: bool, body: &Value, why: &str) {
+        let Some((path, lines)) = self
+            .dap
+            .session
+            .as_mut()
+            .and_then(|session| session.sent.remove(&seq))
+        else {
+            return;
+        };
+        let Some(file) = self.dap.breakpoints.get_mut(&path) else {
+            return;
+        };
+        let answers = body["breakpoints"].as_array();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(bp) = file.get_mut(line) else {
+                continue;
+            };
+            if !success {
+                bp.verified = Some(false);
+                bp.message = Some(why.to_owned());
+            } else if let Some(answer) = answers.and_then(|a| a.get(index)) {
+                bp.apply(answer);
+            }
+        }
+    }
+
+    /// A `breakpoint` event: the adapter changed what it says about one of
+    /// ours, found by id (`debugSession.ts:1000-1040`).
+    fn dap_breakpoint_event(&mut self, body: &Value) {
+        if body["reason"].as_str() != Some("changed") {
+            return;
+        }
+        let data = &body["breakpoint"];
+        let Some(id) = model::id(&data["id"]) else {
+            return;
+        };
+        for file in self.dap.breakpoints.values_mut() {
+            for bp in file.values_mut().filter(|bp| bp.id == Some(id)) {
+                bp.apply(data);
+            }
+        }
+    }
+
     fn dap_root(&self) -> PathBuf {
         self.dap
             .session
@@ -546,7 +681,9 @@ impl Workspace {
         };
         let body = &event["body"];
         match event["event"].as_str() {
+            Some("initialized") if !session.started => session.initialized_early = true,
             Some("initialized") => self.dap_initialized(),
+            Some("breakpoint") => self.dap_breakpoint_event(body),
             Some("stopped") => {
                 session.invalidate();
                 session.resuming = false;
@@ -566,9 +703,7 @@ impl Workspace {
             }
             Some("exited") => session.exit_code = body["exitCode"].as_i64(),
             Some("terminated") => {
-                let message = session
-                    .exit_code
-                    .map(|code| format!("the program exited with code {code}"));
+                let message = session.exit_message();
                 self.dap_end(message, false);
             }
             Some("output") => {
@@ -587,7 +722,7 @@ impl Workspace {
 
     /// The adapter is ready for the breakpoints and `configurationDone`.
     fn dap_initialized(&mut self) {
-        let files: Vec<(PathBuf, BTreeSet<usize>)> = self
+        let files: Vec<(PathBuf, BTreeMap<usize, Breakpoint>)> = self
             .dap
             .breakpoints
             .iter()

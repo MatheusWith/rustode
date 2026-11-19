@@ -26,9 +26,11 @@ pub use config::{
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
 pub use dap::{
+    BreakpointDraft, BreakpointInfo, BreakpointInput, BreakpointKind, BreakpointSpec,
     CONTINUE_COMMAND, ConsoleKind, ConsoleLine, DebugError, DebugState, DebugStatus, DebugTree,
-    FrameInfo, LaunchConfiguration, PAUSE_COMMAND, START_COMMAND, STEP_INTO_COMMAND,
-    STEP_OUT_COMMAND, STEP_OVER_COMMAND, StepKind, StopLocation, ThreadInfo, VariableRow,
+    FrameInfo, LaunchConfiguration, MAX_BREAKPOINT_TEXT, PAUSE_COMMAND, START_COMMAND,
+    STEP_INTO_COMMAND, STEP_OUT_COMMAND, STEP_OVER_COMMAND, StepKind, StopLocation, ThreadInfo,
+    VariableRow,
 };
 pub use document::{Document, DocumentId, Highlight};
 pub use explorer::{Explorer, ExplorerRow};
