@@ -5,7 +5,7 @@
 use crate::EditorApp;
 use crate::latency::PresentLatency;
 use eframe::UserEvent;
-use rustode_workspace::trace::LatencyReport;
+use rustode_workspace::trace::{FirstFrame, LatencyReport};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
@@ -70,6 +70,7 @@ pub fn run_timed(
     let mut timed = Timed {
         eframe,
         latency: Rc::clone(latency),
+        first_frame: FirstFrame::requested().then(FirstFrame::since_process_start),
     };
     event_loop.run_app(&mut timed)?;
     Ok(())
@@ -79,6 +80,9 @@ pub fn run_timed(
 struct Timed<'a> {
     eframe: eframe::EframeWinitApplication<'a>,
     latency: Rc<RefCell<PresentLatency>>,
+    /// Set when `RUSTODE_REPORT_FIRST_FRAME` is: prints the first presented
+    /// frame's time once, for `rustode bench` (startup scenarios).
+    first_frame: Option<FirstFrame>,
 }
 
 impl ApplicationHandler<UserEvent> for Timed<'_> {
@@ -101,7 +105,11 @@ impl ApplicationHandler<UserEvent> for Timed<'_> {
         }
         self.eframe.window_event(event_loop, id, event);
         if redraw {
-            self.latency.borrow_mut().presented(Instant::now());
+            let at = Instant::now();
+            self.latency.borrow_mut().presented(at);
+            if let Some(elapsed) = self.first_frame.as_mut().and_then(|f| f.presented(at)) {
+                eprintln!("{}", FirstFrame::line(elapsed));
+            }
         }
     }
 

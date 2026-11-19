@@ -118,6 +118,7 @@ pub fn build_filter(directive: &str) -> Result<EnvFilter, InitError> {
 /// [`InitError::Filter`] for a bad filter, [`InitError::AlreadySet`] when a
 /// global subscriber already exists.
 pub fn init(config: &TraceConfig) -> Result<(), InitError> {
+    crate::first_frame::mark_process_start();
     let filter = build_filter(&config.filter)?;
     let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
