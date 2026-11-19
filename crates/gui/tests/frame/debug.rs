@@ -165,9 +165,15 @@ fn a_gutter_click_sets_a_breakpoint_and_f5_stops_on_it_and_continues() {
     harness.snapshot("debug_breakpoint");
 
     press(&mut harness, Modifiers::NONE, Key::F5);
+    // The snapshot is taken with the views loaded: an arrow that is still
+    // there while the scope's variables are on their way is a few pixels.
     wait(&mut harness, |h| {
-        h.state().workspace().debug_status().state == DebugState::Stopped
-            && h.state().workspace().stopped_line(id).is_some()
+        let ws = h.state().workspace();
+        let rows = ws.debug_rows(rustode_workspace::DebugTree::Variables);
+        ws.debug_status().state == DebugState::Stopped
+            && ws.stopped_line(id).is_some()
+            && !rows.is_empty()
+            && rows.iter().all(|r| !r.loading)
     });
     assert_eq!(
         debug_item(&harness).as_deref(),
@@ -469,11 +475,14 @@ fn each_kind_of_breakpoint_has_its_own_mark_and_an_unsupported_one_is_unverified
 
     press(&mut harness, Modifiers::NONE, Key::F5);
     wait(&mut harness, |h| {
-        h.state().workspace().stopped_line(id) == Some(0)
-            && h.state()
-                .workspace()
-                .breakpoint_at(id, 3)
-                .is_some_and(|b| !b.verified)
+        let ws = h.state().workspace();
+        let rows = ws.debug_rows(rustode_workspace::DebugTree::Variables);
+        ws.stopped_line(id) == Some(0)
+            && ws.breakpoint_at(id, 3).is_some_and(|b| !b.verified)
+            && !rows.is_empty()
+            && rows.iter().all(|r| !r.loading)
+            && !ws.debug_frames().is_empty()
+            && !ws.debug_threads().is_empty()
     });
     harness.snapshot("breakpoint_marks_unverified");
     let details = harness.state().workspace().breakpoint_details(id);
