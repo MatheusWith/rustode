@@ -262,3 +262,87 @@ fn stress_search_monorepo() {
         );
     }
 }
+
+/// Replaces every `needle` of a generated tree with `pin` through the
+/// workspace, and times what a frontend waits for: the preview of the
+/// first file, and the replace itself (read, edit and save every file).
+/// The tree is its own copy, removed afterwards, because the replace
+/// rewrites it. Afterwards a new search must find nothing.
+fn replace_within(name: &str, crates: usize, per_crate: usize, budget: Duration) {
+    use rustode_workspace::ReplaceScope;
+    let tree = monorepo(&format!("replace-{name}"), crates, per_crate);
+    let mut ws = Workspace::new();
+    let settings = tree.root.with_extension("settings.json");
+    std::fs::write(&settings, r#"{ "search.maxResults": null }"#).expect("settings");
+    ws.load_config(&settings, &tree.root.with_extension("keybindings.json"));
+    ws.open_folder(&tree.root).expect("open folder");
+    let query =
+        SearchQuery::new(FindQuery::new("needle", FindOptions::default()).expect("literal"));
+    let (_, _, found, files) = timed(&mut ws, query);
+    assert_eq!(found, tree.literal);
+    ws.set_search_replacement("pin");
+    let started = Instant::now();
+    let preview = ws.search_replacement_text(0, 0);
+    let preview_time = started.elapsed();
+    assert_eq!(preview.as_deref(), Some("pin"));
+    let started = Instant::now();
+    ws.start_replace(ReplaceScope::All).expect("start");
+    // As a frontend does: a slice of work per frame.
+    let (mut longest, mut polls) = (Duration::ZERO, 0_usize);
+    while ws.is_replacing() {
+        let slice = Instant::now();
+        ws.poll_replace(Some(Duration::from_millis(8)));
+        longest = longest.max(slice.elapsed());
+        polls += 1;
+        assert!(started.elapsed() < Duration::from_secs(300), "stuck");
+    }
+    let replace_time = started.elapsed();
+    let outcome = ws
+        .take_replace_outcome()
+        .expect("an outcome")
+        .expect("replace");
+    assert_eq!((outcome.matches, outcome.files), (found, files));
+    assert!(outcome.unsaved.is_empty(), "{:?}", outcome.unsaved);
+    assert!(ws.search_results().files().is_empty(), "all replaced");
+    let again =
+        SearchQuery::new(FindQuery::new("needle", FindOptions::default()).expect("literal"));
+    let (_, _, left, _) = timed(&mut ws, again);
+    let peak = peak_rss_mb();
+    eprintln!(
+        "replace {name} ({files} files, {found} matches): first preview {preview_time:?}, replace all {replace_time:?} in {polls} polls, longest poll {longest:?}, peak RSS {peak} MB"
+    );
+    let _ = std::fs::remove_dir_all(&tree.root);
+    assert_eq!(left, 0, "nothing left to find after the replace");
+    assert!(
+        longest <= Duration::from_secs(3),
+        "one poll blocked the UI for {longest:?}"
+    );
+    assert!(
+        replace_time <= budget,
+        "replace took {replace_time:?}, budget {budget:?}"
+    );
+}
+
+/// 500 files (20 crates of 25), 2,692 matches. Measured at the commit of
+/// this change on 2026-11-19, debug build, three runs of
+/// `cargo nextest run -p rustode-workspace -E 'test(stress_replace_small)'`
+/// from the project root, on a machine shared with two other builds: first
+/// preview 0.4–0.8 ms, replace all 1.66–1.74 s in 186–193 polls of 8 ms,
+/// longest poll 80–90 ms (the poll that opens the first Rust file, which
+/// builds its grammar), peak RSS 110 MB. One run met a busy machine and
+/// had a 1.9 s poll, so the budget is 3 s.
+#[test]
+fn stress_replace_small_monorepo() {
+    if enough_memory(500) {
+        replace_within("small", 20, 25, Duration::from_secs(60));
+    }
+}
+
+/// 10,000 files, run explicitly in release like the search case.
+#[test]
+#[ignore = "large: run explicitly, in release"]
+fn stress_replace_monorepo() {
+    if enough_memory(1500) {
+        replace_within("large", 200, 50, Duration::from_secs(120));
+    }
+}

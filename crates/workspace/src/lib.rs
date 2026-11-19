@@ -1,5 +1,6 @@
 //! The single in-process API that every frontend uses.
 
+mod bulk_edit;
 mod child;
 mod commands;
 mod config;
@@ -56,8 +57,9 @@ pub use rustode_syntax::TokenKind;
 /// input-to-frame latency with `trace::LatencyRecorder`.
 pub use rustode_trace as trace;
 pub use search::{
-    FileResult, MAX_RESULTS, MatchPreview, SearchError, SearchEvent, SearchMatch, SearchQuery,
-    SearchResults, SearchRow, SearchState,
+    FileResult, MAX_RESULTS, MatchPreview, ReplaceError, ReplaceOutcome, ReplaceProgress,
+    ReplaceScope, SearchError, SearchEvent, SearchMatch, SearchQuery, SearchResults, SearchRow,
+    SearchState,
 };
 pub use tabs::EditorGroup;
 
@@ -225,6 +227,9 @@ pub struct Workspace {
     lsp: lsp::LanguageServers,
     /// The debug session, its breakpoints and `launch.json`.
     dap: dap::Debug,
+    /// The open documents by absolute path, so that finding one does not
+    /// scan them all.
+    open_index: std::collections::HashMap<PathBuf, DocumentId>,
     /// Search across the folder: the running search and its results.
     search: search::Searches,
     /// `files.associations`, read again whenever the settings load.
@@ -259,6 +264,9 @@ impl Workspace {
         self.documents.push(Some(document));
         self.watch(path);
         let id = DocumentId(self.documents.len() - 1);
+        if let Ok(absolute) = std::path::absolute(path) {
+            self.open_index.insert(absolute, id);
+        }
         self.group.open(id);
         self.lsp_opened(id);
         Ok(id)
@@ -267,11 +275,7 @@ impl Workspace {
     /// The open document for `path`, compared as absolute paths.
     fn find_open(&self, path: &Path) -> Option<DocumentId> {
         let wanted = std::path::absolute(path).ok()?;
-        (0..self.documents.len()).map(DocumentId).find(|&id| {
-            self.document(id)
-                .and_then(|d| std::path::absolute(d.path()).ok())
-                .is_some_and(|p| p == wanted)
-        })
+        self.open_index.get(&wanted).copied()
     }
 
     /// The tabs of the editor group, in display order.
@@ -345,6 +349,7 @@ impl Workspace {
         }
         self.lsp_closing(id);
         self.documents[id.0] = None;
+        self.open_index.retain(|_, open| *open != id);
         self.group.close(id);
         Ok(())
     }
