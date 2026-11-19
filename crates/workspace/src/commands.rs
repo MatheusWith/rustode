@@ -55,6 +55,15 @@
 //! `:687`, `:767`, `:1169`; `debugEditorActions.ts:35-60`); the first three run
 //! without a document, and [`Workspace::debug_key_command`] says which of
 //! start and continue F5 means now.
+//! "Debug: Add Conditional Breakpoint...", "Add Logpoint..." and "Edit
+//! Breakpoint" have no key in VS Code
+//! (`src/vs/workbench/contrib/debug/browser/debugEditorActions.ts:101-215`:
+//! `editor.debug.action.conditionalBreakpoint`, `.addLogPoint`,
+//! `.editBreakpoint`); they open the breakpoint editor, so the frontend asks
+//! for the texts ([`Workspace::begin_breakpoint_edit`]) and calls
+//! [`Workspace::finish_breakpoint_edit`]. `debug.editBreakpoint` is VS Code's
+//! id for editing a *function* breakpoint's condition
+//! (`breakpointsView.ts:2353`), which rustode does not have.
 //! "Debug: Step Over" on F10, "Step Into" on F11, "Step Out" on Shift+F11
 //! and "Pause" on F6, each with VS Code's `when` clause
 //! (`debugCommands.ts:500-560`: stopped; not inactive; stopped with more than
@@ -349,6 +358,24 @@ pub const COMMANDS: &[CommandInfo] = &[
         "Debug: Toggle Breakpoint",
         Editor,
         Some("F9"),
+    ),
+    command(
+        "editor.debug.action.conditionalBreakpoint",
+        "Debug: Add Conditional Breakpoint...",
+        Editor,
+        None,
+    ),
+    command(
+        "editor.debug.action.addLogPoint",
+        "Debug: Add Logpoint...",
+        Editor,
+        None,
+    ),
+    command(
+        "editor.debug.action.editBreakpoint",
+        "Debug: Edit Breakpoint",
+        Editor,
+        None,
     ),
     command(
         "workbench.action.debug.stepOver",

@@ -19,7 +19,7 @@ use eframe::egui::{
     self, Align2, Color32, Context, FontId, Frame, Id, Key, Modifiers, Order, ScrollArea, Sense,
     Stroke, TextEdit, Vec2,
 };
-use rustode_workspace::{DocumentId, SymbolLocation, Workspace};
+use rustode_workspace::{BreakpointDraft, BreakpointInput, DocumentId, SymbolLocation, Workspace};
 
 const BACKGROUND: Color32 = Color32::from_rgb(0x20, 0x20, 0x20);
 const BORDER: Color32 = Color32::from_rgb(0x45, 0x45, 0x45);
@@ -52,8 +52,17 @@ pub(crate) enum Outcome {
 /// Which box is open.
 #[derive(Debug)]
 enum Mode {
-    Locations { selected: usize },
-    Rename { document: DocumentId, word: String },
+    Locations {
+        selected: usize,
+    },
+    Rename {
+        document: DocumentId,
+        word: String,
+    },
+    /// The breakpoint editor: the three texts of a breakpoint.
+    Breakpoint {
+        draft: BreakpointDraft,
+    },
 }
 
 /// The boxes' state.
@@ -89,6 +98,15 @@ impl Navigator {
     /// whether `id` is one of them. F2 opens the rename box; the others ask
     /// the workspace, whose answer comes later as events.
     pub(crate) fn run(&mut self, workspace: &mut Workspace, id: &str) -> Option<Outcome> {
+        let input = match id {
+            "editor.debug.action.conditionalBreakpoint" => Some(Some(BreakpointInput::Expression)),
+            "editor.debug.action.addLogPoint" => Some(Some(BreakpointInput::LogMessage)),
+            "editor.debug.action.editBreakpoint" => Some(None),
+            _ => None,
+        };
+        if let Some(input) = input {
+            return Some(self.open_breakpoint(workspace, input));
+        }
         if !matches!(
             id,
             REVEAL_DEFINITION | GO_TO_REFERENCES | RENAME | FORMAT_DOCUMENT
@@ -126,6 +144,32 @@ impl Navigator {
         })
     }
 
+    /// Opens the breakpoint editor on the active document's cursor line, on
+    /// the text `input` names, or the one the line's breakpoint uses.
+    fn open_breakpoint(
+        &mut self,
+        workspace: &mut Workspace,
+        input: Option<BreakpointInput>,
+    ) -> Outcome {
+        let Some(document) = workspace.active_document() else {
+            return Outcome::Message("No text editor active at this time".to_owned());
+        };
+        let line = workspace
+            .document(document)
+            .map_or(0, |d| d.cursor_position().line);
+        match workspace.begin_breakpoint_edit(document, line, input) {
+            Ok(draft) => {
+                *self = Self {
+                    mode: Some(Mode::Breakpoint { draft }),
+                    query: String::new(),
+                    focus: true,
+                };
+                Outcome::None
+            }
+            Err(err) => Outcome::Message(err.to_string()),
+        }
+    }
+
     /// The workspace found places to pick from, or closed its list.
     pub(crate) fn locations_changed(&mut self, workspace: &Workspace) -> Option<String> {
         let Some(list) = workspace.locations() else {
@@ -153,6 +197,8 @@ impl Navigator {
         let Some(mode) = self.mode.take() else {
             return Outcome::None;
         };
+        let tab = matches!(mode, Mode::Breakpoint { .. })
+            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Tab));
         let (down, up, enter, escape) = ctx.input_mut(|input| {
             (
                 input.consume_key(Modifiers::NONE, Key::ArrowDown),
@@ -167,6 +213,7 @@ impl Navigator {
         }
         match mode {
             Mode::Rename { document, word } => self.rename(ctx, workspace, document, word, enter),
+            Mode::Breakpoint { draft } => self.breakpoint(ctx, workspace, draft, enter, tab),
             Mode::Locations { selected } => {
                 self.locations(ctx, workspace, selected, (down, up, enter))
             }
@@ -201,6 +248,57 @@ impl Navigator {
             None
         });
         self.mode = Some(Mode::Rename { document, word });
+        Outcome::None
+    }
+
+    /// The breakpoint editor: a choice of the three texts and the one shown.
+    /// Tab shows the next, a click on a name shows that one, Enter applies.
+    fn breakpoint(
+        &mut self,
+        ctx: &Context,
+        workspace: &mut Workspace,
+        mut draft: BreakpointDraft,
+        enter: bool,
+        tab: bool,
+    ) -> Outcome {
+        if tab {
+            draft.next_input();
+            self.focus = true;
+        }
+        if enter {
+            return match workspace.finish_breakpoint_edit(&draft) {
+                Ok(()) => Outcome::Closed,
+                Err(err) => Outcome::Message(err.to_string()),
+            };
+        }
+        self.window::<()>(ctx, "rustode-breakpoint", |this, ui| {
+            ui.horizontal(|ui| {
+                for input in [
+                    BreakpointInput::Expression,
+                    BreakpointInput::HitCount,
+                    BreakpointInput::LogMessage,
+                ] {
+                    if ui
+                        .selectable_label(draft.input == input, input.label())
+                        .clicked()
+                    {
+                        draft.input = input;
+                        this.focus = true;
+                    }
+                }
+            });
+            let hint = format!("{}. Enter to accept, Escape to cancel", draft.input.hint());
+            let edit = ui.add(
+                TextEdit::singleline(draft.text_mut())
+                    .hint_text(hint)
+                    .desired_width(f32::INFINITY),
+            );
+            if std::mem::take(&mut this.focus) {
+                edit.request_focus();
+            }
+            None
+        });
+        self.mode = Some(Mode::Breakpoint { draft });
         Outcome::None
     }
 

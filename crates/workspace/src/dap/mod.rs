@@ -35,27 +35,41 @@
 //! (VS Code does the same on `stopped` and `continued`, `debugSession.ts:964-990`, `:1107-1165`), so
 //! a late answer is never applied.
 //!
-//! Not done yet: attach, compound configurations, other variables than
+//! Conditions, hit counts and logpoints (ticket 39, [`breakpoints`]) are
+//! sent with `setBreakpoints` when the adapter's capabilities allow;
+//! otherwise the breakpoint stays a plain one and shows as unverified with
+//! the reason. What the adapter says about each one (`verified`, `message`,
+//! `id`) comes from the response and from `breakpoint` events. `attach`
+//! configurations send `attach` and are never terminated, only disconnected.
+//!
+//! Not done yet: compound configurations, other variables than
 //! `${workspaceFolder}`, breakpoints that follow edits or survive a restart,
-//! conditions and logpoints.
+//! the line an adapter moves a breakpoint to, `runInTerminal` and
+//! `startDebugging` (refused with a reason).
 
+mod breakpoints;
 mod launch;
 mod model;
 mod session;
 mod settings;
 mod views;
 
+pub use breakpoints::{
+    BreakpointDraft, BreakpointInfo, BreakpointInput, BreakpointKind, BreakpointSpec,
+    MAX_BREAKPOINT_TEXT,
+};
 pub use launch::LaunchConfiguration;
 pub use model::{ConsoleKind, ConsoleLine, DebugTree, FrameInfo, ThreadInfo, VariableRow};
 
 use crate::child::{Process, Waker};
 use crate::{DocumentId, Error, Event, Workspace};
+use breakpoints::Breakpoint;
 use launch::Launch;
 use model::Node;
 use serde_json::json;
 use session::Session;
 use settings::AdapterConfig;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -135,10 +149,14 @@ pub enum DebugError {
     Busy,
     /// A watch expression that is empty, or one too many.
     BadWatch(String),
+    /// A breakpoint text that is not acceptable.
+    BadBreakpoint(String),
+    /// There is no breakpoint on that line to edit.
+    NoBreakpoint,
     /// No debug adapter is configured for this configuration type, in
     /// `rustode.debugAdapters`.
     NoAdapter(String),
-    /// Only `launch` requests are supported so far.
+    /// Only `launch` and `attach` requests exist.
     UnsupportedRequest(String),
     /// The adapter could not be started.
     Spawn(String),
@@ -155,7 +173,8 @@ impl fmt::Display for DebugError {
             Self::NotRunningProgram => f.write_str("the program is not running"),
             Self::NoSuchRow => f.write_str("there is nothing there"),
             Self::Busy => f.write_str("the debug adapter has too many requests waiting"),
-            Self::BadWatch(why) => f.write_str(why),
+            Self::BadWatch(why) | Self::BadBreakpoint(why) => f.write_str(why),
+            Self::NoBreakpoint => f.write_str("there is no breakpoint on this line"),
             Self::NoAdapter(kind) => write!(
                 f,
                 "no debug adapter for type \"{kind}\"; set rustode.debugAdapters[\"{kind}\"]"
@@ -202,8 +221,8 @@ pub(crate) struct Debug {
     problems: Vec<String>,
     launch: Launch,
     selected: Option<String>,
-    /// Breakpoint lines (zero-based) by absolute path.
-    breakpoints: BTreeMap<PathBuf, BTreeSet<usize>>,
+    /// Breakpoints by absolute path and zero-based line.
+    breakpoints: BTreeMap<PathBuf, BTreeMap<usize, Breakpoint>>,
     session: Option<Session>,
     /// What the last session said when it ended.
     message: Option<String>,
@@ -352,7 +371,7 @@ impl Workspace {
             .selected_launch_configuration()
             .cloned()
             .ok_or(DebugError::NoConfiguration)?;
-        if configuration.request != "launch" {
+        if !matches!(configuration.request.as_str(), "launch" | "attach") {
             return Err(DebugError::UnsupportedRequest(configuration.request));
         }
         let adapter = self
@@ -370,7 +389,10 @@ impl Workspace {
         )
         .map_err(|err| DebugError::Spawn(err.to_string()))?;
         let arguments = launch::substitute(&configuration.body, &root);
-        let mut session = Session::new(&configuration, process, arguments, root);
+        let mut session = Session::new(&configuration, process, arguments, &root);
+        for file in self.dap.breakpoints.values_mut() {
+            file.values_mut().for_each(Breakpoint::reset);
+        }
         session.request(
             "initialize",
             &json!({
@@ -381,6 +403,8 @@ impl Workspace {
                 "linesStartAt1": true,
                 "columnsStartAt1": true,
                 "supportsRunInTerminalRequest": false,
+                "supportsStartDebuggingRequest": false,
+                "supportsVariableType": true,
             }),
             session::Pending::Initialize,
         );
@@ -424,28 +448,116 @@ impl Workspace {
     /// Sets or clears a breakpoint on a zero-based line of an open
     /// document, as a click on the gutter or F9 does
     /// (`src/vs/workbench/contrib/debug/browser/debugEditorActions.ts:35-60`).
-    /// Returns whether there is a breakpoint now. While a session runs the
-    /// file's breakpoints are sent again.
+    /// A line that has one, whatever its kind, loses it. Returns whether
+    /// there is a breakpoint now. While a session runs the file's
+    /// breakpoints are sent again.
     ///
     /// # Errors
     /// When there is no such document.
     pub fn toggle_breakpoint(&mut self, id: DocumentId, line: usize) -> Result<bool, Error> {
+        let path = self.breakpoint_path(id)?;
+        let lines = self.dap.breakpoints.entry(path.clone()).or_default();
+        let set = if lines.remove(&line).is_some() {
+            false
+        } else {
+            lines.insert(line, Breakpoint::default());
+            true
+        };
+        self.dap_breakpoints_changed(&path);
+        Ok(set)
+    }
+
+    /// Sets the breakpoint on a zero-based line with a condition, a hit
+    /// count condition and a log message, replacing what was there; texts
+    /// that are all empty make a plain breakpoint (`breakpointWidget.ts:490-505`).
+    ///
+    /// # Errors
+    /// When there is no such document, or a text has a line break.
+    pub fn set_breakpoint(
+        &mut self,
+        id: DocumentId,
+        line: usize,
+        spec: BreakpointSpec,
+    ) -> Result<(), Error> {
+        let spec = spec.clean().map_err(Error::Debug)?;
+        let path = self.breakpoint_path(id)?;
+        self.dap
+            .breakpoints
+            .entry(path.clone())
+            .or_default()
+            .insert(line, Breakpoint::new(spec));
+        self.dap_breakpoints_changed(&path);
+        Ok(())
+    }
+
+    /// Opens the breakpoint editor on a line: the three texts of the
+    /// breakpoint there (empty if there is none), showing `input`, or the
+    /// one the breakpoint uses when `None` (`breakpointWidget.ts:160-200`).
+    ///
+    /// # Errors
+    /// When there is no such document, or `input` is `None` and the line has
+    /// no breakpoint to edit.
+    pub fn begin_breakpoint_edit(
+        &mut self,
+        id: DocumentId,
+        line: usize,
+        input: Option<BreakpointInput>,
+    ) -> Result<BreakpointDraft, Error> {
+        let path = self.breakpoint_path(id)?;
+        let existing = self
+            .dap
+            .breakpoints
+            .get(&path)
+            .and_then(|lines| lines.get(&line))
+            .map(|bp| bp.spec.clone());
+        let input = match (input, &existing) {
+            (Some(input), _) => input,
+            (None, None) => return Err(Error::Debug(DebugError::NoBreakpoint)),
+            (None, Some(spec)) if spec.log_message.is_some() => BreakpointInput::LogMessage,
+            (None, Some(spec)) if spec.hit_condition.is_some() && spec.condition.is_none() => {
+                BreakpointInput::HitCount
+            }
+            (None, Some(_)) => BreakpointInput::Expression,
+        };
+        Ok(BreakpointDraft::new(
+            id,
+            line,
+            input,
+            &existing.unwrap_or_default(),
+        ))
+    }
+
+    /// Applies an edited draft: [`Workspace::set_breakpoint`] with its texts.
+    ///
+    /// # Errors
+    /// As [`Workspace::set_breakpoint`].
+    pub fn finish_breakpoint_edit(&mut self, draft: &BreakpointDraft) -> Result<(), Error> {
+        self.set_breakpoint(draft.document, draft.line, draft.spec())
+    }
+
+    fn breakpoint_path(&self, id: DocumentId) -> Result<PathBuf, Error> {
         let doc = self.document(id).ok_or(Error::UnknownDocument(id))?;
-        let path = std::path::absolute(doc.path()).map_err(|source| Error::Io {
+        std::path::absolute(doc.path()).map_err(|source| Error::Io {
             path: doc.path().to_owned(),
             source,
-        })?;
-        let lines = self.dap.breakpoints.entry(path.clone()).or_default();
-        let set = lines.insert(line) || !lines.remove(&line);
-        if lines.is_empty() {
-            self.dap.breakpoints.remove(&path);
+        })
+    }
+
+    /// The breakpoints of a file changed: forget it if none is left, send
+    /// them again to the session and tell the frontends.
+    fn dap_breakpoints_changed(&mut self, path: &Path) {
+        if self
+            .dap
+            .breakpoints
+            .get(path)
+            .is_some_and(BTreeMap::is_empty)
+        {
+            self.dap.breakpoints.remove(path);
         }
-        let lines = self.dap.breakpoints.get(&path);
         if let Some(session) = self.dap.session.as_mut() {
-            session.send_breakpoints(&path, lines);
+            session.send_breakpoints(path, self.dap.breakpoints.get(path));
         }
         self.events.push(Event::DebugChanged);
-        Ok(set)
     }
 
     /// The zero-based lines of an open document that have a breakpoint.
@@ -454,7 +566,31 @@ impl Workspace {
         self.document(id)
             .and_then(|doc| std::path::absolute(doc.path()).ok())
             .and_then(|path| self.dap.breakpoints.get(&path))
-            .map_or_else(Vec::new, |lines| lines.iter().copied().collect())
+            .map_or_else(Vec::new, |lines| lines.keys().copied().collect())
+    }
+
+    /// The breakpoints of an open document with their kind and whether the
+    /// adapter can stop on them, by line.
+    #[must_use]
+    pub fn breakpoint_details(&self, id: DocumentId) -> Vec<BreakpointInfo> {
+        let caps = self.dap.session.as_ref().and_then(Session::capabilities);
+        self.document(id)
+            .and_then(|doc| std::path::absolute(doc.path()).ok())
+            .and_then(|path| self.dap.breakpoints.get(&path))
+            .map_or_else(Vec::new, |lines| {
+                lines
+                    .iter()
+                    .map(|(line, bp)| bp.info(*line, caps.as_ref()))
+                    .collect()
+            })
+    }
+
+    /// The breakpoint on a line of an open document.
+    #[must_use]
+    pub fn breakpoint_at(&self, id: DocumentId, line: usize) -> Option<BreakpointInfo> {
+        self.breakpoint_details(id)
+            .into_iter()
+            .find(|bp| bp.line == line)
     }
 
     /// The zero-based line the program is stopped on, if it is stopped in
@@ -463,7 +599,14 @@ impl Workspace {
     pub fn stopped_line(&self, id: DocumentId) -> Option<usize> {
         let location = self.dap.session.as_ref()?.location.as_ref()?;
         let path = std::path::absolute(self.document(id)?.path()).ok()?;
-        (path == location.path).then_some(location.line)
+        // An adapter may name the file through another path than the one it
+        // was opened with (a symlink, `..`): compare the files, not the text.
+        let same = path == location.path
+            || std::fs::canonicalize(&path)
+                .ok()
+                .zip(std::fs::canonicalize(&location.path).ok())
+                .is_some_and(|(a, b)| a == b);
+        same.then_some(location.line)
     }
 
     /// After the settings loaded: reads `rustode.debugAdapters`.
@@ -500,8 +643,13 @@ impl Workspace {
             }
             self.dap_message(message);
         }
-        if closed && self.dap.session.is_some() {
-            self.dap_end(None, true);
+        if closed && let Some(session) = &self.dap.session {
+            // An adapter that exits right after `exited`, with no
+            // `terminated`, ended the session normally.
+            match session.exit_message() {
+                Some(message) => self.dap_end(Some(message), false),
+                None => self.dap_end(None, true),
+            }
         }
         if !messages.is_empty() || closed || self.debug_status() != before {
             self.events.push(Event::DebugChanged);
@@ -516,6 +664,9 @@ impl Workspace {
         };
         for watch in &mut self.dap.watches {
             watch.reset();
+        }
+        for file in self.dap.breakpoints.values_mut() {
+            file.values_mut().for_each(Breakpoint::reset);
         }
         self.dap.message = if crashed {
             Some(format!("the debug adapter {}", session.reap()))

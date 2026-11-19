@@ -43,14 +43,14 @@ use crate::minimap;
 use crate::suggest;
 use crate::text::DisplayLine;
 use eframe::egui::{
-    self, Align2, Color32, EventFilter, FontId, Id, Key, Pos2, Rect, Response, Sense, Ui, Vec2,
-    WidgetInfo, WidgetType, accesskit,
+    self, Align2, Color32, EventFilter, FontId, Id, Key, Pos2, Rect, Response, Sense, Stroke, Ui,
+    Vec2, WidgetInfo, WidgetType, accesskit,
     emath::{GuiRounding as _, TSTransform},
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
 use rustode_workspace::{
-    CompletionMove, Document, DocumentId, Highlight, Marker, Position, Range, Selection, TokenKind,
-    Workspace,
+    BreakpointInfo, BreakpointKind, CompletionMove, Document, DocumentId, Highlight, Marker,
+    Position, Range, Selection, TokenKind, Workspace,
 };
 use std::sync::Arc;
 
@@ -70,6 +70,8 @@ const SELECTION: Color32 = Color32::from_rgb(0x26, 0x4f, 0x78);
 const BREAKPOINT: Color32 = Color32::from_rgb(0xe5, 0x14, 0x00);
 /// `debugIcon.breakpointCurrentStackframeForeground`, dark (`:877` of the same file).
 const STOPPED_ARROW: Color32 = Color32::from_rgb(0xff, 0xcc, 0x00);
+/// The mark of a breakpoint the adapter could not set.
+const UNVERIFIED: Color32 = Color32::from_rgb(0x84, 0x84, 0x84);
 const CARET: Color32 = Color32::from_rgb(0xae, 0xaf, 0xad);
 /// Dark Modern's `editor.findMatchBackground`, the current match.
 const FIND_MATCH: Color32 = Color32::from_rgb(0x9e, 0x6a, 0x03);
@@ -329,8 +331,8 @@ struct Screen<'a> {
     rows: Vec<Row>,
     /// The document's diagnostics, the most severe last.
     markers: Vec<Marker>,
-    /// The zero-based lines with a breakpoint.
-    breakpoints: Vec<usize>,
+    /// The breakpoints of the document, by line.
+    breakpoints: Vec<BreakpointInfo>,
     /// The line the program is stopped on, in this document.
     stopped: Option<usize>,
     /// Find matches to highlight, sorted (`find.rs`).
@@ -440,7 +442,7 @@ pub(crate) fn show(
         view,
         rows: rows(ui, doc, &layout, view),
         markers,
-        breakpoints: workspace.breakpoints(document),
+        breakpoints: workspace.breakpoint_details(document),
         stopped: workspace.stopped_line(document),
         matches,
     };
@@ -800,6 +802,41 @@ fn rows(ui: &Ui, doc: &Document, layout: &Layout, view: &View) -> Vec<Row> {
         .collect()
 }
 
+/// A breakpoint's mark: a disc; a filled diamond for a condition or a hit
+/// count; a hollow diamond for a logpoint; gray, and a hollow disc for a
+/// plain one, when the adapter could not set it
+/// (`src/vs/workbench/contrib/debug/browser/breakpointsView.ts:1923-1960`).
+fn breakpoint_mark(painter: &egui::Painter, center: Pos2, radius: f32, bp: &BreakpointInfo) {
+    let color = if bp.verified { BREAKPOINT } else { UNVERIFIED };
+    let stroke = Stroke::new(1.5, color);
+    let diamond = || {
+        vec![
+            center + egui::vec2(0.0, -radius * 1.2),
+            center + egui::vec2(radius * 1.2, 0.0),
+            center + egui::vec2(0.0, radius * 1.2),
+            center + egui::vec2(-radius * 1.2, 0.0),
+        ]
+    };
+    match (bp.kind, bp.verified) {
+        (BreakpointKind::Plain, true) => {
+            painter.circle_filled(center, radius, color);
+        }
+        (BreakpointKind::Plain, false) => {
+            painter.circle_stroke(center, radius, stroke);
+        }
+        (BreakpointKind::Condition | BreakpointKind::HitCount, _) => {
+            painter.add(egui::Shape::convex_polygon(diamond(), color, Stroke::NONE));
+        }
+        (BreakpointKind::LogPoint, _) => {
+            painter.add(egui::Shape::convex_polygon(
+                diamond(),
+                Color32::TRANSPARENT,
+                stroke,
+            ));
+        }
+    }
+}
+
 fn paint(ui: &Ui, screen: &Screen<'_>) {
     let Screen {
         doc,
@@ -828,19 +865,15 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
         }
     }
     for row in rows {
-        let color = if screen.stopped == Some(row.line) {
-            Some(STOPPED_ARROW)
-        } else if screen.breakpoints.contains(&row.line) {
-            Some(BREAKPOINT)
-        } else {
-            None
-        };
-        if let Some(color) = color {
-            let center = Pos2::new(
-                layout.gutter.left() + layout.char_width,
-                row.top + layout.line_height / 2.0,
-            );
-            gutter_painter.circle_filled(center, layout.line_height * 0.3, color);
+        let center = Pos2::new(
+            layout.gutter.left() + layout.char_width,
+            row.top + layout.line_height / 2.0,
+        );
+        let radius = layout.line_height * 0.3;
+        if screen.stopped == Some(row.line) {
+            gutter_painter.circle_filled(center, radius, STOPPED_ARROW);
+        } else if let Some(bp) = screen.breakpoints.iter().find(|bp| bp.line == row.line) {
+            breakpoint_mark(&gutter_painter, center, radius, bp);
         }
     }
     let active = doc.position_of(doc.primary_selection().head).line;

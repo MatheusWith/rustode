@@ -155,7 +155,10 @@ fn f1_lists_the_registry_and_enter_runs_the_selected_command() {
     assert_eq!(node.accesskit_node().label().as_deref(), Some(COMMANDS));
     let all = options(&harness);
     // The list shows the first six commands alphabetically.
-    assert!(all.contains(&"Debug: Continue · F5".to_owned()), "{all:?}");
+    assert!(
+        all.contains(&"Debug: Add Conditional Breakpoint...".to_owned()),
+        "{all:?}"
+    );
     assert!(all[0].ends_with(" <"), "the first is selected: {all:?}");
     type_text(&mut harness, "save");
     assert_eq!(options(&harness), ["File: Save · Ctrl+S <"]);

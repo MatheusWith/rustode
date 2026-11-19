@@ -22,8 +22,8 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use rustode_workspace::{
-    DebugState, Document, DocumentId, Eol, Highlight, Marker, MarkerSeverity, Position, Selection,
-    ServerState,
+    BreakpointKind, DebugState, Document, DocumentId, Eol, Highlight, Marker, MarkerSeverity,
+    Position, Selection, ServerState,
 };
 use std::collections::HashMap;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -151,6 +151,8 @@ fn draw_quick(app: &mut App, frame: &mut Frame) {
     let width = area.width.saturating_sub(4).min(80);
     let rows = items.len().min(QUICK_ROWS);
     let height = to_u16(rows + 3).min(area.height.saturating_sub(1));
+    // A short screen shows fewer rows: the border and the text take three.
+    let rows = rows.min(usize::from(height.saturating_sub(3)));
     let outer = Rect {
         x: area.x + (area.width - width) / 2,
         y: area.y + 1,
@@ -653,7 +655,7 @@ fn gutter_spans(
     {
         let (glyph, color) = match mark {
             Mark::Stopped => ("▶", Color::Yellow),
-            Mark::Breakpoint => ("●", Color::Red),
+            Mark::Breakpoint(kind, verified) => breakpoint_mark(kind, verified),
         };
         return vec![
             Span::styled(glyph, Style::default().fg(color)),
@@ -679,8 +681,29 @@ fn gutter_spans(
 /// breakpoint, which wins over a problem's letter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mark {
-    Breakpoint,
+    /// A breakpoint of this kind, and whether the adapter verified it.
+    Breakpoint(BreakpointKind, bool),
     Stopped,
+}
+
+/// The gutter glyph of a breakpoint: a disc, a diamond for a condition or a
+/// hit count (VS Code draws both with its conditional icon), a hollow
+/// diamond for a logpoint; red, or gray when the adapter could not set it,
+/// where a plain breakpoint becomes a hollow disc
+/// (`src/vs/workbench/contrib/debug/browser/breakpointsView.ts:1923-1960`).
+fn breakpoint_mark(kind: BreakpointKind, verified: bool) -> (&'static str, Color) {
+    let color = if verified {
+        Color::Red
+    } else {
+        Color::DarkGray
+    };
+    let glyph = match (kind, verified) {
+        (BreakpointKind::Plain, true) => "●",
+        (BreakpointKind::Plain, false) => "○",
+        (BreakpointKind::Condition | BreakpointKind::HitCount, _) => "◆",
+        (BreakpointKind::LogPoint, _) => "◇",
+    };
+    (glyph, color)
 }
 
 /// The most severe problem starting on each line, hints left out.
@@ -742,7 +765,7 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         highlights: document.highlights(view.top..view.top + height),
         markers,
     };
-    let breakpoints = app.workspace.breakpoints(id);
+    let breakpoints = app.workspace.breakpoint_details(id);
     let stopped = app.workspace.stopped_line(id);
     let buffer = frame.buffer_mut();
     for (row, line) in (view.top..lines).take(height).enumerate() {
@@ -750,7 +773,10 @@ fn draw_editor(app: &mut App, frame: &mut Frame, area: Rect, id: DocumentId) {
         let debug = if stopped == Some(line) {
             Some(Mark::Stopped)
         } else {
-            breakpoints.contains(&line).then_some(Mark::Breakpoint)
+            breakpoints
+                .iter()
+                .find(|bp| bp.line == line)
+                .map(|bp| Mark::Breakpoint(bp.kind, bp.verified))
         };
         let mut spans = gutter_spans(&app.theme, letter, debug, line, gutter, line == cursor.line);
         spans.extend(row_spans(&context, line));
