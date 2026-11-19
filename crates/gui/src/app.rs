@@ -438,15 +438,10 @@ impl EditorApp {
     }
 
     /// "Change Language Mode": Ctrl+K M or a click on the status bar's
-    /// language opens the picker, which is drawn while it is open. Returns
-    /// whether a pick changed the document's language.
-    fn change_language(&mut self, ctx: &Context, clicked: bool) -> bool {
-        let chord = !self.language.is_open() && self.language.chord(ctx);
-        if let Some(id) = self
-            .workspace
-            .active_document()
-            .filter(|_| chord || clicked)
-        {
+    /// language (`open`) opens the picker, which is drawn while it is open.
+    /// Returns whether a pick changed the document's language.
+    fn change_language(&mut self, ctx: &Context, open: bool) -> bool {
+        if let Some(id) = self.workspace.active_document().filter(|_| open) {
             self.language.open(id);
         }
         match self.language.show(ctx, &mut self.workspace) {
@@ -737,6 +732,8 @@ impl eframe::App for EditorApp {
         self.workspace.poll_search();
         self.note();
         let tab = focus::tab_pressed(&ctx);
+        // Before the editor, which also reads Ctrl+K for Ctrl+K Ctrl+I.
+        let chord = !self.language.is_open() && self.language.chord(&ctx);
         let mut changed = self.workbench_keys(&ctx);
         self.default_focus(&ctx);
         let rect = ui.max_rect();
@@ -784,7 +781,7 @@ impl eframe::App for EditorApp {
             // one when it wraps around: draw that one now.
             ctx.request_repaint();
         }
-        changed |= self.change_language(&ctx, clicked_language);
+        changed |= self.change_language(&ctx, chord || clicked_language);
         self.update_title(&ctx);
         if let Some(latency) = &self.latency {
             latency.borrow_mut().frame(changed);

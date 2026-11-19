@@ -89,8 +89,10 @@ impl Picker {
                     && !modifiers.alt
                     && !modifiers.shift
                 {
+                    // Kept for the editor, whose Ctrl+K Ctrl+I shares the
+                    // first key.
                     chord = true;
-                    return false;
+                    return true;
                 }
                 let second = chord && *key == Key::M && !modifiers.alt && !modifiers.shift;
                 chord = false;

@@ -31,6 +31,7 @@ pub use extensions::{
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
+pub use languages::LanguagePick;
 pub use lsp::{
     CompletionKind, CompletionList, CompletionMove, CompletionRow, Hover, Marker, MarkerSeverity,
     Problem, ProblemCounts, ServerState, ServerStatus,

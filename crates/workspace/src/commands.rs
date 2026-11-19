@@ -27,6 +27,9 @@
 //! "Show or Focus Hover" on Ctrl+K Ctrl+I
 //! (`src/vs/editor/contrib/hover/browser/hoverActions.ts:28-70`); both return
 //! `false` when the document's server cannot answer.
+//! "Change Language Mode" on Ctrl+K M
+//! (`src/vs/workbench/browser/parts/editor/editorStatus.ts:1110-1131`; the
+//! frontends open the picker, [`Workspace::language_picks`]).
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
@@ -202,6 +205,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         "Show or Focus Hover",
         Editor,
         Some("Ctrl+K Ctrl+I"),
+    ),
+    command(
+        "workbench.action.editor.changeLanguageMode",
+        "Change Language Mode",
+        Workbench,
+        Some("Ctrl+K M"),
     ),
     command(
         "rustode.restartLanguageServer",
