@@ -73,6 +73,7 @@ impl Schema {
     /// - `editor.tabSize`, `editor.insertSpaces`, `editor.detectIndentation`:
     ///   `src/vs/editor/common/config/editorConfigurationSchema.ts:25`, `:46`, `:51`, defaults
     ///   from `src/vs/editor/common/core/misc/textModelDefaults.ts:6`;
+    /// - `editor.minimap.enabled`: `src/vs/editor/common/config/editorOptions.ts:3582`, `:3599-3603`;
     /// - `files.encoding`, `files.eol`, `files.trimTrailingWhitespace`,
     ///   `files.insertFinalNewline`, `files.autoSave`, `files.autoSaveDelay`:
     ///   `src/vs/workbench/contrib/files/browser/files.contribution.ts:197`, `:223`, `:244`,
@@ -94,6 +95,17 @@ impl Schema {
     #[must_use]
     #[allow(clippy::too_many_lines)] // one table row per setting
     pub fn builtin() -> Self {
+        let mut schema = Self::files_and_search();
+        schema.register(SettingSchema {
+            key: "editor.minimap.enabled".to_owned(),
+            kind: SettingType::Boolean,
+            default: Value::Bool(true),
+        });
+        schema
+    }
+
+    /// The `editor.tab*`, `files.*` and `search.*` settings of [`Self::builtin`].
+    fn files_and_search() -> Self {
         let mut schema = Self::empty();
         let number = |minimum, maximum| SettingType::Number { minimum, maximum };
         let enumeration =

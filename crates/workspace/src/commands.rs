@@ -201,6 +201,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         Some("Ctrl+Shift+M"),
     ),
     command(
+        "editor.action.toggleMinimap",
+        "View: Toggle Minimap",
+        Workbench,
+        None,
+    ),
+    command(
         "editor.action.triggerSuggest",
         "Trigger Suggest",
         Editor,
@@ -362,18 +368,7 @@ impl Workspace {
         match id {
             "workbench.action.nextEditor" => self.next_tab(),
             "workbench.action.previousEditor" => self.previous_tab(),
-            "workbench.action.debug.start" => {
-                return self.start_debugging().map(|()| true).map_err(Error::Debug);
-            }
-            "workbench.action.debug.continue" => {
-                return self
-                    .continue_debugging()
-                    .map(|()| true)
-                    .map_err(Error::Debug);
-            }
-            "workbench.action.debug.stop" => {
-                return self.stop_debugging().map(|()| true).map_err(Error::Debug);
-            }
+            "editor.action.toggleMinimap" => drop(self.toggle_minimap()),
             _ => {
                 let Some(document) = self.active_document() else {
                     return Ok(false);

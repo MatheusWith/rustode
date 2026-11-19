@@ -244,7 +244,7 @@ fn typing_in_the_editor_updates_the_count_while_the_widget_stays() {
     press(&mut harness, CTRL, Key::F);
     type_text(&mut harness, "a");
     assert_eq!(count(&harness), "1 of 2");
-    let end = editor(&harness).rect().left_top() + eframe::egui::vec2(300.0, 66.0);
+    let end = editor(&harness).rect().left_top() + eframe::egui::vec2(200.0, 66.0);
     click_at(&mut harness, end);
     assert!(editor(&harness).is_focused());
     type_text(&mut harness, " a");

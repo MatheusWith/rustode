@@ -26,6 +26,13 @@ impl Workspace {
     pub fn reload_config(&mut self) -> ConfigChange {
         let change = self.config.reload();
         log_change(&self.config, &change);
+        if change
+            .settings
+            .iter()
+            .any(|s| s.language.is_none() && s.key == crate::MINIMAP_SETTING)
+        {
+            self.minimap_toggled = None;
+        }
         if !change.settings.is_empty() {
             self.lsp_config_changed();
             self.dap_config_changed();

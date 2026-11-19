@@ -15,6 +15,7 @@ mod keyboard;
 mod language;
 mod layout;
 mod lsp;
+mod minimap;
 mod quick_input;
 mod scale;
 mod search;

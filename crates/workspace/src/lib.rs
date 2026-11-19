@@ -13,6 +13,7 @@ mod fuzzy;
 mod language;
 mod languages;
 mod lsp;
+mod minimap;
 mod quick_open;
 mod search;
 mod tabs;
@@ -42,6 +43,7 @@ pub use lsp::{
     CompletionKind, CompletionList, CompletionMove, CompletionRow, Hover, Marker, MarkerSeverity,
     Problem, ProblemCounts, ServerState, ServerStatus,
 };
+pub use minimap::{MINIMAP_SETTING, MinimapRun};
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
 pub use rustode_core::{EditError, Movement, Position, Range, Selection};
 pub use rustode_fs::{Encoding, Eol};
@@ -212,6 +214,9 @@ pub struct Workspace {
     search: search::Searches,
     /// `files.associations`, read again whenever the settings load.
     associations: language::Associations,
+    /// What `editor.action.toggleMinimap` set since `editor.minimap.enabled`
+    /// last changed.
+    minimap_toggled: Option<bool>,
 }
 
 impl Workspace {
