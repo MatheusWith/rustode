@@ -7,6 +7,7 @@
 //! Snapshots live in `tests/snapshots/`. Regenerate them with
 //! `UPDATE_SNAPSHOTS=1 cargo nextest run -p rustode-gui`.
 
+mod debug;
 mod editor;
 mod extensions;
 mod find;

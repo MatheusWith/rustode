@@ -185,6 +185,12 @@ pub(crate) enum Workbench {
     FindNext,
     /// Shift+F3: the previous match.
     FindPrevious,
+    /// F5: start debugging, or continue a stopped program.
+    DebugKey,
+    /// Shift+F5: stop debugging.
+    DebugStop,
+    /// F9: a breakpoint on the cursor's line.
+    ToggleBreakpoint,
 }
 
 impl Workbench {
@@ -246,6 +252,9 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::H, true, false, false) => Workbench::Replace,
         (Key::F3, false, false, false) => Workbench::FindNext,
         (Key::F3, false, true, false) => Workbench::FindPrevious,
+        (Key::F5, false, false, false) => Workbench::DebugKey,
+        (Key::F5, false, true, false) => Workbench::DebugStop,
+        (Key::F9, false, false, false) => Workbench::ToggleBreakpoint,
         _ => return None,
     })
 }
