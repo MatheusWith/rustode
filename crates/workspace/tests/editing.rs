@@ -122,6 +122,22 @@ fn undo_back_to_the_saved_state_is_clean_again() {
 }
 
 #[test]
+fn every_edit_gives_a_new_version_and_undo_returns_to_the_earlier_one() {
+    let (mut ws, id, _) = open("version", "a");
+    let version = |ws: &Workspace| ws.document(id).expect("doc").version();
+    let opened = version(&ws);
+    ws.set_cursor(id, 1).expect("cursor");
+    assert_eq!(version(&ws), opened, "moving the cursor keeps the version");
+    type_str(&mut ws, id, "b");
+    let typed = version(&ws);
+    assert_ne!(typed, opened);
+    ws.undo(id).expect("undo");
+    assert_eq!(version(&ws), opened);
+    ws.redo(id).expect("redo");
+    assert_eq!(version(&ws), typed);
+}
+
+#[test]
 fn edits_emit_events_and_out_of_range_edits_are_refused() {
     let (mut ws, id, _) = open("events", "abc");
     let _ = ws.take_events();

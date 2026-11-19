@@ -32,7 +32,20 @@
 //! - Ctrl+Shift+M toggles the problems panel
 //!   (`src/vs/workbench/contrib/markers/browser/markers.contribution.ts:150-154`);
 //! - Ctrl+Shift+F shows the Search view
-//!   (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:239-242`).
+//!   (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:239-242`);
+//! - Ctrl+Q quits (`src/vs/workbench/electron-browser/desktop.contribution.ts:82-91`);
+//! - Ctrl+P opens quick open, and in it selects the next row
+//!   (`src/vs/workbench/browser/actions/quickAccessActions.ts:24-28`, `:75-84`);
+//!   Ctrl+Shift+P or F1 the command palette
+//!   (`src/vs/workbench/contrib/quickaccess/browser/commandsQuickAccess.ts:275-285`);
+//!   Ctrl+G go to line
+//!   (`src/vs/workbench/contrib/codeEditor/browser/quickaccess/gotoLineQuickAccess.ts:71-84`);
+//! - Ctrl+F finds, Ctrl+H replaces, F3 and Shift+F3 go to the next and
+//!   previous match (`src/vs/editor/contrib/find/browser/findController.ts:572`,
+//!   `:783-809`, `:1010`).
+//!
+//! The quick input and the find widget handle their own keys (`quick_input.rs`,
+//! `find.rs`).
 //!
 //! In the explorer, as in VS Code's lists
 //! (`src/vs/workbench/browser/actions/listCommands.ts:336-365`, `:461-464`,
@@ -156,6 +169,46 @@ pub(crate) enum Workbench {
     ToggleProblems,
     /// Ctrl+Shift+F: the Search view in the sidebar.
     ShowSearch,
+    /// Ctrl+Q: closes the window; with unsaved changes, only when asked twice.
+    Quit,
+    /// Ctrl+P: quick open.
+    QuickOpen,
+    /// Ctrl+Shift+P or F1: the command palette.
+    ShowCommands,
+    /// Ctrl+G: go to a line.
+    GotoLine,
+    /// Ctrl+F: the find widget.
+    Find,
+    /// Ctrl+H: the find widget with its replace field.
+    Replace,
+    /// F3: the next match of the last search.
+    FindNext,
+    /// Shift+F3: the previous match.
+    FindPrevious,
+}
+
+impl Workbench {
+    /// The workbench command a registry id names, for the command palette.
+    pub(crate) fn from_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "workbench.action.files.save" => Self::Save,
+            "workbench.action.quit" => Self::Quit,
+            "workbench.action.closeActiveEditor" => Self::CloseTab,
+            "workbench.view.explorer" => Self::FocusExplorer,
+            "workbench.view.extensions" => Self::ShowExtensions,
+            "workbench.action.focusNextPart" => Self::FocusNextPart,
+            "workbench.action.findInFiles" => Self::ShowSearch,
+            "workbench.actions.view.problems" => Self::ToggleProblems,
+            "workbench.action.quickOpen" => Self::QuickOpen,
+            "workbench.action.showCommands" => Self::ShowCommands,
+            "workbench.action.gotoLine" => Self::GotoLine,
+            "actions.find" => Self::Find,
+            "editor.action.startFindReplaceAction" => Self::Replace,
+            "editor.action.nextMatchFindAction" => Self::FindNext,
+            "editor.action.previousMatchFindAction" => Self::FindPrevious,
+            _ => return None,
+        })
+    }
 }
 
 /// The workbench command for one input event, if it is a workbench key.
@@ -185,6 +238,14 @@ pub(crate) fn workbench(event: &Event) -> Option<Workbench> {
         (Key::F6, false, false, false) => Workbench::FocusNextPart,
         (Key::F6, false, true, false) => Workbench::FocusPreviousPart,
         (Key::M, true, false, false) => Workbench::ToggleTabMovesFocus,
+        (Key::Q, true, false, false) => Workbench::Quit,
+        (Key::P, true, false, false) => Workbench::QuickOpen,
+        (Key::P, true, true, false) | (Key::F1, false, false, false) => Workbench::ShowCommands,
+        (Key::G, true, false, false) => Workbench::GotoLine,
+        (Key::F, true, false, false) => Workbench::Find,
+        (Key::H, true, false, false) => Workbench::Replace,
+        (Key::F3, false, false, false) => Workbench::FindNext,
+        (Key::F3, false, true, false) => Workbench::FindPrevious,
         _ => return None,
     })
 }

@@ -32,6 +32,11 @@
 //! - **Keyboard only.** F6 and Shift+F6 cycle the parts, Tab and Shift+Tab
 //!   move through them, each focused element is outlined, and the AccessKit
 //!   focus follows (`focus.rs`).
+//! - **Quick input and find.** Ctrl+P, Ctrl+Shift+P or F1, and Ctrl+G open
+//!   the quick input over the editor area: an editable combo box over a list
+//!   box of files, commands from the workspace's registry, or a line
+//!   (`quick_input.rs`). Ctrl+F and Ctrl+H open the find widget at the
+//!   editor's top right, with every match in view highlighted (`find.rs`).
 //!
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
@@ -41,12 +46,15 @@ mod app;
 mod editor;
 mod explorer;
 mod extensions;
+mod find;
 mod focus;
 pub mod fonts;
+mod input;
 mod keys;
 pub mod latency;
 pub mod layout;
 mod problems;
+mod quick_input;
 mod run;
 mod search;
 mod status;

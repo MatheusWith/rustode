@@ -4,7 +4,7 @@
 //! to their problem. The server is `rustode-test-lsp`, which reports every
 //! `ERROR` and `WARN`. Going to a problem opens or activates its file's tab.
 
-use super::{press, status};
+use super::{press, status, type_text};
 use eframe::egui::{self, Key, Modifiers, ViewportId, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -276,4 +276,16 @@ fn the_counts_drop_out_of_a_status_bar_too_narrow_for_them() {
     harness.set_size(egui::Vec2::new(30.0, 360.0));
     harness.run();
     assert!(counts(&harness).is_none(), "{:?}", counts(&harness));
+}
+
+#[test]
+fn find_highlights_squiggles_and_token_colors_are_drawn_together() {
+    let mut harness = open("find-squiggles");
+    wait(&mut harness, |h| {
+        counts(h).is_some_and(|c| c.starts_with("Errors"))
+    });
+    press(&mut harness, Modifiers::COMMAND, Key::F);
+    type_text(&mut harness, "ar");
+    harness.run();
+    harness.snapshot("lsp_find_squiggles");
 }

@@ -18,7 +18,8 @@
 //!   when it collapses, is `layout.rs`; how focus moves, `focus.rs`.
 //!
 //! As in the TUI, closing a tab with unsaved changes asks first: a second
-//! Ctrl+W, or a second click on its close button, discards them.
+//! Ctrl+W, or a second click on its close button, discards them; quitting
+//! with unsaved changes asks the same way, with a second Ctrl+Q.
 //!
 //! Language servers: the window gives the workspace one waker, which
 //! requests a repaint, so diagnostics (and extension results) show while
@@ -26,11 +27,15 @@
 //! Ctrl+Shift+M or a click on the status bar's counts toggles the problems
 //! panel below the editor ([`crate::problems`]); going to a problem opens or
 //! activates its file's tab.
+//!
+//! The quick input (`quick_input.rs`) and the find widget (`find.rs`) float
+//! above the workbench; `app/overlays.rs` opens them and runs what they ask.
 
 use crate::focus::Part;
 use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
-use crate::{editor, explorer, extensions, focus, layout, problems, search, status, tabs};
+use crate::quick_input::QuickInput;
+use crate::{editor, explorer, extensions, find, focus, layout, problems, search, status, tabs};
 use eframe::egui::{
     self, Color32, Context, FontId, Label, Rect, RichText, Sense, UiBuilder, Vec2, ViewportCommand,
 };
@@ -42,8 +47,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+mod overlays;
+
 /// The status bar prompt after closing a tab with unsaved changes.
 const CLOSE_PROMPT: &str = "Unsaved changes: Ctrl+W again closes without saving, Ctrl+S saves";
+/// The status bar prompt after quitting with unsaved changes, as in the TUI.
+const QUIT_PROMPT: &str = "Unsaved changes: Ctrl+Q again quits without saving, Ctrl+S saves";
 const EDITOR_BACKGROUND: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
 const HINT: Color32 = Color32::from_rgb(0x9d, 0x9d, 0x9d);
 
@@ -87,6 +96,12 @@ pub struct EditorApp {
     focus_editor_next: bool,
     /// The Search view, shown in the sidebar instead of the explorer.
     search: search::Panel,
+    /// The open quick input, if any.
+    quick: Option<QuickInput>,
+    /// The find widget; kept while closed, so F3 repeats the last search.
+    find: find::Find,
+    /// Whether the next quit discards unsaved changes.
+    confirm_quit: bool,
 }
 
 fn file_name(document: &Document) -> String {
@@ -169,6 +184,9 @@ impl EditorApp {
             search: search::Panel::default(),
             problems: problems::Panel::default(),
             focus_editor_next: false,
+            quick: None,
+            find: find::Find::default(),
+            confirm_quit: false,
         }
     }
 
@@ -291,7 +309,7 @@ impl EditorApp {
     fn go_to_problem(&mut self, ctx: &Context, problem: &Problem) {
         match self.workspace.go_to_problem(problem) {
             Ok(id) => {
-                self.views.entry(id).or_default().reveal = true;
+                self.views.entry(id).or_default().reveal();
                 self.focus_editor_next = true;
                 ctx.request_repaint();
             }
@@ -361,6 +379,9 @@ impl EditorApp {
         {
             self.confirm_close = None;
         }
+        if typed || commands.iter().any(|&command| command != Workbench::Quit) {
+            self.confirm_quit = false;
+        }
         for &command in &commands {
             self.run_workbench(ctx, command);
         }
@@ -391,6 +412,14 @@ impl EditorApp {
                 self.extensions.shown = false;
                 self.search.show_search(&self.workspace);
             }
+            Workbench::Quit => self.quit(ctx),
+            Workbench::QuickOpen => self.open_quick(ctx, ""),
+            Workbench::ShowCommands => self.open_quick(ctx, ">"),
+            Workbench::GotoLine => self.open_quick(ctx, ":"),
+            Workbench::Find
+            | Workbench::Replace
+            | Workbench::FindNext
+            | Workbench::FindPrevious => self.run_find(ctx, command),
         }
     }
 
@@ -611,13 +640,14 @@ impl EditorApp {
             .document(id)
             .map_or_else(Default::default, file_name);
         let view = self.views.entry(id).or_default();
+        let matches = self.find.highlights(&self.workspace);
         let workspace = &mut self.workspace;
         let outcome = ui
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(rect)
                     .id_salt("rustode-editor-area"),
-                |ui| editor::show(ui, workspace, id, view, &name),
+                |ui| editor::show(ui, workspace, id, view, &name, matches),
             )
             .inner;
         if let Some(error) = outcome.error {
@@ -632,7 +662,7 @@ fn empty_group(ui: &mut egui::Ui, rect: Rect) {
     ui.painter().rect_filled(rect, 0.0, EDITOR_BACKGROUND);
     let lines = [
         "No file open",
-        "Open one from the explorer: Ctrl+Shift+E or Shift+F6",
+        "Open one with Ctrl+P, or from the explorer: Ctrl+Shift+E or Shift+F6",
     ];
     for (row, line) in (0_u8..).zip(lines) {
         let center = rect.center() + Vec2::new(0.0, (f32::from(row) - 0.5) * 20.0);
@@ -662,12 +692,17 @@ impl eframe::App for EditorApp {
         let rect = ui.max_rect();
         let areas = layout::areas(rect, self.sidebar.fit(rect.width()));
         self.sidebar_area = areas.sidebar;
+        changed |= self.show_overlays(ui, &areas);
         if let Some(sidebar) = areas.sidebar {
             changed |= self.show_sidebar(ui, sidebar);
         }
         changed |= self.show_tabs(ui, areas.tabs);
         let editor = self.show_problems(ui, areas.editor);
         changed |= self.show_editor(ui, editor);
+        if self.find.is_stale(&self.workspace) {
+            // The editor changed the text after the matches were found.
+            ctx.request_repaint();
+        }
         self.note();
         let message = self
             .message

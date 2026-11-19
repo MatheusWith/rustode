@@ -9,9 +9,11 @@
 
 mod editor;
 mod extensions;
+mod find;
 mod keyboard;
 mod layout;
 mod lsp;
+mod quick_input;
 mod scale;
 mod search;
 mod workbench;
