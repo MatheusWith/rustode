@@ -268,6 +268,13 @@ fn quick_line(item: &QuickItem, width: usize, selected: bool, theme: &Theme) -> 
             (vec![Span::raw(text)], String::new())
         }
         QuickItem::Hint(hint) => (vec![Span::styled(format!(" {hint}"), dim)], String::new()),
+        QuickItem::Location(_, location) => (
+            vec![
+                Span::raw(format!(" {}", location.preview)),
+                Span::styled(format!("  {}", crate::navigate::place(location)), dim),
+            ],
+            String::new(),
+        ),
         QuickItem::Language(pick) => {
             let mut spans = highlighted(
                 &format!(" {}", pick.label),

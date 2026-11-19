@@ -130,7 +130,8 @@ fn workspace_edit(edit: &Value) -> Result<Vec<FileEdits>, String> {
 
 /// Where char `offset` goes when `edits` (sorted, not overlapping, as char
 /// ranges and the chars that replace them) are applied: past an edit it
-/// moves with the text, inside one it goes to the end of the new text.
+/// moves with the text, inside one it keeps its distance from the start of
+/// the edit, within the new text.
 fn follow(offset: usize, edits: &[(Range, usize)]) -> usize {
     let (mut added, mut removed) = (0_usize, 0_usize);
     for (range, inserted) in edits {
@@ -138,11 +139,12 @@ fn follow(offset: usize, edits: &[(Range, usize)]) -> usize {
             added = added.saturating_add(*inserted);
             removed = removed.saturating_add(range.len());
         } else if range.start < offset {
+            let inside = (offset - range.start).min(*inserted);
             return range
                 .start
                 .saturating_add(added)
                 .saturating_sub(removed)
-                .saturating_add(*inserted);
+                .saturating_add(inside);
         } else {
             break;
         }
@@ -448,7 +450,8 @@ mod tests {
     fn offsets_follow_the_edits_around_them() {
         let edits = [(Range::new(2, 4), 5), (Range::new(10, 10), 3)];
         assert_eq!(follow(0, &edits), 0);
-        assert_eq!(follow(3, &edits), 7, "inside an edit: its new end");
+        assert_eq!(follow(3, &edits), 3, "inside an edit: same distance in");
+        assert_eq!(follow(4, &[(Range::new(2, 6), 1)]), 3, "or its new end");
         assert_eq!(follow(6, &edits), 9);
         assert_eq!(follow(12, &edits), 18);
     }

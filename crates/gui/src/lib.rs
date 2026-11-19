@@ -65,6 +65,7 @@ mod language;
 pub mod latency;
 pub mod layout;
 mod minimap;
+mod navigate;
 mod problems;
 mod quick_input;
 mod run;

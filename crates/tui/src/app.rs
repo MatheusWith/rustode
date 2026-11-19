@@ -87,6 +87,10 @@ pub(crate) struct QuickInput {
     /// Picking the language of this document ("Change Language Mode")
     /// instead of a file, command or line.
     pub language: Option<DocumentId>,
+    /// Listing the locations a definition or references request found.
+    pub locations: bool,
+    /// Typing the new name of the symbol of this document ("Rename Symbol").
+    pub rename: Option<DocumentId>,
 }
 
 /// One row of the quick input list.
@@ -101,6 +105,8 @@ pub(crate) enum QuickItem {
     Hint(String),
     /// A language of the "Change Language Mode" picker.
     Language(rustode_workspace::LanguagePick),
+    /// A place of the workspace's list of locations, with its index there.
+    Location(usize, rustode_workspace::SymbolLocation),
 }
 
 /// Rows the quick input list shows at most.
@@ -362,6 +368,9 @@ impl App {
         if self.focus == Focus::Editor && self.suggest_key(key) {
             return;
         }
+        if self.focus == Focus::Editor && self.navigate_key(key) {
+            return;
+        }
         match self.focus {
             Focus::Editor => {
                 if let Some(command) = keys::command(key).filter(|c| !self.removed(c, key)) {
@@ -458,6 +467,9 @@ impl App {
     fn run_id(&mut self, id: &str) {
         if let Some(command) = keys::from_id(id) {
             self.run_command(command);
+            return;
+        }
+        if self.run_language(id) {
             return;
         }
         match self.workspace.execute(id) {
@@ -806,6 +818,7 @@ impl App {
             text: prefix.to_owned(),
             selected: 0,
             language: None,
+            ..QuickInput::default()
         });
     }
 
@@ -815,6 +828,9 @@ impl App {
             return Vec::new();
         };
         if let Some(items) = self.language_items(&text) {
+            return items;
+        }
+        if let Some(items) = self.navigate_items(&text) {
             return items;
         }
         match parse_quick_query(&text) {
@@ -852,7 +868,10 @@ impl App {
             return;
         };
         match key.code {
-            KeyCode::Esc => self.quick = None,
+            KeyCode::Esc => {
+                self.quick = None;
+                self.close_locations();
+            }
             KeyCode::Enter => self.run_quick(),
             KeyCode::Up => quick.selected = quick.selected.saturating_sub(1),
             KeyCode::Down => quick.selected = (quick.selected + 1).min(count.saturating_sub(1)),
@@ -873,6 +892,10 @@ impl App {
 
     fn run_quick(&mut self) {
         let selected = self.quick.as_ref().map_or(0, |q| q.selected);
+        if let Some(quick) = self.quick.take_if(|q| q.rename.is_some()) {
+            self.rename_to(&quick.text);
+            return;
+        }
         let item = self.quick_items().into_iter().nth(selected);
         self.quick = None;
         match item {
@@ -886,6 +909,7 @@ impl App {
                 self.report(|ws, id| ws.go_to_line(id, line, column));
             }
             Some(QuickItem::Language(pick)) => self.pick_language(&pick),
+            Some(QuickItem::Location(index, _)) => self.pick_location(index),
             Some(QuickItem::Hint(_)) | None => {}
         }
     }
@@ -1087,6 +1111,11 @@ impl App {
                     Some(message) => message,
                     None => continue,
                 },
+                WorkspaceEvent::Notice(text) => text.clone(),
+                WorkspaceEvent::LocationsChanged => {
+                    self.show_locations();
+                    continue;
+                }
                 WorkspaceEvent::LanguageServerChanged {
                     language,
                     state: ServerState::Crashed,

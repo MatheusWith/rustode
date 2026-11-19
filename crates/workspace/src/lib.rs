@@ -169,6 +169,13 @@ pub enum Event {
     /// A definition or references request found several places to pick from
     /// ([`Workspace::locations`]), or the list closed.
     LocationsChanged,
+    /// The selection moved to a place in another part of a document, in
+    /// another document or not: a definition or a picked location. The
+    /// frontend scrolls to it.
+    Navigated {
+        /// The document.
+        id: DocumentId,
+    },
     /// Something a language request did or could not do, in a sentence for
     /// the status bar: "No definition found for 'x'", what a rename changed,
     /// why a format was refused.

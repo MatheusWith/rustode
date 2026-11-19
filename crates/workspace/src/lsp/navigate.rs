@@ -76,6 +76,30 @@ pub struct Locations {
     pub locations: Vec<SymbolLocation>,
 }
 
+impl Locations {
+    /// The places whose file name or text contain `query` (case does not
+    /// matter; all of them for an empty query), each with its index in
+    /// [`locations`](Self::locations), which
+    /// [`Workspace::pick_location`] takes.
+    #[must_use]
+    pub fn filtered(&self, query: &str) -> Vec<(usize, &SymbolLocation)> {
+        let query = query.trim().to_lowercase();
+        self.locations
+            .iter()
+            .enumerate()
+            .filter(|(_, location)| {
+                query.is_empty()
+                    || location.preview.to_lowercase().contains(&query)
+                    || location
+                        .path
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .contains(&query)
+            })
+            .collect()
+    }
+}
+
 /// The symbol a rename would change: the word under the cursor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenameTarget {
@@ -332,6 +356,7 @@ impl Workspace {
         let start = doc.offset_of(location.start);
         let end = doc.offset_of(location.end).max(start);
         self.set_selections(id, vec![Selection::new(start, end)], 0)?;
+        self.events.push(Event::Navigated { id });
         Ok(id)
     }
 

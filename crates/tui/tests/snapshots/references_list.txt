@@ -1,0 +1,14 @@
+ main.rs │
+   1 fn helper() {}┌──────────────────────────────────────────────────────────────────────────────┐
+   2 fn main() {   │                                                                              │
+   3     helper(); │ fn helper() {}  main.rs:1                                                    │
+   4 }             │ helper();  main.rs:3                                                         │
+   5               │ helper();  other.rs:2                                                        │
+                   └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+ E 0 W 0  main.rs  References of 'helper': 3                            Ln 3, Col 7  UTF-8  LF  rustode-test-lsp  Rust
