@@ -3,7 +3,7 @@
 //! the AccessKit tree (a tree of tree items, a tab list of tabs, a status
 //! node of labels), the window title and image snapshots.
 
-use super::{open_paths, press, status, temp_dir, type_text};
+use super::{open_paths, press, quiet, status, temp_dir, type_text};
 use eframe::egui::{
     Event, Key, Modifiers, MouseWheelUnit, TouchPhase, Vec2, ViewportId, accesskit::Role,
 };
@@ -244,7 +244,7 @@ fn clicking_a_tab_activates_it_and_its_close_button_closes_it() {
     let paths = three_files("click-tabs");
     let mut harness = open_paths(&paths, SIZE);
     harness.get_by_role_and_label(Role::Tab, "a.rs").click();
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(tabs(&harness), ["a.rs *", "b.md", "c.txt"]);
     assert!(editor(&harness).is_focused());
     harness
@@ -252,7 +252,7 @@ fn clicking_a_tab_activates_it_and_its_close_button_closes_it() {
         .query_by_role(Role::Button)
         .expect("each tab has a close button")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(tabs(&harness), ["a.rs *", "c.txt"], "b.md closed");
     let closes = harness.query_all_by_role_and_label(Role::Button, "Close");
     assert_eq!(closes.count(), 2, "one close button per tab");
@@ -304,7 +304,7 @@ fn clicking_explorer_rows_toggles_folders_and_opens_files_keeping_focus() {
     let root = project("click-rows");
     let mut harness = open_paths(&[root], SIZE);
     harness.get_by_role_and_label(Role::TreeItem, "src").click();
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(
         rows(&harness),
         ["▾ src <", "    lib.rs", "    main.rs", "  README.md"]
@@ -312,7 +312,7 @@ fn clicking_explorer_rows_toggles_folders_and_opens_files_keeping_focus() {
     harness
         .get_by_role_and_label(Role::TreeItem, "main.rs")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(tabs(&harness), ["main.rs *"]);
     assert!(explorer_focused(&harness), "a click keeps the focus here");
     assert_eq!(rows(&harness)[2], "    main.rs <");
@@ -375,7 +375,7 @@ fn only_the_explorer_rows_in_view_are_exposed_and_the_wheel_scrolls_them() {
         phase: TouchPhase::Move,
         modifiers: NONE,
     });
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(first(&harness), before - 8, "the wheel scrolled 8 rows up");
     assert!(
         rows(&harness).iter().all(|row| !row.ends_with('<')),

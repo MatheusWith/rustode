@@ -5,7 +5,7 @@
 //! listing commands and reading the text are tested at the workspace seam
 //! (`crates/workspace/tests/quick_open.rs`).
 
-use super::{assert_status, open_paths, press, status, temp_dir, type_text};
+use super::{assert_status, open_paths, press, quiet, status, temp_dir, type_text};
 use eframe::egui::{Event, Key, Modifiers, Vec2, ViewportCommand, ViewportId, accesskit::Role};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_kittest::{Harness, Node};
@@ -209,7 +209,7 @@ fn up_and_down_wrap_ctrl_p_moves_down_and_a_click_runs_a_row() {
     harness
         .get_by_role_and_label(Role::ListBoxOption, "View: Show Explorer")
         .click();
-    harness.run();
+    quiet(&mut harness);
     assert!(harness.query_by_role(Role::EditableComboBox).is_none());
     let tree = harness.get_by_role(Role::Tree);
     assert!(
@@ -265,7 +265,7 @@ fn clicking_outside_closes_the_box() {
     harness.hover_at(bottom);
     harness.drag_at(bottom);
     harness.drop_at(bottom);
-    harness.run();
+    quiet(&mut harness);
     assert!(
         harness.query_by_role(Role::EditableComboBox).is_none(),
         "the box closed when the editor took focus"
@@ -295,7 +295,7 @@ fn ctrl_q_asks_before_quitting_with_unsaved_changes() {
     type_text(&mut harness, "x");
     ctrl_q(&mut harness);
     assert!(!closed(&harness));
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(
         status(&harness)[0],
         "Unsaved changes: Ctrl+Q again quits without saving, Ctrl+S saves"

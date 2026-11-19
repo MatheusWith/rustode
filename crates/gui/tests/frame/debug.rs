@@ -4,7 +4,7 @@
 //! F5 continues it to the end and Shift+F5 stops it. The adapter is
 //! `rustode-test-dap`, whose program is a text file.
 
-use super::{press, status};
+use super::{press, quiet, status};
 use eframe::egui::{Event, Key, Modifiers, PointerButton, Pos2, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -69,7 +69,7 @@ fn open(name: &str) -> Harness<'static, EditorApp> {
             rustode_gui::fonts::install(&cc.egui_ctx);
             app
         });
-    harness.run();
+    quiet(&mut harness);
     harness.state_mut().load_user_config(&base.join("user"));
     harness
 }
@@ -86,7 +86,7 @@ fn wait(harness: &mut Harness<'_, EditorApp>, done: impl Fn(&Harness<'_, EditorA
             std::thread::sleep(Duration::from_millis(5));
         }
     }
-    harness.run();
+    quiet(harness);
 }
 
 fn debug_item(harness: &Harness<'_, EditorApp>) -> Option<String> {
@@ -105,7 +105,7 @@ fn click_at(harness: &mut Harness<'_, EditorApp>, pos: Pos2) {
             modifiers: Modifiers::NONE,
         });
     }
-    harness.run();
+    quiet(harness);
 }
 
 #[test]

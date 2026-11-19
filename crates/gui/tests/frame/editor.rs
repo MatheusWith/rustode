@@ -1,7 +1,7 @@
 //! The editor area: typing, selecting, scrolling and saving, as the
 //! AccessKit tree, the window title and image snapshots show them.
 
-use super::{HEIGHT, assert_status, fixture, open, open_text, press, status, type_text};
+use super::{HEIGHT, assert_status, fixture, open, open_text, press, quiet, status, type_text};
 use eframe::egui::{
     self, Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2, ViewportId,
     accesskit::Role,
@@ -54,7 +54,7 @@ fn click_at(harness: &mut Harness<'_, EditorApp>, pos: Pos2, modifiers: Modifier
             modifiers,
         });
     }
-    harness.run();
+    quiet(harness);
 }
 
 /// Lines of the editor area (window minus tab strip and status bar):
@@ -258,7 +258,7 @@ fn the_mouse_wheel_scrolls_without_moving_the_caret() {
         phase: TouchPhase::Move,
         modifiers: Modifiers::NONE,
     });
-    harness.run();
+    quiet(&mut harness);
     assert!(
         shown(&harness).starts_with("line 10\n"),
         "{}",
@@ -347,7 +347,7 @@ fn resizing_the_window_changes_how_many_lines_are_shown() {
         super::WIDTH,
         TAB_HEIGHT + STATUS_BAR_HEIGHT + 5.0 * LINE_HEIGHT,
     ));
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(exposed_lines(&harness), 5);
     assert_eq!(shown(&harness), "line 0\nline 1\nline 2\nline 3\nline 4");
 }
@@ -396,7 +396,7 @@ fn the_window_settles_after_input_and_schedules_no_frame() {
     type_text(&mut harness, "x");
     press(&mut harness, Modifiers::SHIFT, Key::ArrowLeft);
     harness.hover_at(Pos2::new(100.0, 50.0));
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(
         idle(&harness),
         Duration::MAX,
@@ -423,6 +423,6 @@ fn a_file_changed_on_disk_is_shown_on_the_next_frame() {
 fn ime_commits_are_typed() {
     let mut harness = open_text("ime", "");
     harness.event(Event::Ime(egui::ImeEvent::Commit("çé".to_owned())));
-    harness.run();
+    quiet(&mut harness);
     assert_eq!(shown(&harness), "çé");
 }
