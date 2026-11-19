@@ -127,8 +127,16 @@ fn columns_past_the_maximum_are_not_returned() {
 fn a_range_past_the_end_is_clamped_and_an_empty_one_is_empty() {
     let (ws, id) = open("range", "a.txt", "a\nb");
     assert_eq!(ws.minimap_lines(id, 1..50, 120).expect("lines").len(), 1);
-    assert!(ws.minimap_lines(id, 5..9, 120).expect("lines").is_empty());
-    assert!(ws.minimap_lines(id, 2..1, 120).expect("lines").is_empty());
+    assert_eq!(
+        ws.minimap_lines(id, 5..9, 120).expect("lines"),
+        Vec::<Vec<MinimapRun>>::new()
+    );
+    #[allow(clippy::reversed_empty_ranges)] // a hostile range is the point of this test
+    let backwards = 2..1;
+    assert_eq!(
+        ws.minimap_lines(id, backwards, 120).expect("lines"),
+        Vec::<Vec<MinimapRun>>::new()
+    );
 }
 
 #[test]

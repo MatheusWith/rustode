@@ -21,17 +21,22 @@ fn shown(harness: &Harness<'_, EditorApp>) -> String {
 }
 
 fn numbered_lines(count: usize) -> String {
-    (1..=count).map(|n| format!("line {n}\n")).collect()
+    use std::fmt::Write as _;
+    (1..=count).fold(String::new(), |mut text, n| {
+        let _ = writeln!(text, "line {n}");
+        text
+    })
 }
 
 fn rust_source(count: usize) -> String {
-    (0..count)
-        .map(|n| {
-            format!(
-                "fn function_{n}(value: u32) -> u32 {{\n    // step {n}\n    value + {n}\n}}\n\n"
-            )
-        })
-        .collect()
+    use std::fmt::Write as _;
+    (0..count).fold(String::new(), |mut text, n| {
+        let _ = write!(
+            text,
+            "fn function_{n}(value: u32) -> u32 {{\n    // step {n}\n    value + {n}\n}}\n\n"
+        );
+        text
+    })
 }
 
 /// The text area's right edge, where the minimap starts, and its top.
