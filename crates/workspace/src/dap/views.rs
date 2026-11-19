@@ -231,6 +231,8 @@ impl Workspace {
             "debugState" => ContextValue::Str(state.label().to_owned()),
             "inDebugMode" => ContextValue::Bool(state != DebugState::Inactive),
             "threadHasMultipleStackFrames" => ContextValue::Bool(frames > 1),
+            "activeEditorGroupEmpty" => ContextValue::Bool(self.active_document().is_none()),
+            "multipleEditorGroups" => ContextValue::Bool(self.group_ids().len() > 1),
             _ => ContextValue::Undefined,
         };
         parse_when(clause).is_ok_and(|when| when.evaluate(&context))

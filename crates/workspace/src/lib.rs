@@ -11,6 +11,7 @@ pub mod extensions;
 mod external;
 mod find;
 mod fuzzy;
+mod groups;
 mod language;
 mod languages;
 mod lsp;
@@ -42,6 +43,7 @@ pub use extensions::{
 pub use external::Resolution;
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
+pub use groups::{Axis, Direction, GroupId, Layout, SplitDirection};
 pub use languages::LanguagePick;
 pub use lsp::{
     CompletionKind, CompletionList, CompletionMove, CompletionRow, Hover, Locations, LocationsKind,
@@ -50,7 +52,7 @@ pub use lsp::{
 };
 pub use minimap::{MINIMAP_SETTING, MinimapRun};
 pub use quick_open::{FileMatch, QuickQuery, parse_quick_query};
-pub use rustode_core::{EditError, Movement, Position, Range, Selection};
+pub use rustode_core::{EditError, Movement, Position, Range, Selection, Selections};
 pub use rustode_fs::{Encoding, Eol};
 /// What a highlighted run of text is; [`TokenKind::dark_modern`] gives its
 /// color in Dark Modern.
@@ -98,6 +100,8 @@ pub enum Error {
     UnknownLanguage(String),
     /// A debug command was refused.
     Debug(DebugError),
+    /// No editor group has this id.
+    UnknownGroup(GroupId),
 }
 
 /// Something that happened in the workspace, for frontends to react to.
@@ -166,6 +170,9 @@ pub enum Event {
     /// The debug session started, stopped, continued or ended, or a
     /// breakpoint was set or cleared ([`Workspace::debug_status`]).
     DebugChanged,
+    /// Editor groups were added, closed or rearranged, or the focus moved
+    /// to another group ([`Workspace::layout`]).
+    GroupsChanged,
     /// A hover arrived or went away ([`Workspace::hover`]).
     HoverChanged,
     /// The suggest list opened, changed or closed
@@ -202,6 +209,7 @@ impl fmt::Display for Error {
             Self::NoConflict(id) => write!(f, "{id:?} has no conflict to resolve"),
             Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
             Self::Debug(err) => err.fmt(f),
+            Self::UnknownGroup(id) => write!(f, "no editor group {id:?}"),
         }
     }
 }
@@ -218,8 +226,8 @@ pub struct Workspace {
     watcher: Option<rustode_fs::Watcher>,
     /// Settings and keybindings (`load_config`, `reload_config`).
     config: Config,
-    /// The editor group and its tabs (one group until splits arrive).
-    group: EditorGroup,
+    /// The editor groups, their layout and which one has focus.
+    groups: groups::Groups,
     /// The opened folder, if any.
     explorer: Option<Explorer>,
     /// The opened folder's files for quick open, listed on first use.
@@ -255,7 +263,7 @@ impl Workspace {
     /// When the file cannot be read.
     pub fn open(&mut self, path: &Path) -> Result<DocumentId, Error> {
         if let Some(id) = self.find_open(path) {
-            self.group.open(id);
+            self.open_in_group(self.groups.active, id);
             return Ok(id);
         }
         let bytes = rustode_fs::read_file(path).map_err(|source| Error::Io {
@@ -270,7 +278,7 @@ impl Workspace {
         if let Ok(absolute) = std::path::absolute(path) {
             self.open_index.insert(absolute, id);
         }
-        self.group.open(id);
+        self.open_in_group(self.groups.active, id);
         self.lsp_opened(id);
         Ok(id)
     }
@@ -281,22 +289,23 @@ impl Workspace {
         self.open_index.get(&wanted).copied()
     }
 
-    /// The tabs of the editor group, in display order.
+    /// The tabs of the active editor group, in display order.
     #[must_use]
     pub fn tabs(&self) -> &[DocumentId] {
-        self.group.tabs()
+        self.groups.active_group().tabs()
     }
 
-    /// The editor group.
+    /// The active editor group.
     #[must_use]
     pub fn group(&self) -> &EditorGroup {
-        &self.group
+        self.groups.active_group()
     }
 
-    /// The document of the active tab.
+    /// The document of the active tab of the active group: the one every
+    /// editor command works on.
     #[must_use]
     pub fn active_document(&self) -> Option<DocumentId> {
-        self.group.active()
+        self.groups.active_group().active()
     }
 
     /// Makes `id`'s tab the active one.
@@ -304,7 +313,7 @@ impl Workspace {
     /// # Errors
     /// When the document has no tab.
     pub fn activate(&mut self, id: DocumentId) -> Result<(), Error> {
-        if self.group.activate(id) {
+        if self.groups.active_group_mut().activate(id) {
             Ok(())
         } else {
             Err(Error::UnknownDocument(id))
@@ -313,29 +322,30 @@ impl Workspace {
 
     /// Activates the next tab, wrapping around (Ctrl+PageDown).
     pub fn next_tab(&mut self) {
-        self.group.cycle(true);
+        self.groups.active_group_mut().cycle(true);
     }
 
     /// Activates the previous tab, wrapping around (Ctrl+PageUp).
     pub fn previous_tab(&mut self) {
-        self.group.cycle(false);
+        self.groups.active_group_mut().cycle(false);
     }
 
     /// Activates the tab used before the active one: what a quick Ctrl+Tab
     /// does in VS Code, whose editor picker opens on the second most
     /// recently used editor.
     pub fn recently_used_tab(&mut self) {
-        self.group.activate_recent(false);
+        self.groups.active_group_mut().activate_recent(false);
     }
 
     /// Activates the tab used longest ago: what a quick Ctrl+Shift+Tab does
     /// in VS Code.
     pub fn least_recently_used_tab(&mut self) {
-        self.group.activate_recent(true);
+        self.groups.active_group_mut().activate_recent(true);
     }
 
-    /// Closes a document and its tab; the most recently used tab becomes
-    /// active. Unsaved changes are only dropped when `discard` is true.
+    /// Closes a document and its tabs in every group; the most recently used
+    /// tab of each becomes active, and a group left empty closes.
+    /// ([`Workspace::close_editor`] closes one tab of one group.) Unsaved changes are only dropped when `discard` is true.
     ///
     /// # Errors
     /// When there is no such document, or it is dirty and `discard` is false.
@@ -353,7 +363,7 @@ impl Workspace {
         self.lsp_closing(id);
         self.documents[id.0] = None;
         self.open_index.retain(|_, open| *open != id);
-        self.group.close(id);
+        self.close_tabs_everywhere(id);
         Ok(())
     }
 
@@ -749,6 +759,7 @@ impl Workspace {
 
     /// The events since the last call, oldest first.
     pub fn take_events(&mut self) -> Vec<Event> {
+        self.sync_views_all();
         std::mem::take(&mut self.events)
     }
 
@@ -769,6 +780,7 @@ impl Workspace {
         if let Ok(document) = self.document_mut(id) {
             document.sync_syntax();
         }
+        self.sync_views(id);
         if changed {
             self.events.push(Event::DocumentChanged { id });
             self.lsp_changed(id);

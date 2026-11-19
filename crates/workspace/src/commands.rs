@@ -74,13 +74,21 @@
 //! four "Focus on … View" commands (`debug.contribution.ts:471-473`,
 //! `repl.ts:1228`) are workbench commands: the frontend asks for the text
 //! or moves the focus.
+//! The editor group commands (`groups.rs`): "View: Split Editor" on Ctrl+\
+//! (`src/vs/workbench/browser/parts/editor/editorActions.ts:82-95`), the
+//! "Focus … Editor Group" family on Ctrl+1 to Ctrl+3 (`editorCommands.ts:694-740`)
+//! and Ctrl+K then Ctrl+arrow (`editorActions.ts:347-420`), "Move Editor into
+//! Next/Previous Group" on Ctrl+Alt+Right and Left (`editorActions.ts:2128-2156`),
+//! "Close All Editors in Group" on Ctrl+K W and "Close Editor Group" on
+//! Ctrl+W while the group is empty (`editorCommands.ts:853-880`), which is
+//! why "Close Editor" carries `!activeEditorGroupEmpty`.
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
 //! recently used ones first and matches word starts
 //! (`AbstractCommandsQuickAccessProvider`), which is not done yet.
 
-use crate::{DocumentId, Error, StepKind, Workspace};
+use crate::{Direction, DocumentId, Error, SplitDirection, StepKind, Workspace};
 use rustode_config::Chord;
 
 /// Who runs a command: the workspace on the active document, or the frontend.
@@ -152,6 +160,110 @@ pub const COMMANDS: &[CommandInfo] = &[
         "View: Close Editor",
         Workbench,
         Some("Ctrl+W"),
+    )
+    .when("!activeEditorGroupEmpty"),
+    command(
+        "workbench.action.closeGroup",
+        "View: Close Editor Group",
+        Editor,
+        Some("Ctrl+W"),
+    )
+    .when("activeEditorGroupEmpty && multipleEditorGroups"),
+    command(
+        "workbench.action.closeEditorsInGroup",
+        "View: Close All Editors in Group",
+        Editor,
+        Some("Ctrl+K W"),
+    ),
+    command(
+        "workbench.action.splitEditor",
+        "View: Split Editor",
+        Editor,
+        Some("Ctrl+\\"),
+    ),
+    command(
+        "workbench.action.splitEditorRight",
+        "View: Split Editor Right",
+        Editor,
+        None,
+    ),
+    command(
+        "workbench.action.splitEditorDown",
+        "View: Split Editor Down",
+        Editor,
+        None,
+    ),
+    command(
+        "workbench.action.focusFirstEditorGroup",
+        "View: Focus First Editor Group",
+        Editor,
+        Some("Ctrl+1"),
+    ),
+    command(
+        "workbench.action.focusSecondEditorGroup",
+        "View: Focus Second Editor Group",
+        Editor,
+        Some("Ctrl+2"),
+    ),
+    command(
+        "workbench.action.focusThirdEditorGroup",
+        "View: Focus Third Editor Group",
+        Editor,
+        Some("Ctrl+3"),
+    ),
+    command(
+        "workbench.action.focusNextGroup",
+        "View: Focus Next Editor Group",
+        Editor,
+        None,
+    ),
+    command(
+        "workbench.action.focusPreviousGroup",
+        "View: Focus Previous Editor Group",
+        Editor,
+        None,
+    ),
+    command(
+        "workbench.action.focusLeftGroup",
+        "View: Focus Left Editor Group",
+        Editor,
+        Some("Ctrl+K Ctrl+Left"),
+    ),
+    command(
+        "workbench.action.focusRightGroup",
+        "View: Focus Right Editor Group",
+        Editor,
+        Some("Ctrl+K Ctrl+Right"),
+    ),
+    command(
+        "workbench.action.focusAboveGroup",
+        "View: Focus Editor Group Above",
+        Editor,
+        Some("Ctrl+K Ctrl+Up"),
+    ),
+    command(
+        "workbench.action.focusBelowGroup",
+        "View: Focus Editor Group Below",
+        Editor,
+        Some("Ctrl+K Ctrl+Down"),
+    ),
+    command(
+        "workbench.action.moveEditorToNextGroup",
+        "View: Move Editor into Next Group",
+        Editor,
+        Some("Ctrl+Alt+Right"),
+    ),
+    command(
+        "workbench.action.moveEditorToPreviousGroup",
+        "View: Move Editor into Previous Group",
+        Editor,
+        Some("Ctrl+Alt+Left"),
+    ),
+    command(
+        "workbench.action.joinAllGroups",
+        "View: Join All Editor Groups",
+        Editor,
+        None,
     ),
     command(
         "workbench.action.nextEditor",
@@ -567,6 +679,30 @@ impl Workspace {
     pub fn execute(&mut self, id: &str) -> Result<bool, Error> {
         match id {
             "workbench.action.nextEditor" => self.next_tab(),
+            "workbench.action.splitEditor" | "workbench.action.splitEditorRight" => {
+                self.split_by_command(id);
+            }
+            "workbench.action.splitEditorDown" => drop(self.split_group(SplitDirection::Down)),
+            "workbench.action.focusFirstEditorGroup" => drop(self.focus_group_index(0)),
+            "workbench.action.focusSecondEditorGroup" => drop(self.focus_group_index(1)),
+            "workbench.action.focusThirdEditorGroup" => drop(self.focus_group_index(2)),
+            "workbench.action.focusNextGroup" => drop(self.focus_next_group(true)),
+            "workbench.action.focusPreviousGroup" => drop(self.focus_next_group(false)),
+            "workbench.action.focusLeftGroup" => drop(self.focus_group_toward(Direction::Left)),
+            "workbench.action.focusRightGroup" => drop(self.focus_group_toward(Direction::Right)),
+            "workbench.action.focusAboveGroup" => drop(self.focus_group_toward(Direction::Up)),
+            "workbench.action.focusBelowGroup" => drop(self.focus_group_toward(Direction::Down)),
+            "workbench.action.moveEditorToNextGroup" => drop(self.move_editor_to_group(true)),
+            "workbench.action.moveEditorToPreviousGroup" => drop(self.move_editor_to_group(false)),
+            "workbench.action.joinAllGroups" => drop(self.join_all_groups()),
+            "workbench.action.closeGroup" => {
+                let group = self.active_group();
+                self.close_group(group)?;
+            }
+            "workbench.action.closeEditorsInGroup" => {
+                let group = self.active_group();
+                self.close_editors_in_group(group, false)?;
+            }
             "workbench.action.previousEditor" => self.previous_tab(),
             "editor.action.toggleMinimap" => drop(self.toggle_minimap()),
             "workbench.action.debug.start" => {
@@ -681,6 +817,33 @@ mod tests {
         let count = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), count);
+    }
+
+    #[test]
+    fn an_editor_group_key_shared_with_another_command_has_when_clauses_on_both() {
+        for (i, a) in COMMANDS.iter().enumerate() {
+            for b in &COMMANDS[i + 1..] {
+                // Other pairs (Search's replace keys, Delete in two views) are
+                // told apart by which part has focus, in the frontends.
+                let editor_area = |c: &CommandInfo| {
+                    c.id.contains("Group")
+                        || c.id.contains("splitEditor")
+                        || c.id == "workbench.action.closeActiveEditor"
+                };
+                if a.default_key.is_some()
+                    && a.default_key == b.default_key
+                    && (editor_area(a) || editor_area(b))
+                {
+                    assert!(
+                        a.when.is_some() && b.when.is_some(),
+                        "{} and {} share {:?} without `when` clauses",
+                        a.id,
+                        b.id,
+                        a.default_key
+                    );
+                }
+            }
+        }
     }
 
     #[test]

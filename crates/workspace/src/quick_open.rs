@@ -78,7 +78,7 @@ impl Workspace {
             return self.recent_files(root.as_deref(), limit);
         }
         let mut candidates: Vec<PathBuf> = self.file_index().to_vec();
-        for &id in self.group.recent() {
+        for &id in self.groups.active_group().recent() {
             if let Some(path) = self.document(id).map(|d| d.path().to_owned())
                 && !candidates.contains(&path)
             {
@@ -115,7 +115,8 @@ impl Workspace {
     }
 
     fn recent_files(&self, root: Option<&Path>, limit: usize) -> Vec<FileMatch> {
-        self.group
+        self.groups
+            .active_group()
             .recent()
             .iter()
             .filter_map(|&id| self.document(id))
