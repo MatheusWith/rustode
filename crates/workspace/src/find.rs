@@ -175,6 +175,23 @@ impl rustode_fs::TextMatcher for TextSearch {
     }
 }
 
+/// Every match of `query` in `buffer`, in order, with the text that replaces
+/// it (the groups of a regex match read as `ReplacePattern` reads them).
+/// The text keeps the line breaks as written in `replacement`.
+pub(crate) fn replacements(
+    buffer: &Buffer,
+    query: &FindQuery,
+    replacement: &str,
+) -> Vec<(Range, String)> {
+    let pattern = ReplacePattern::new(replacement, query.options.regex);
+    let mut found = Vec::new();
+    let _ = search::each_match::<()>(buffer, query, pattern.has_groups(), |hit| {
+        found.push((hit.range, pattern.build(hit)));
+        Continue(())
+    });
+    found
+}
+
 /// The text of a document, for searching.
 fn editor_buffer(workspace: &Workspace, id: DocumentId) -> Result<&Buffer, Error> {
     let document = workspace.document(id).ok_or(Error::UnknownDocument(id))?;

@@ -1,0 +1,16 @@
+ SEARCH                                    │ notes.txt │ lib.rs │
+ Search: needle                   Aa ab .* │   1 hello
+ Replace: pin                              │   2
+ files to include                          │
+ files to exclude                          │
+ 2 results in 2 files                      │
+ ▾ lib.rs  src                           1 │
+     // a pin and a Needle→pin             │
+ ▾ main.rs  src                          1 │
+     fn main() { needle→pin(); }           │
+                                           │
+                                           │
+                                           │
+                                           │
+                                           │
+ notes.txt  Replaced 1 occurrence across 1 file with 'pin'.      Ln 1, Col 1  UTF-8  LF  Plain Text

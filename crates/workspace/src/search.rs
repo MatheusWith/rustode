@@ -31,6 +31,10 @@
 //!   `src/vs/base/common/strings.ts:784-807`);
 //! - opening a match selects it in its file, in a tab.
 
+mod replace;
+
+pub use replace::{ReplaceError, ReplaceOutcome, ReplaceProgress, ReplaceScope};
+
 use crate::explorer::compare_names;
 use crate::find::TextSearch;
 use crate::{Config, DocumentId, Error, Event, FindQuery, Position, Selection, Value, Workspace};
@@ -117,6 +121,8 @@ pub enum SearchEvent {
     Results,
     /// The search finished or was cancelled.
     Finished,
+    /// A replace ended; [`Workspace::take_replace_outcome`] has how.
+    Replaced,
 }
 
 /// One match in a file.
@@ -245,6 +251,9 @@ pub struct SearchResults {
     folder: bool,
     /// Files whose matches are hidden.
     collapsed: HashSet<PathBuf>,
+    /// What the last replace did, shown instead of "no results" when it
+    /// replaced every match.
+    notice: Option<String>,
 }
 
 impl SearchResults {
@@ -296,6 +305,9 @@ impl SearchResults {
         let query = self.query.as_ref()?;
         if self.matches > 0 {
             return Some(count_message(self.matches, self.files.len()));
+        }
+        if let Some(notice) = &self.notice {
+            return Some(notice.clone());
         }
         Some(match self.state {
             SearchState::Idle | SearchState::Running => return None,
@@ -493,6 +505,7 @@ fn merged_object(config: &Config, key: &str) -> BTreeMap<String, Value> {
 #[derive(Default)]
 pub(crate) struct Searches {
     results: SearchResults,
+    replace: replace::ReplaceState,
     running: Option<rustode_fs::Search>,
     /// The opened folder when the running search started.
     root: Option<PathBuf>,
@@ -519,6 +532,7 @@ impl Workspace {
     /// cleared.
     pub fn start_search(&mut self, query: SearchQuery) -> Result<(), SearchError> {
         self.cancel_search();
+        self.search.replace.forget_previews();
         let root = self.explorer().map(|e| absolute(e.root()));
         self.search.results = SearchResults {
             folder: root.is_some(),

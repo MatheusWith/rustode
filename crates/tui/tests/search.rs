@@ -226,3 +226,108 @@ fn escape_goes_back_to_the_editor_and_a_click_opens_a_match() {
         "a click keeps the view focused"
     );
 }
+
+fn ctrl_shift_h() -> Event {
+    Event::Key(KeyEvent::new(
+        KeyCode::Char('H'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ))
+}
+
+fn ctrl_enter() -> Event {
+    Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL))
+}
+
+/// Polls until a replace is over, then draws.
+fn settle_replace(app: &mut App, terminal: &mut Terminal<TestBackend>) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while app.workspace().is_replacing() {
+        app.poll();
+        assert!(Instant::now() < deadline, "the replace did not finish");
+    }
+    app.poll();
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+}
+
+/// Ctrl+Shift+H, a search for `needle`, then `pin` in the replace field.
+fn replace_view(app: &mut App, terminal: &mut Terminal<TestBackend>) {
+    send(app, terminal, &[ctrl_shift_h()]);
+    type_text(app, terminal, "needle");
+    send(app, terminal, &[key(KeyCode::Enter)]);
+    settle(app, terminal);
+    send(app, terminal, &[key(KeyCode::Tab)]);
+    type_text(app, terminal, "pin");
+}
+
+#[test]
+fn the_replace_field_previews_every_match() {
+    let (mut app, _) = app("replace-preview");
+    let mut terminal = Terminal::new(TestBackend::new(100, 16)).expect("terminal");
+    replace_view(&mut app, &mut terminal);
+    assert_snapshot("search-replace-preview-100x16", &screen(&terminal));
+}
+
+#[test]
+fn replace_all_asks_first_then_replaces_in_every_file() {
+    let (mut app, dir) = app("replace-all");
+    let mut terminal = Terminal::new(TestBackend::new(100, 16)).expect("terminal");
+    replace_view(&mut app, &mut terminal);
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    assert_snapshot("search-replace-confirm-100x16", &screen(&terminal));
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).expect("read");
+    assert!(lib.contains("needle"), "nothing changes before confirming");
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    settle_replace(&mut app, &mut terminal);
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).expect("read");
+    assert_eq!(lib, "pub fn pin() {}\n// a pin and a pin\n");
+    let main = std::fs::read_to_string(dir.join("src/main.rs")).expect("read");
+    assert_eq!(main, "fn main() { pin(); }\n");
+    assert_snapshot("search-replace-done-100x16", &screen(&terminal));
+}
+
+#[test]
+fn any_other_key_cancels_the_confirmation() {
+    let (mut app, dir) = app("replace-cancel");
+    let mut terminal = Terminal::new(TestBackend::new(100, 16)).expect("terminal");
+    replace_view(&mut app, &mut terminal);
+    send(
+        &mut app,
+        &mut terminal,
+        &[
+            key(KeyCode::Enter),
+            key(KeyCode::Char('s')),
+            key(KeyCode::Enter),
+        ],
+    );
+    // The second Enter asks again instead of replacing.
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).expect("read");
+    assert!(lib.contains("needle"));
+}
+
+#[test]
+fn dismissing_and_replacing_one_match_or_one_file() {
+    let (mut app, dir) = app("replace-some");
+    let mut terminal = Terminal::new(TestBackend::new(100, 16)).expect("terminal");
+    replace_view(&mut app, &mut terminal);
+    // Rows: lib.rs, its three matches, main.rs, its match. Dismiss the
+    // first match of lib.rs, replace the second with Ctrl+Enter.
+    send(
+        &mut app,
+        &mut terminal,
+        &[key(KeyCode::Down), key(KeyCode::Down), key(KeyCode::Delete)],
+    );
+    assert_eq!(app.workspace().search_results().match_count(), 3);
+    send(&mut app, &mut terminal, &[ctrl_enter()]);
+    settle_replace(&mut app, &mut terminal);
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).expect("read");
+    assert_eq!(lib, "pub fn needle() {}\n// a pin and a Needle\n");
+    assert_eq!(app.workspace().search_results().match_count(), 2);
+    assert_snapshot("search-replace-one-100x16", &screen(&terminal));
+    // Select the file row and replace what is left of it.
+    send(&mut app, &mut terminal, &[key(KeyCode::Down), ctrl_enter()]);
+    settle_replace(&mut app, &mut terminal);
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).expect("read");
+    assert_eq!(lib, "pub fn needle() {}\n// a pin and a pin\n");
+    let main = std::fs::read_to_string(dir.join("src/main.rs")).expect("read");
+    assert_eq!(main, "fn main() { needle(); }\n", "another file stays");
+}

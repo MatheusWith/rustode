@@ -17,6 +17,16 @@
 //! "Search: Find in Files" on Ctrl+Shift+F
 //! (`src/vs/workbench/contrib/search/browser/searchActionsFind.ts:203-242`,
 //! in the Search category of `searchActionsBase.ts:25`).
+//! "Search: Replace in Files" on Ctrl+Shift+H
+//! (`src/vs/workbench/contrib/search/browser/searchActionsNav.ts:396-413`),
+//! "Search: Replace" and "Search: Replace All in File" on Ctrl+Shift+1,
+//! each for its own kind of result (a match, a file), and "Search: Dismiss"
+//! on Delete (`src/vs/workbench/contrib/search/browser/searchActionsRemoveReplace.ts:59-68`,
+//! `:154-160`, `:190-196`); "Search: Replace All" is the Search view's
+//! button (`searchView.ts:814-856`) and "Search: Undo Replace"
+//! (`rustode.search.undoReplace`) is rustode's own: VS Code undoes a bulk
+//! edit from the editor, rustode has no tab-less models. The frontend runs
+//! them on the selected result row.
 //! Commands that take an argument ([`Workspace::execute_with`]) are not
 //! listed in the palette, as in VS Code.
 //! "View: Toggle Problems" on Ctrl+Shift+M
@@ -140,6 +150,42 @@ pub const COMMANDS: &[CommandInfo] = &[
         "Search: Find in Files",
         Workbench,
         Some("Ctrl+Shift+F"),
+    ),
+    command(
+        "workbench.action.replaceInFiles",
+        "Search: Replace in Files",
+        Workbench,
+        Some("Ctrl+Shift+H"),
+    ),
+    command(
+        "search.action.replaceAll",
+        "Search: Replace All",
+        Workbench,
+        None,
+    ),
+    command(
+        "search.action.replace",
+        "Search: Replace",
+        Workbench,
+        Some("Ctrl+Shift+1"),
+    ),
+    command(
+        "search.action.replaceAllInFile",
+        "Search: Replace All in File",
+        Workbench,
+        Some("Ctrl+Shift+1"),
+    ),
+    command(
+        "search.action.remove",
+        "Search: Dismiss",
+        Workbench,
+        Some("Delete"),
+    ),
+    command(
+        "rustode.search.undoReplace",
+        "Search: Undo Replace",
+        Workbench,
+        None,
     ),
     command(
         "workbench.action.focusNextPart",

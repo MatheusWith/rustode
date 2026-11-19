@@ -17,6 +17,18 @@
 //! running search (`search.action.cancel`, `searchActionsTopBar.ts:42-62`),
 //! else goes back to the editor. A click on a result opens it. All work
 //! goes through the workspace, in the background.
+//!
+//! Replace (Ctrl+Shift+H, `workbench.action.replaceInFiles`,
+//! `searchActionsNav.ts:396-413`) adds a replace field below the search
+//! box. Each match row then shows its line before and after the
+//! replacement, `before[match→replacement]after`, where VS Code opens a
+//! diff editor per file (a gap). Enter in the replace field asks to confirm
+//! Replace All (`searchView.ts:833-837`) and a second Enter does it
+//! (`search.action.replaceAll`); on a result row Ctrl+Enter or
+//! Ctrl+Shift+1 replaces that match or that file's matches
+//! (`search.action.replace`, `search.action.replaceAllInFile`) and Delete
+//! dismisses it (`search.action.remove`). The work runs a few files at a
+//! time, so the screen keeps drawing; the status line counts the files.
 
 use crate::app::{App, Focus};
 use crate::keys;
@@ -26,12 +38,12 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders};
-use rustode_workspace::{FindOptions, FindQuery, SearchQuery, SearchRow};
+use rustode_workspace::{FindOptions, FindQuery, ReplaceScope, SearchQuery, SearchRow};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Width of the sidebar while it shows the Search view.
 pub(crate) const WIDTH: u16 = 44;
-/// Lines above the results: the title, three fields and the status.
+/// Lines above the results: the title, the fields and the status.
 const HEADER: u16 = 5;
 
 /// The view's text fields.
@@ -39,6 +51,7 @@ const HEADER: u16 = 5;
 pub(crate) enum Field {
     #[default]
     Query,
+    Replace,
     Include,
     Exclude,
 }
@@ -51,6 +64,11 @@ pub(crate) struct SearchView {
     pub query: String,
     pub include: String,
     pub exclude: String,
+    /// The replace field's text, and whether the field is shown.
+    pub replacement: String,
+    pub replace_shown: bool,
+    /// Whether Replace All was asked and waits for a second Enter.
+    pub confirming: bool,
     pub options: FindOptions,
     /// The field that takes typing while no result is selected.
     pub field: Field,
@@ -63,9 +81,15 @@ pub(crate) struct SearchView {
 }
 
 impl SearchView {
+    /// The lines above the results.
+    fn header(&self) -> u16 {
+        HEADER + u16::from(self.replace_shown)
+    }
+
     fn field_mut(&mut self) -> &mut String {
         match self.field {
             Field::Query => &mut self.query,
+            Field::Replace => &mut self.replacement,
             Field::Include => &mut self.include,
             Field::Exclude => &mut self.exclude,
         }
@@ -83,7 +107,26 @@ impl App {
         self.extensions.shown = false;
         self.search.field = Field::Query;
         self.search.selected = None;
+        self.search.confirming = false;
         self.focus = Focus::Search;
+    }
+
+    /// Ctrl+Shift+H (`workbench.action.replaceInFiles`): the same view with
+    /// the replace field shown.
+    pub(crate) fn show_replace(&mut self) {
+        self.show_search();
+        self.search.replace_shown = true;
+    }
+
+    /// Hands the replace field's text to the workspace, which builds the
+    /// previews from it.
+    fn sync_replacement(&mut self) {
+        let text = if self.search.replace_shown {
+            self.search.replacement.as_str()
+        } else {
+            ""
+        };
+        self.workspace.set_search_replacement(text);
     }
 
     /// Starts a search for the fields' text; a running one stops first.
@@ -114,14 +157,28 @@ impl App {
             .field_mut()
             .push_str(text.lines().next().unwrap_or_default());
         self.search.selected = None;
+        self.search.confirming = false;
+        self.sync_replacement();
     }
 
     /// Keys while the view has focus.
     pub(crate) fn search_key(&mut self, key: KeyEvent) {
+        let confirmed = self.search.confirming && key.code == KeyCode::Enter;
+        self.search.confirming = false;
+        if confirmed {
+            self.message = None;
+            self.start_replace(ReplaceScope::All);
+            return;
+        }
         if let Some(command) = keys::global(key) {
             self.run_global(command, key);
             return;
         }
+        self.search_key_in_view(key);
+        self.sync_replacement();
+    }
+
+    fn search_key_in_view(&mut self, key: KeyEvent) {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
@@ -129,7 +186,8 @@ impl App {
             KeyCode::Char(c) if alt && !ctrl => self.toggle_search_option(c),
             KeyCode::Tab => self.move_field(true),
             KeyCode::BackTab => self.move_field(false),
-            _ if self.search.selected.is_some() => self.results_key(key.code),
+            _ if self.search.selected.is_some() => self.results_key(key),
+            KeyCode::Enter if self.search.field == Field::Replace => self.search_replace_all(),
             KeyCode::Enter => self.run_search(),
             KeyCode::Down if !self.workspace.search_results().files().is_empty() => {
                 self.search.selected = Some(0);
@@ -168,18 +226,27 @@ impl App {
 
     /// Tab and Shift+Tab: the next or previous field.
     fn move_field(&mut self, forward: bool) {
-        let fields = [Field::Query, Field::Include, Field::Exclude];
+        let fields = if self.search.replace_shown {
+            vec![Field::Query, Field::Replace, Field::Include, Field::Exclude]
+        } else {
+            vec![Field::Query, Field::Include, Field::Exclude]
+        };
         let at = fields
             .iter()
             .position(|f| *f == self.search.field)
             .unwrap_or(0);
-        let next = (if forward { at + 1 } else { at + 2 }) % fields.len();
+        let next = (if forward {
+            at + 1
+        } else {
+            at + fields.len() - 1
+        }) % fields.len();
         self.search.field = fields[next];
         self.search.selected = None;
     }
 
     /// Keys while a result row is selected.
-    fn results_key(&mut self, code: KeyCode) {
+    fn results_key(&mut self, key: KeyEvent) {
+        let code = key.code;
         let rows = self.workspace.search_results().rows();
         let last = rows.len().saturating_sub(1);
         let Some(row) = self.search.selected.map(|r| r.min(last)) else {
@@ -194,6 +261,12 @@ impl App {
             KeyCode::PageDown => self.search.selected = Some((row + page).min(last)),
             KeyCode::Home => self.search.selected = Some(0),
             KeyCode::End => self.search.selected = Some(last),
+            KeyCode::Enter | KeyCode::Char('1' | '!')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.search_replace_selected(false);
+            }
+            KeyCode::Delete => self.search_remove(),
             KeyCode::Enter => self.open_search_row(rows.get(row).copied(), false),
             KeyCode::Char(' ') => self.open_search_row(rows.get(row).copied(), true),
             KeyCode::Left => match rows.get(row) {
@@ -228,6 +301,93 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// The selected result row, as the workspace's indexes.
+    fn selected_row(&self) -> Option<SearchRow> {
+        let rows = self.workspace.search_results().rows();
+        let row = self.search.selected?.min(rows.len().saturating_sub(1));
+        rows.get(row).copied()
+    }
+
+    /// `search.action.replaceAll`: asks to confirm, as VS Code does.
+    pub(crate) fn search_replace_all(&mut self) {
+        match self.workspace.replace_confirmation(ReplaceScope::All) {
+            Some(question) => {
+                self.message = Some(question);
+                self.search.confirming = true;
+            }
+            None => self.message = Some("There is nothing to replace".to_owned()),
+        }
+    }
+
+    /// `search.action.replace` on a match, `search.action.replaceAllInFile`
+    /// on a file; with `file`, a match row stands for its file.
+    pub(crate) fn search_replace_selected(&mut self, file: bool) {
+        let scope = match self.selected_row() {
+            Some(SearchRow::Match { file: at, index }) if !file => {
+                ReplaceScope::Match { file: at, index }
+            }
+            Some(SearchRow::Match { file: at, .. } | SearchRow::File { file: at, .. }) => {
+                ReplaceScope::File(at)
+            }
+            None => {
+                self.message = Some("Select a match or a file to replace".to_owned());
+                return;
+            }
+        };
+        self.start_replace(scope);
+    }
+
+    fn start_replace(&mut self, scope: ReplaceScope) {
+        self.sync_replacement();
+        if let Err(err) = self.workspace.start_replace(scope) {
+            self.message = Some(err.to_string());
+        }
+    }
+
+    /// `search.action.remove`: the selected match or file leaves the results.
+    pub(crate) fn search_remove(&mut self) {
+        let removed = match self.selected_row() {
+            Some(SearchRow::Match { file, index }) => {
+                self.workspace.dismiss_search_match(file, index)
+            }
+            Some(SearchRow::File { file, .. }) => self.workspace.dismiss_search_file(file),
+            None => false,
+        };
+        if removed {
+            let rows = self.workspace.search_results().rows().len();
+            self.search.selected = self.search.selected.map(|r| r.min(rows.saturating_sub(1)));
+            if rows == 0 {
+                self.search.selected = None;
+            }
+        }
+    }
+
+    /// `rustode.search.undoReplace`.
+    pub(crate) fn search_undo_replace(&mut self) {
+        self.message = Some(match self.workspace.undo_replace() {
+            Ok(files) => format!("Undid the replace in {files} file(s)"),
+            Err(err) => err.to_string(),
+        });
+    }
+
+    /// A replace ended: say how.
+    pub(crate) fn search_replaced(&mut self) {
+        let replacement = self.workspace.search_replacement().to_owned();
+        let Some(outcome) = self.workspace.take_replace_outcome() else {
+            return;
+        };
+        self.message = Some(match outcome {
+            Ok(done) if done.unsaved.is_empty() => done.message(&replacement),
+            Ok(done) => format!(
+                "{} Not saved: {}",
+                done.message(&replacement),
+                done.unsaved.join("; ")
+            ),
+            Err(err) => err.to_string(),
+        });
+        self.search.selected = None;
     }
 
     /// Enter or Space on a row, or a click: a file collapses or expands, a
@@ -310,11 +470,21 @@ fn row_spans(app: &App, row: SearchRow, width: usize) -> Vec<Span<'static>> {
             let preview = found.preview();
             let mut left = width;
             let mut spans = Vec::new();
-            for (text, style) in [
+            let replacement = if app.search.replace_shown {
+                app.workspace.search_replacement_text(file, index)
+            } else {
+                None
+            };
+            let mut parts = vec![
                 (format!("     {}", preview.before), Style::new()),
                 (preview.inside, theme.highlight),
-                (preview.after, Style::new()),
-            ] {
+            ];
+            if let Some(text) = replacement {
+                parts.push(("→".to_owned(), theme.description));
+                parts.push((text, theme.quick_selected));
+            }
+            parts.push((preview.after, Style::new()));
+            for (text, style) in parts {
                 let text = truncate(&text.replace('\t', " "), left);
                 left -= text.width();
                 spans.push(Span::styled(text, style));
@@ -329,6 +499,12 @@ fn status(app: &App) -> Option<(String, Style)> {
     let theme = app.theme;
     if let Some(error) = &app.search.error {
         return Some((error.clone(), theme.description));
+    }
+    if let Some(progress) = app.workspace.replace_progress() {
+        return Some((
+            format!("Replacing… {}/{}", progress.done, progress.total),
+            theme.description,
+        ));
     }
     let results = app.workspace.search_results();
     if let Some(message) = results.message() {
@@ -356,7 +532,7 @@ fn field_line(label: &str, text: &str, width: usize, theme: &crate::theme::Theme
 }
 
 /// The title, the search box with its toggles, and the two glob fields.
-fn header_lines(app: &App, width: usize) -> [Line<'static>; 4] {
+fn header_lines(app: &App, width: usize) -> Vec<Line<'static>> {
     let theme = app.theme;
     let view = &app.search;
     let toggle = |on: bool, label: &str| {
@@ -378,12 +554,16 @@ fn header_lines(app: &App, width: usize) -> [Line<'static>; 4] {
     let mut query_spans = query.spans;
     query_spans.push(Span::raw(" ".repeat(query_width.saturating_sub(used) + 1)));
     query_spans.extend(toggles);
-    [
+    let mut lines = vec![
         Line::styled(" SEARCH", theme.sidebar_header),
         Line::from(query_spans),
-        field_line("files to include", &view.include, width, &theme),
-        field_line("files to exclude", &view.exclude, width, &theme),
-    ]
+    ];
+    if view.replace_shown {
+        lines.push(field_line("Replace", &view.replacement, width, &theme));
+    }
+    lines.push(field_line("files to include", &view.include, width, &theme));
+    lines.push(field_line("files to exclude", &view.exclude, width, &theme));
+    lines
 }
 
 /// Draws the view in the sidebar's `area`.
@@ -394,7 +574,8 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         .border_style(theme.separator);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    if inner.height < HEADER + 1 {
+    let header = app.search.header();
+    if inner.height < header + 1 {
         return;
     }
     let width = usize::from(inner.width);
@@ -403,7 +584,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
     let buffer = frame.buffer_mut();
     for (offset, line) in (0_u16..).zip(lines) {
         let y = inner.y + offset;
-        if (1..=3).contains(&offset) {
+        if (1..header - 1).contains(&offset) {
             buffer.set_style(
                 Rect {
                     y,
@@ -424,23 +605,25 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame, area: Rect) {
         let text = truncate(&format!(" {text}{warning}"), width);
         frame.buffer_mut().set_line(
             inner.x,
-            inner.y + 4,
+            inner.y + header - 1,
             &Line::styled(text, style),
             inner.width,
         );
     }
     let list = Rect {
-        y: inner.y + HEADER,
-        height: inner.height - HEADER,
+        y: inner.y + header,
+        height: inner.height - header,
         ..inner
     };
     app.hits.search = Some(list);
     draw_rows(app, frame, list, focused);
     if focused && app.search.selected.is_none() && app.quick.is_none() {
+        let below = u16::from(app.search.replace_shown);
         let (y, label, text) = match app.search.field {
             Field::Query => (1, "Search", &app.search.query),
-            Field::Include => (2, "files to include", &app.search.include),
-            Field::Exclude => (3, "files to exclude", &app.search.exclude),
+            Field::Replace => (2, "Replace", &app.search.replacement),
+            Field::Include => (2 + below, "files to include", &app.search.include),
+            Field::Exclude => (3 + below, "files to exclude", &app.search.exclude),
         };
         let prefix = if text.is_empty() {
             1
