@@ -5,7 +5,7 @@
 
 ## Context
 
-`AGENTS.md` is the single source of instructions for agents and contributors. `CLAUDE.md` only imports it ([`padrao-de-documentos.md`](../padrao-de-documentos.md) §2). Until Phase 1 it covered only the study:
+`AGENTS.md` is the single source of instructions for agents and contributors. `CLAUDE.md` only imports it ([`document-standard.md`](../document-standard.md) §2). Until Phase 1 it covered only the study:
 
 - the inviolable rules on evidence, licenses, personal data, running the App and analysis (§0–§4);
 - the working instructions (§5–§10).

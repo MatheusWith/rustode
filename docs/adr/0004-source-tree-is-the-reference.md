@@ -5,9 +5,9 @@
 
 ## Context
 
-The app has no source maps in its main bundles ([ADR 0001](0001-bundle-sem-source-maps.md)), and the JavaScript names stay minified even after reformatting (`out-formatado/`). On the other hand, two facts make the source usable:
-- `02-engenharia-reversa/fonte/arvore/` is exactly the code that produced the app (commit + patches + post-install steps).
-- 30 of the 32 bundles start from a file with the same path in `src/` ([`fonte-vs-pacote.md`](../fonte-vs-pacote.md)).
+The app has no source maps in its main bundles ([ADR 0001](0001-bundle-without-source-maps.md)), and the JavaScript names stay minified even after reformatting (`out-formatted/`). On the other hand, two facts make the source usable:
+- `02-package-analysis/source/tree/` is exactly the code that produced the app (commit + patches + post-install steps).
+- 30 of the 32 bundles start from a file with the same path in `src/` ([`source-vs-package.md`](../source-vs-package.md)).
 
 ## Decision
 

@@ -1,17 +1,17 @@
 ---
 name: find-minified-symbol
-description: Locates in the source tree the code that produced a minified snippet of the app (stack trace, out-formatado snippet, observed behavior), using stable anchors and the NLS indexes. Use when you need to explain a snippet of the packaged JavaScript or link an app error to its source .ts file.
+description: Locates in the source tree the code that produced a minified snippet of the app (stack trace, out-formatted snippet, observed behavior), using stable anchors and the NLS indexes. Use when you need to explain a snippet of the packaged JavaScript or link an app error to its source .ts file.
 ---
 
 # Locate a minified snippet in the source
 
-The bundles have no source maps ([ADR 0001](../../../docs/adr/0001-bundle-sem-source-maps.md)) and local names are minified. The way to the source goes through **anchors**: what survives minification unchanged. Anchors are strings, command IDs, configuration and context keys, property and method names, and NLS indexes. The final reference is always the source tree ([`AGENTS.md`](../../../AGENTS.md) §4.1).
+The bundles have no source maps ([ADR 0001](../../../docs/adr/0001-bundle-without-source-maps.md)) and local names are minified. The way to the source goes through **anchors**: what survives minification unchanged. Anchors are strings, command IDs, configuration and context keys, property and method names, and NLS indexes. The final reference is always the source tree ([`AGENTS.md`](../../../AGENTS.md) §4.1).
 
 Folders (relative to the project root):
 
 - `01-app/VSCode-linux-x64/resources/app/out/`: the original bundles (stack-trace positions refer to these)
-- `02-engenharia-reversa/out-formatado/`: the same bundles reformatted (line numbers change)
-- `02-engenharia-reversa/fonte/arvore/src/`: the source
+- `02-package-analysis/out-formatted/`: the same bundles reformatted (line numbers change)
+- `02-package-analysis/source/tree/src/`: the source
 
 ## Process
 
@@ -19,8 +19,8 @@ Folders (relative to the project root):
 
 - **Stack trace** (`…/out/<path>.js:L:C`):
   1. Read the original, which is one long line: `awk -v L=<L> 'NR==L' 01-app/VSCode-linux-x64/resources/app/out/<path>.js | cut -c$((C-300))-$((C+300))`.
-  2. Find the same snippet in `out-formatado/` to read it with indentation.
-- **Observed behavior:** start from a string that appears in the UI or the log and search for it in `out-formatado/`.
+  2. Find the same snippet in `out-formatted/` to read it with indentation.
+- **Observed behavior:** start from a string that appears in the UI or the log and search for it in `out-formatted/`.
 
 Done when you have a 5- to 30-line snippet of the formatted bundle.
 
@@ -45,7 +45,7 @@ Local variable names don't work as anchors.
 ### 3. Search the tree
 
 ```sh
-grep -rn --include='*.ts' -F '<anchor>' 02-engenharia-reversa/fonte/arvore/src
+grep -rn --include='*.ts' -F '<anchor>' 02-package-analysis/source/tree/src
 ```
 
 With several anchors, keep the files that contain all of them (or most). To confirm the shape of the code (a class with method X that calls Y), use the `ast-grep` skill on the tree.
@@ -72,5 +72,5 @@ Patch:       <if the file was changed by a patch; see the trace-behavior-to-patc
   - `nls.messages.js`;
   - the product configuration injected into the bundle (`BUILD_INSERT_PRODUCT_CONFIGURATION`);
   - the agent host's crypto module (its own build).
-- **The tree already includes the patches.** To know whether the snippet came from a port patch or from the original VS Code, compare with `02-engenharia-reversa/fonte/port-aplicado.diff`.
+- **The tree already includes the patches.** To know whether the snippet came from a port patch or from the original VS Code, compare with `02-package-analysis/source/port-applied.diff`.
 - **Different bundles repeat modules.** `workbench.desktop.main.js` and `sessions.desktop.main.js` share `base`, `platform` and `editor`. Say which bundle the snippet is from.

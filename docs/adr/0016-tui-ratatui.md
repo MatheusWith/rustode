@@ -35,6 +35,6 @@ The TUI renders the same workspace state as the GUI, at every width band, and ne
 
 ## Consequences
 
-- The decision does not say what 60 to 79 columns shows ([`lacunas.md`](../lacunas.md) G17). Until the owner decides, the TUI shows what it shows from 80 to 119: the status bar and no sidebar (`crates/tui/src/view.rs:32-68`).
-- The App's default dark theme is "Dark 2026", not Dark Modern (`src/vs/workbench/services/themes/common/workbenchThemeService.ts:43`, in the source tree). Whether rustode follows it, and whether the theme's color values may be reused, is open ([`lacunas.md`](../lacunas.md) G18).
+- The decision does not say what 60 to 79 columns shows ([`gaps.md`](../gaps.md) G17). Until the owner decides, the TUI shows what it shows from 80 to 119: the status bar and no sidebar (`crates/tui/src/view.rs:32-68`).
+- The App's default dark theme is "Dark 2026", not Dark Modern (`src/vs/workbench/services/themes/common/workbenchThemeService.ts:43`, in the source tree). Whether rustode follows it, and whether the theme's color values may be reused, is open ([`gaps.md`](../gaps.md) G18).
 - "Wherever the terminal allows" admits that some VS Code keybindings may not reach the TUI. Each one the TUI cannot offer is listed in the roadmap's Gap Analysis.

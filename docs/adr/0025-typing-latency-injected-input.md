@@ -1,6 +1,6 @@
 # ADR 0025: Typing latency is measured with keystrokes injected into both editors through the virtual compositor
 
-- **Status:** accepted (2026-11-16, the owner's choice of option a in the Phase 1 grilling session; feasibility measured on 2026-11-17 in [`09-analises/0002`](../../09-analises/0002-entrada-virtual-wayland.md)); not applied until [ADR 0028](0028-virtual-display-input.md) is accepted
+- **Status:** accepted (2026-11-16, the owner's choice of option a in the Phase 1 grilling session; feasibility measured on 2026-11-17 in [`09-findings/0002`](../../09-findings/0002-virtual-wayland-input.md)); not applied until [ADR 0028](0028-virtual-display-input.md) is accepted
 - **Build:** rustode at `d6debfb`; the App: local VSCodium 1.147.0; KWin 6.8.2 (`kwin_wayland --virtual`)
 
 ## Context
@@ -34,6 +34,6 @@ Both editors get the same keystrokes through the same path, and no injected keys
 ## Consequences
 
 - The send-to-receive deltas in finding 0002 are not a latency measurement. The two sides use different clocks and different end points.
-- Open questions: which App-side event marks the frame that shows the key ([`lacunas.md`](../lacunas.md) G15), and why the first key was lost once (G16).
+- Open questions: which App-side event marks the frame that shows the key ([`gaps.md`](../gaps.md) G15), and why the first key was lost once (G16).
 - The wgpu present path has not been tried on the virtual display; the stand-in used glow ([ADR 0017](0017-gui-egui-wgpu.md)).
 - If ADR 0028 is rejected, typing latency is measured on neither editor through this path, and this ADR needs a new decision.

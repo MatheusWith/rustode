@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** minor (translated to English) · **Target:** local VSCodium 1.147.0; reference `code` 1.138.0 (Arch)
 
-This is a summary of the tests on the built app. The full QA document is [`05-qa/docs/06-testes-do-build-vscodium.md`](../05-qa/docs/06-testes-do-build-vscodium.md). Each run is in [`08-testes-do-build/`](../08-testes-do-build/RESUMO.md), with `steps.json` (steps) and `screenshots/`.
+This is a summary of the tests on the built app. The full QA document is [`05-qa/docs/06-testes-do-build-vscodium.md`](../05-qa/docs/06-testes-do-build-vscodium.md). Each run is in [`08-build-tests/`](../08-build-tests/SUMMARY.md), with `steps.json` (steps) and `screenshots/`.
 
 ## 1. Environment
 

@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-11-16 · **Last updated:** 2026-11-16 · **Change:** minor (translated to English) · **Target:** local VSCodium 1.147.0 (VS Code `22d8dccf0f29`)
 
-Where each part of the package (`01-app/VSCode-linux-x64/`) comes from in the source tree (`02-engenharia-reversa/fonte/arvore/`). Everything below was measured by comparing the two folders, and the commands are in each section.
+Where each part of the package (`01-app/VSCode-linux-x64/`) comes from in the source tree (`02-package-analysis/source/tree/`). Everything below was measured by comparing the two folders, and the commands are in each section.
 
 ## 1. Bundles in `resources/app/out/` → entry file
 
@@ -37,7 +37,7 @@ A bundle gathers every module imported from its entry. So a snippet of `workbenc
 
 ## 3. `product.json`
 
-Command: compare `fonte/arvore/product.json` with `01-app/…/resources/app/product.json`.
+Command: compare `source/tree/product.json` with `01-app/…/resources/app/product.json`.
 
 | Difference | Value |
 |---|---|
@@ -53,7 +53,7 @@ The choices of VSCodium and of the port are already in the source:
 
 ## 4. Extensions
 
-Command: `diff <(ls fonte/arvore/extensions) <(ls 01-app/…/resources/app/extensions)`.
+Command: `diff <(ls source/tree/extensions) <(ls 01-app/…/resources/app/extensions)`.
 
 | | Source | Package |
 |---|---|---|
@@ -67,9 +67,9 @@ Command: `diff <(ls fonte/arvore/extensions) <(ls 01-app/…/resources/app/exten
 | | Source | Package |
 |---|---|---|
 | Declared in `package.json` (`dependencies`) | 68 | — |
-| Modules in `node_modules.asar` (direct and transitive, asar root) | — | 191 (`02-engenharia-reversa/asar/node_modules.asar.lista.txt`) |
+| Modules in `node_modules.asar` (direct and transitive, asar root) | — | 191 (`02-package-analysis/asar/node_modules.asar.list.txt`) |
 | Kept outside the asar on purpose | `build/gulpfile.vscode.ts` (the `createAsar` exception list) | `resources/app/node_modules/`: `semver`, `shell-quote`, `zod`, `@pondwader/socks5-server`, `@vscode/sandbox-runtime` |
-| Native (`.node`) | — | `node_modules.asar.unpacked/` (list in `02-engenharia-reversa/binarios.txt`) |
+| Native (`.node`) | — | `node_modules.asar.unpacked/` (list in `02-package-analysis/binaries.txt`) |
 | VSCodium forks | `@vscodium/native-keymap`, `@vscodium/policy-watcher`, `@vscodium/os-proxy-resolver` | present (`smoke.sh`) |
 
 ## Summary

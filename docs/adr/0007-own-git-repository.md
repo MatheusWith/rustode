@@ -7,7 +7,7 @@
 
 Phase 1 builds a Rust editor in the folder that holds the study of the App, so the study becomes the editor's live specification. The editor needs history, pull requests and CI. Three facts shape how the folder is versioned:
 
-- Folders 01 to 08 are copies that `montar.sh` rebuilds from the live sources (AGENTS.md §0.1). Together they take 1.5 GB (measured from the project root: `du -shc 0[1-8]*`).
+- Folders 01 to 08 are copies that `assemble.sh` rebuilds from the live sources (AGENTS.md §0.1). Together they take 1.5 GB (measured from the project root: `du -shc 0[1-8]*`).
 - Some of them hold personal data, for example `05-qa/results/backup-sharedStorage-125048.vscdb` (AGENTS.md §2.1).
 - The owner keeps a prompt file and planning notes (spec and tickets) in the folder. They must never reach GitHub, and they don't belong in the shared ignore file either.
 
@@ -35,6 +35,6 @@ Check, from the project root: `git ls-files | grep -cE '^0[1-8]|\.vscdb$'` print
   - `grep` for absolute home paths and email addresses found no match.
 
   The owner approved the review, and `78aa4d5` is the first commit.
-- As of 2026-11-17 nothing has been pushed: `git status -sb` shows `## main` with no upstream (measured from the project root). CI has never run, and branch protection can only be checked after the push ([`lacunas.md`](../lacunas.md) G19).
-- Regenerating the evidence still goes through `montar.sh` on each machine. Cloning the repository does not bring the App or the source tree.
+- As of 2026-11-17 nothing has been pushed: `git status -sb` shows `## main` with no upstream (measured from the project root). CI has never run, and branch protection can only be checked after the push ([`gaps.md`](../gaps.md) G19).
+- Regenerating the evidence still goes through `assemble.sh` on each machine. Cloning the repository does not bring the App or the source tree.
 - Anything else that would leave the machine (a release, a package, a mirror) needs a new decision.

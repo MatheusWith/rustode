@@ -3,9 +3,9 @@
 > In VS Code, `product.commit` is not just informational: the code uses its presence to decide whether it is running packaged. Without a commit, the agent host looks for modules in `node_modules`, which barely exists in the package, and fails to load `tree-sitter.wasm`.
 
 **Sources:**
-- `02-engenharia-reversa/fonte/arvore/src/vs/platform/agentHost/node/appNodeModules.ts`;
+- `02-package-analysis/source/tree/src/vs/platform/agentHost/node/appNodeModules.ts`;
 - `…/agentHost/node/commandAutoApprover.ts`;
-- `02-engenharia-reversa/fonte/arvore/build/lib/git.ts` and `build/lib/getVersion.ts`;
+- `02-package-analysis/source/tree/build/lib/git.ts` and `build/lib/getVersion.ts`;
 - `06-port/PORT-NOTES.md` ("`build.sh`: `BUILD_SOURCEVERSION`").
 
 ## Context

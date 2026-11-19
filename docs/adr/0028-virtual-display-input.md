@@ -1,6 +1,6 @@
 # ADR 0028: Keystrokes may be injected on the virtual display through the virtual compositor's own input paths (amends ADR 0006 rule 2 and AGENTS.md §3.2)
 
-- **Status:** proposed — owner's decision (2026-11-17, from the "Proposed amendment" of [`09-analises/0002`](../../09-analises/0002-entrada-virtual-wayland.md)). [ADR 0006](0006-testes-em-tela-virtual.md) and [`AGENTS.md`](../../AGENTS.md) §3.2 are unchanged until the owner accepts it.
+- **Status:** proposed — owner's decision (2026-11-17, from the "Proposed amendment" of [`09-findings/0002`](../../09-findings/0002-virtual-wayland-input.md)). [ADR 0006](0006-tests-on-virtual-display.md) and [`AGENTS.md`](../../AGENTS.md) §3.2 are unchanged until the owner accepts it.
 - **Build:** the App: local VSCodium 1.147.0; KWin 6.8.2 (`kwin_wayland --virtual`)
 
 ## Context
@@ -33,7 +33,7 @@ Finding 0002 measured:
 Containment rules:
 
 1. Nothing changes until the owner accepts this ADR. When the owner does, ADR 0006 gets a dated addendum that points here and carries the new rule 2 ([`README.md`](README.md)), and AGENTS.md §3.2 gets the new text, in the same commit.
-2. Every injector implements the guards, as the finding's tools do: `09-analises/0002-anexos/tools/fakeinput/src/main.rs` and `09-analises/0002-anexos/tools/eistype/eistype.c`.
+2. Every injector implements the guards, as the finding's tools do: `09-findings/0002-attachments/tools/fakeinput/src/main.rs` and `09-findings/0002-attachments/tools/eistype/eistype.c`.
 3. The scope is keyboard input on the virtual display. Pointer input, or anything in the real session, needs a new decision.
 
 ## The guarantee
@@ -44,4 +44,4 @@ No injected event can reach the owner's desktop, because the injector refuses to
 
 - If accepted: the typing-latency scenarios of ADR 0025 can run.
 - If rejected: typing latency through the virtual compositor is not measured, and ADR 0025 needs a new decision.
-- A related but separate decision, which is not part of this ADR: finding 0002 also proposes setting `NODE_DISABLE_COMPILE_CACHE=1` whenever the App is launched from `01-app/` (the `launch-built-app` skill and the QA launchers), and an integrity check that also lists files missing from the manifest ([`lacunas.md`](../lacunas.md) G13). Editor benchmarks avoid the problem by running a verified temporary copy (AGENTS.md §11.5).
+- A related but separate decision, which is not part of this ADR: finding 0002 also proposes setting `NODE_DISABLE_COMPILE_CACHE=1` whenever the App is launched from `01-app/` (the `launch-built-app` skill and the QA launchers), and an integrity check that also lists files missing from the manifest ([`gaps.md`](../gaps.md) G13). Editor benchmarks avoid the problem by running a verified temporary copy (AGENTS.md §11.5).

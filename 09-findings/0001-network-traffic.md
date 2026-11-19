@@ -19,8 +19,8 @@ No connection escaped the proxy. `code` 1.138 does the same, minus the malicious
 
 | What | Where | Note |
 |---|---|---|
-| Build hosts, with connections, bytes and the second of the first connection | `08-testes-do-build/2026-11-16-codium1.147-rede/network-report.md` and `proxy.jsonl` | measured by the logging proxy |
-| 1.138 hosts | `08-testes-do-build/2026-11-16-code1.138-rede/network-report.md` | measured |
+| Build hosts, with connections, bytes and the second of the first connection | `08-build-tests/2026-11-16-codium1.147-rede/network-report.md` and `proxy.jsonl` | measured by the logging proxy |
+| 1.138 hosts | `08-build-tests/2026-11-16-code1.138-rede/network-report.md` | measured |
 | Connections outside the proxy: 0; DNS outside the proxy: 0 | `…-rede/conn.jsonl` (empty) | sampled every 0.5 s with `ss` |
 | Typical-use steps | `…-rede/steps.json` | open, 120 s idle, extensions + search for "python", a TypeScript file, welcome page, 60 s idle |
 | URL of the malicious-extension list | `01-app/VSCode-linux-x64/resources/app/product.json`, `extensionsGallery.controlUrl` | `raw.githubusercontent.com/EclipseFdn/publish-extensions/…/extensions.json` |
@@ -51,4 +51,4 @@ QA_BIN=/usr/bin/code tools/run_virtual.sh scenarios/run_network.sh code1.138-red
 ## Next steps
 
 - G9: find out whether the dictionary download can be turned off without a patch.
-- Check the s 33 hypothesis on 1.138: look for gallery calls at startup in `fonte/arvore/src/vs/workbench/contrib/extensions/`.
+- Check the s 33 hypothesis on 1.138: look for gallery calls at startup in `source/tree/src/vs/workbench/contrib/extensions/`.

@@ -28,11 +28,11 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 /// The VS Code API version installed extensions are checked against: the
-/// App's, `VSCodium` 1.147.0 (`02-engenharia-reversa/product.json:478`). A
+/// App's, `VSCodium` 1.147.0 (`02-package-analysis/product.json:478`). A
 /// later extension host implements this API.
 pub const VSCODE_API_VERSION: &str = "1.147.0";
 /// The date of that API, in UTC: the App's build, `2026-11-12T17:39:10+01:00`
-/// (`02-engenharia-reversa/product.json:465`), as year, month, day, hour,
+/// (`02-package-analysis/product.json:465`), as year, month, day, hour,
 /// minute and second.
 pub const VSCODE_API_DATE: [u32; 6] = [2026, 11, 12, 16, 39, 10];
 

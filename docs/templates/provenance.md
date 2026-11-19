@@ -1,6 +1,6 @@
 # Provenance sidecar
 
-Use this sidecar for any extracted, generated or captured file that goes into `09-analises/` or `docs/`. Examples: a snippet extracted from the asar, a new screenshot, a tool output. Save it next to the file as `<file>.procedencia`.
+Use this sidecar for any extracted, generated or captured file that goes into `09-findings/` or `docs/`. Examples: a snippet extracted from the asar, a new screenshot, a tool output. Save it next to the file as `<file>.provenance`.
 
 ```text
 file:         <file name>

@@ -1,6 +1,6 @@
 # Decisions (ADRs)
 
-There is one decision per file, `NNNN-slug.md`, and its title states the decision itself. Template: [`../modelos/adr.md`](../modelos/adr.md). An accepted decision is never rewritten. Changes come in one of two ways:
+There is one decision per file, `NNNN-slug.md`, and its title states the decision itself. Template: [`../templates/adr.md`](../templates/adr.md). An accepted decision is never rewritten. Changes come in one of two ways:
 - as a `## Addendum (YYYY-MM-DD): …` at the end;
 - as a new ADR that supersedes the old one.
 
@@ -8,12 +8,12 @@ There is one decision per file, `NNNN-slug.md`, and its title states the decisio
 
 | # | Decision | Status |
 |---|---|---|
-| [0001](0001-bundle-sem-source-maps.md) | The production bundle is built without source maps | accepted (2026-11-16) |
-| [0002](0002-dados-separados-do-code-oss.md) | The app's data lives in `.vscodium` and `.vscodium-shared`, separate from the system's Code - OSS | accepted (2026-11-16) |
-| [0003](0003-sem-checagem-de-atualizacao.md) | The local build does not check for updates | accepted (2026-11-16) |
-| [0004](0004-arvore-fonte-e-a-referencia.md) | The copied source tree is the reference for the analysis; the minified JavaScript only confirms | proposed |
-| [0005](0005-evidencia-somente-leitura.md) | Folders 01 to 08 are read-only evidence; analyses go in `09-analises/` | proposed |
-| [0006](0006-testes-em-tela-virtual.md) | UI tests run on a virtual display | proposed (in use); amendment proposed in [0028](0028-virtual-display-input.md) |
+| [0001](0001-bundle-without-source-maps.md) | The production bundle is built without source maps | accepted (2026-11-16) |
+| [0002](0002-data-separate-from-code-oss.md) | The app's data lives in `.vscodium` and `.vscodium-shared`, separate from the system's Code - OSS | accepted (2026-11-16) |
+| [0003](0003-no-update-check.md) | The local build does not check for updates | accepted (2026-11-16) |
+| [0004](0004-source-tree-is-the-reference.md) | The copied source tree is the reference for the analysis; the minified JavaScript only confirms | proposed |
+| [0005](0005-evidence-is-read-only.md) | Folders 01 to 08 are read-only evidence; analyses go in `09-findings/` | proposed |
+| [0006](0006-tests-on-virtual-display.md) | UI tests run on a virtual display | proposed (in use); amendment proposed in [0028](0028-virtual-display-input.md) |
 
 ## Editor (rustode, Phase 1)
 

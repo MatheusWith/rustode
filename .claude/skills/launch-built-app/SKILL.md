@@ -54,4 +54,4 @@ Send SIGTERM first, and only to processes with the profile on their command line
 
 ## Output
 
-What was observed goes into an analysis (the `write-finding` skill). Keep its screenshots and provenance sidecar ([`docs/modelos/proveniencia.md`](../../../docs/modelos/proveniencia.md)) outside folders 01 to 08.
+What was observed goes into an analysis (the `write-finding` skill). Keep its screenshots and provenance sidecar ([`docs/templates/provenance.md`](../../../docs/templates/provenance.md)) outside folders 01 to 08.

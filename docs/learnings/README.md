@@ -19,4 +19,4 @@ Format:
 
 | # | Lesson |
 |---|---|
-| [0001](0001-commit-muda-caminho-dos-modulos.md) | A build without a recorded commit changes where the app looks for modules |
+| [0001](0001-commit-changes-module-paths.md) | A build without a recorded commit changes where the app looks for modules |

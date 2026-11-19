@@ -14,7 +14,7 @@
 
 | What | Where | Note |
 |---|---|---|
-| <snippet, value or behavior> | `02-engenharia-reversa/fonte/arvore/src/…:N` · `out-formatado/…` · `06-port/patches/…` · `08-testes-do-build/<run>/` | <how it was measured> |
+| <snippet, value or behavior> | `02-package-analysis/source/tree/src/…:N` · `out-formatted/…` · `06-port/patches/…` · `08-build-tests/<run>/` | <how it was measured> |
 
 Commands used (with the folder they were run from):
 

@@ -1,29 +1,29 @@
 # rustode: roadmap
 
-**Study stage: preparation** · next: active analysis, once there is a bundle → source map of the main processes and the first component analyses ([why](docs/lacunas.md))
+**Study stage: preparation** · next: active analysis, once there is a bundle → source map of the main processes and the first component analyses ([why](docs/gaps.md))
 
 **Editor stage: Phase 1, M1 (core and CLI) and M2 (workspace and TUI), both in progress** · next: the GUI merge, waiting on the font-license and advisory decisions (M3); the GUI tracer (M3); the CLI `open` command and the micro-benchmark gate (M1) ([milestones](#editor-phase-1-milestones))
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (the editor's state brought up to `7c2467c`: the TUI, `rustode bench`, re-measured numbers, new Gap Analysis rows and the owner decisions the benchmark runner raised) · **Target:** local VSCodium 1.147.0 (VS Code `22d8dccf0f29`, VSCodium `ca7f7b44b5e5`, Electron 43.8.6) and the rustode editor at `7c2467c`
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-18 · **Change:** minor (folder and file names renamed to English) · **Target:** local VSCodium 1.147.0 (VS Code `22d8dccf0f29`, VSCodium `ca7f7b44b5e5`, Electron 43.8.6) and the rustode editor at `7c2467c`
 
 This page is the summary. The details are in:
 - [`docs/qa.md`](docs/qa.md): tests;
-- [`docs/lacunas.md`](docs/lacunas.md): open questions;
+- [`docs/gaps.md`](docs/gaps.md): open questions;
 - [`docs/patches.md`](docs/patches.md): patches;
-- [`09-analises/`](09-analises/): findings;
+- [`09-findings/`](09-findings/): findings;
 - [`docs/adr/`](docs/adr/): decisions, including the editor's (0007–0028).
 
 ## Key numbers
 
 | | Value | How |
 |---|---|---|
-| App built and intact | yes, 3,008 files | measured: `sha256sum -c` against `02-engenharia-reversa/manifesto-sha256.txt`; re-checked on 2026-11-17 (silence, and the file list equals the manifest) |
+| App built and intact | yes, 3,008 files | measured: `sha256sum -c` against `02-package-analysis/manifest-sha256.txt`; re-checked on 2026-11-17 (silence, and the file list equals the manifest) |
 | Patches applied | 55 (32 VSCodium unchanged, 19 adapted, 4 port-only); 6 skipped | measured: the `apply.sh` log (`06-port/logs/`) plus patch 96 |
-| Test runs on the build | 15, no unexplained failure | measured: `08-testes-do-build/RESUMO.md` |
+| Test runs on the build | 15, no unexplained failure | measured: `08-build-tests/SUMMARY.md` |
 | Startup (workbench ready, p50) | 1905 ms (1.138: 2232 ms) | measured: `…-startup-bench`, 10 repetitions, virtual display |
 | Hosts contacted unprompted | 4 groups, none from Microsoft | measured: `…-codium1.147-rede/network-report.md` |
-| Build source tree | 14,465 files | measured: `find 02-engenharia-reversa/fonte/arvore -type f` |
-| Recorded analyses | 2 | measured: `ls 09-analises/[0-9]*.md` |
+| Build source tree | 14,465 files | measured: `find 02-package-analysis/source/tree -type f` |
+| Recorded analyses | 2 | measured: `ls 09-findings/[0-9]*.md` |
 
 Editor (rustode at `7c2467c`, measured on 2026-11-17 from the project root unless stated otherwise):
 
@@ -44,15 +44,15 @@ Editor (rustode at `7c2467c`, measured on 2026-11-17 from the project root unles
 
 | Dimension | State | Doc |
 |---|---|---|
-| Main process (`main.js`, `mainImpl.js`) | mapped by name; contents not studied | [architecture](docs/arquitetura.md) |
-| Workbench (`workbench.desktop.main.js`) | mapped by name; not studied | [architecture](docs/arquitetura.md) |
-| Sessions window (`sessions.desktop.main.js`) | mapped by name; not studied | [architecture](docs/arquitetura.md) |
+| Main process (`main.js`, `mainImpl.js`) | mapped by name; contents not studied | [architecture](docs/architecture.md) |
+| Workbench (`workbench.desktop.main.js`) | mapped by name; not studied | [architecture](docs/architecture.md) |
+| Sessions window (`sessions.desktop.main.js`) | mapped by name; not studied | [architecture](docs/architecture.md) |
 | Extension host | mapped; integration tests pass | [qa](docs/qa.md) |
 | Agent host | port patches studied (99-fixups); bundle not studied | [patches](docs/patches.md) |
-| Packaging (asar, extensions, product.json) | compared with the source | [source-vs-package](docs/fonte-vs-pacote.md) |
-| Privacy and network | measured | [0001](09-analises/0001-trafego-de-rede.md) |
-| Extension compatibility | checked in the code; list of proposed APIs pending | [gaps G6](docs/lacunas.md) |
-| Keystroke injection on the virtual display | measured: works through libei and `org_kde_kwin_fake_input` | [0002](09-analises/0002-entrada-virtual-wayland.md) |
+| Packaging (asar, extensions, product.json) | compared with the source | [source-vs-package](docs/source-vs-package.md) |
+| Privacy and network | measured | [0001](09-findings/0001-network-traffic.md) |
+| Extension compatibility | checked in the code; list of proposed APIs pending | [gaps G6](docs/gaps.md) |
+| Keystroke injection on the virtual display | measured: works through libei and `org_kde_kwin_fake_input` | [0002](09-findings/0002-virtual-wayland-input.md) |
 
 ## QA results
 
@@ -86,7 +86,7 @@ The scope of each milestone is fixed by [ADR 0018](docs/adr/0018-phase-1-milesto
 
 ## Gap Analysis against VS Code
 
-What rustode does compared with the App (local VSCodium 1.147.0, built from VS Code `22d8dccf0f29`). Source-tree paths are relative to `02-engenharia-reversa/fonte/arvore/`. The first benchmark run is not like for like (see "Key numbers"), so no performance comparison exists yet ([ADR 0024](docs/adr/0024-comparison-with-the-app.md)); this section compares behavior only.
+What rustode does compared with the App (local VSCodium 1.147.0, built from VS Code `22d8dccf0f29`). Source-tree paths are relative to `02-package-analysis/source/tree/`. The first benchmark run is not like for like (see "Key numbers"), so no performance comparison exists yet ([ADR 0024](docs/adr/0024-comparison-with-the-app.md)); this section compares behavior only.
 
 ### Implemented
 
@@ -133,7 +133,7 @@ Out of scope for Phase 1 ([ADR 0018](docs/adr/0018-phase-1-milestones.md)): runn
 
 Study:
 
-1. **Bundle → source map of the main processes** (G1). For each bundle in `out/`, list its entry points in `fonte/arvore/src` and the modules it includes. 6–10 h.
+1. **Bundle → source map of the main processes** (G1). For each bundle in `out/`, list its entry points in `source/tree/src` and the modules it includes. 6–10 h.
 2. **2 h soak** (G4): the only measurement of leaks over time. 2 h of machine time + 1 h of analysis. **Owner decision:** authorize it and choose the time.
 3. **Check the `product.json` list of proposed APIs** (G6) against the 1.147 proposals and VSCodium's newest list. 1–2 h. **Owner decision:** download the newest list from the network.
 4. **Stress with more free RAM** (G3): open more than 75 files and test files of 10 to 60 MB. 1 h. **Owner decision:** close other apps or lower the soft limit.
@@ -149,7 +149,7 @@ Editor:
 4. **What the benchmark runner's first run raised** (`rustode bench`, `4203f14`, `176081c`, `ea68264`, `8a5ae5b`). **Owner decisions:**
    1. *The one-App guard.* It refuses while any `codium` process runs, including the owner's own VSCodium: it matches any executable or first argument named `codium` or under a `VSCode-linux-x64` folder (`crates/cli/src/bench/guard.rs:82-133`). Keep it, or narrow it to the App's copies.
    2. *The wait before shutdown.* The driver takes its screenshot and sends SIGTERM as soon as the first line shows (`bench/app/open_file.cjs:25`, `:124-135`); that was about 0.5 s after the first line in the first run, as reported, since its run folder was not kept. The QA startup benchmark waits 2.5 s first (`05-qa/suite/scenarios/startup_bench.cjs:43`). In the first run, 2 of the 4 App launches needed SIGKILL after 10 s (`ea68264`). Adding the wait needs one more App run.
-   3. *Record the first run* as an analysis in `09-analises/`? Its run folder was not kept, so recording it means running it again.
+   3. *Record the first run* as an analysis in `09-findings/`? Its run folder was not kept, so recording it means running it again.
    4. *The App's launch flags*, copied from the QA startup benchmark: an isolated profile, `--disable-telemetry`, `--disable-workspace-trust`, CDP and `--new-window`, under a 3 GB memory cap (`crates/cli/src/bench/plan.rs:17-27`, `:199-215`; `05-qa/suite/scenarios/startup_bench.cjs:31-33`). The runner adds `MemorySwapMax=1G`, which the startup benchmark does not set. Confirm them.
    5. *The duplicate `syn`* that `cargo deny` warns about. It came with ratatui at `a8c6252` (the check at `865c8fa` prints no warning): ratatui's proc-macro dependencies use both syn 2.0.119 and 3.0.10. `serde_derive`, which `rustode bench` added for its scenario list, uses syn 3.0.10, which was already there, so parsing the TOML by hand would not remove the warning (measured: `cargo tree --locked --offline -i syn@2.0.119` and `-i syn@3.0.10` at `7c2467c`). Accept the warning, or keep looking for a way to remove it.
 5. **criterion micro-benchmarks and the regression gate** ([ADR 0026](docs/adr/0026-micro-benchmark-gate.md)).
@@ -162,18 +162,19 @@ Editor:
 
 ## Progress log
 
+- **2026-11-18 (language):** every folder and file name renamed to English, with every link updated: `montar.sh` → `assemble.sh`, `sincronizar-skills.sh` → `sync-skills.sh` (`SEM_FORMATADO` → `SKIP_FORMAT`), `09-analises/` → `09-findings/`, `docs/modelos/` → `docs/templates/`, `docs/componentes/` → `docs/components/`, `docs/aprendizado/` → `docs/learnings/`, `docs/lacunas.md` → `docs/gaps.md`, and the slugs of ADRs 0001–0006 and findings 0001–0002; the scripts' comments and messages are in English. By the owner's explicit decision the evidence folders and generated files were renamed too (`02-package-analysis/`, `03-documents/`, `04-screenshots/`, `07-vscodium-source/`, `08-build-tests/`, `manifest-sha256.txt`, `source/tree/`, `out-formatted/`, `SUMMARY.md`, `network-<run>.md`, …): moved in place, checked against the manifest and by file counts, then rebuilt identically by `assemble.sh`. Only names copied verbatim from the live sources stay in Portuguese.
 - **2026-11-17 (editor, M1 and M2):** the view API that frontends draw from, with Enter keeping indentation, Tab following `editor.tabSize` and `editor.insertSpaces`, and only CR, LF and CRLF breaking lines (`a468316`, `a2c25d6`, `865c8fa`); the TUI tracer, with the status bar, the width bands, key-to-frame latency recorded and snapshot tests (`a8c6252`); tabs, the explorer and closing a document, which unwatches its file (`90ebf27`, `3081db1`); quick open with a fuzzy scorer, the command registry, the command palette and go to line (`22f0bbb`, `b813f94`); Dark Modern colors with 24-bit, 256, 16 or no colors (`818073e`); `rustode bench`, the benchmark runner tracer, with its first real run of `open-file-1mb` (`4203f14`, `176081c`, `ea68264`, `8a5ae5b`). This page, the README, ADR 0016, `AGENTS.md` §11.1, `ATTRIBUTION.md` and gaps G17–G18 brought up to `7c2467c`.
 - **2026-11-17 (editor, documents):** the Editor section of `AGENTS.md` (§11); ADRs 0007–0028 for the Phase 1 decisions, with 0027 (ropey or a piece tree) proposed and 0028 (the native-input amendment) left as the owner's decision; the contributing guide's review checklist, mirrored by the pull request template; the editor's dependencies in `ATTRIBUTION.md`; this page's milestones and Gap Analysis; gaps G13–G19.
 - **2026-11-17 (editor, M1):** editing with undo and redo grouped like VS Code (`042e6fa`); multi-cursor and box selection (`eacae33`); file watching and reload or conflict on external changes (`1fbb01d`, `3e86468`); settings and keybindings in VS Code's format (`46e0234`, `5e2b5ab`); stress budgets, with 1 GB measured at 2.29 s and a 2,208 MB peak (`40cebd1`, `c10e816`); UTF-8 decoded without copying (`9d9313d`; 100 MB peak from 318 MB to 218 MB); the workspace became the only rustode crate the frontends may use (`d6debfb`).
-- **2026-11-17 (spike):** keystrokes reach the App and an eframe stand-in on the virtual display through libei and `org_kde_kwin_fake_input` ([0002](09-analises/0002-entrada-virtual-wayland.md), `a33d58c`). Its exploratory sessions wrote 3 compile-cache files into `01-app/`, which led to the rule against running the App in place (AGENTS.md §11.5; G13).
+- **2026-11-17 (spike):** keystrokes reach the App and an eframe stand-in on the virtual display through libei and `org_kde_kwin_fake_input` ([0002](09-findings/0002-virtual-wayland-input.md), `a33d58c`). Its exploratory sessions wrote 3 compile-cache files into `01-app/`, which led to the rule against running the App in place (AGENTS.md §11.5; G13).
 - **2026-11-17 (documents):** `AGENTS.md` §10 maps every artifact in the evidence folders (`16db07c`).
 - **2026-11-16 (editor, M0 and M1):** the rustode folder became a git repository after the owner approved the privacy review (`78aa4d5`); the Cargo workspace with a working `--version` (`569b179`); commit and push hooks backed by xtask (`9022c11`, `a780b8f`); CI and Dependabot (`cd66bc1`); the license policy (`7ee96c3`); shared tracing (`3c8fe23`); open and save keeping encoding and line endings (`c7bfd73`).
-- **2026-11-16 (language):** every project document translated to English (`AGENTS.md` now requires it). Folder and file names keep their Portuguese spelling, because `montar.sh` and the links depend on them.
+- **2026-11-16 (language):** every project document translated to English (`AGENTS.md` now requires it). Folder and file names kept their Portuguese spelling at the time; they were renamed to English on 2026-11-18 (see that entry; the script is now `assemble.sh`).
 - **2026-11-16 (tools):** REA 6.8.0 (`rea-agents`) registered as the project's MCP server for Claude Code (`.mcp.json`) and OpenCode (`opencode.json`), with the `reverse-engineer-anything` skill and the rules in `AGENTS.md` §6.
   - Verified: `rea mcp doctor` healthy (229 tools); the `codium` fuses were read; static analysis of `out/main.js` took 21 s, with no writes to 01 to 08.
   - Native decompilation is unavailable, because REA 6.8.0 only accepts Ghidra 12.1.x.
 - **2026-11-16 (documents):** rustode gets the documentation set, following the filmcraft standard: `AGENTS.md` (single source; `CLAUDE.md` only imports it), `ROADMAP.md`, `docs/`, ADRs, templates and skills. First analysis recorded (network traffic).
-- **2026-11-16 (rustode):** project assembled with real copies (no links) of the app, documents, screenshots, QA, port and analysis material; test results copied to `08-testes-do-build/`.
+- **2026-11-16 (rustode):** project assembled with real copies (no links) of the app, documents, screenshots, QA, port and analysis material; test results copied to `08-build-tests/`.
 - **2026-11-16 (tests):** smoke 0 failures; network passed; CDP battery equal to 1.138 after fixing the harness (M12) and confirming VSCodium's AI default (P05); load and stress run.
 - **2026-11-16 (build done):** commit recorded via `BUILD_SOURCEVERSION`; compile cache generated on a virtual display after patch 96 (UID suffix).
 - **2026-11-16 (build, 3rd attempt):** bundle without source maps (patch 97) finishes in 65 s with a 2.7 GB peak; swap guard in `lib.sh`.
@@ -187,6 +188,7 @@ Editor:
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-18 | minor | Folder and file names renamed to English, evidence folders included |
 | 2026-11-17 | minor | Editor state at `7c2467c`: the TUI (M2, in part), `rustode bench`, re-measured numbers, TUI rows in the Gap Analysis, the owner decisions the benchmark runner raised |
 | 2026-11-17 | major | Editor: Phase 1 milestones (M0–M9), Gap Analysis against VS Code, editor numbers and next steps; analysis 0002 |
 | 2026-11-16 | minor | Translated to English |

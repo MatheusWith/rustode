@@ -1,4 +1,4 @@
-<!-- Row of the table at the top of docs/lacunas.md: -->
+<!-- Row of the table at the top of docs/gaps.md: -->
 | G<n> | <the gap, in one line> | analysis | test | behavior | build limitation | <blocks active analysis: yes/no> | <N–M h> |
 
 <!-- Detailed entry: -->

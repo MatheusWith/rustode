@@ -3,7 +3,7 @@
 > **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (G17 and G18 note the TUI's current choices) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
 
 This page lists what is still unknown or has not been measured, in priority order: first the study (G1–G12), then the editor (G13 on). The hour figures are estimates, not measurements. When a gap is resolved:
-- record the finding in `09-analises/`;
+- record the finding in `09-findings/`;
 - mark the row as resolved;
 - point the row to the finding.
 
@@ -36,7 +36,7 @@ Editor (rustode, Phase 1):
 
 ## G1. No bundle → source-module map
 
-- **Missing:** for each large bundle (`workbench.desktop.main.js`, `sessions.desktop.main.js`, `agentHostMain.js`, `extensionHostProcess.js`), which `src/` modules it contains and in what order. Today only the entry file is known ([`fonte-vs-pacote.md`](fonte-vs-pacote.md) §1).
+- **Missing:** for each large bundle (`workbench.desktop.main.js`, `sessions.desktop.main.js`, `agentHostMain.js`, `extensionHostProcess.js`), which `src/` modules it contains and in what order. Today only the entry file is known ([`source-vs-package.md`](source-vs-package.md) §1).
 - **Impact:** without it, locating a minified snippet takes a case-by-case anchor search.
 - **Approach:** one of three options. **6–10 h.**
   - Generate the esbuild metafile from the tree. The `metafile` option is already used in the mobile build in `build/next/index.ts`.
@@ -70,7 +70,7 @@ Editor (rustode, Phase 1):
 - **Missing:** checking the contents of the "About" window (version, commit, Electron).
 - **Approach:** one of two options. **30 min.**
   - A native screen capture, which needs the owner's authorization to take over the screen.
-  - Reading `product.json` and `versao.txt`, which already give the same values.
+  - Reading `product.json` and `version.txt`, which already give the same values.
 
 ## G6. The `product.json` list of proposed APIs is from 1.143
 
@@ -84,7 +84,7 @@ Editor (rustode, Phase 1):
 - **Missing:** two confirmations.
   - Whether official VSCodium also shows the bar empty.
   - Whether the "it was empty" rule (`AUXILIARYBAR_EMPTY`) hides it even on the second open.
-- **Evidence:** the block that tests `ChatAIDisabledSettingId` in `layout.ts` (fonte/arvore/src/vs/workbench/browser/layout.ts); the screenshot `…-codium1.147-menus/screenshots/M12.png`.
+- **Evidence:** the block that tests `ChatAIDisabledSettingId` in `layout.ts` (source/tree/src/vs/workbench/browser/layout.ts); the screenshot `…-codium1.147-menus/screenshots/M12.png`.
 - **Approach:** open the same profile twice and compare. Known workaround: `workbench.secondarySideBar.defaultVisibility: hidden`. **1 h.**
 
 ## G8. SIGTERM to all processes leaves the app stuck
@@ -99,7 +99,7 @@ Editor (rustode, Phase 1):
 - **Missing:** two answers.
   - Whether it can be turned off without a patch, through the Electron spell-checker configuration.
   - Whether official VSCodium does the same.
-- **Evidence:** [`09-analises/0001-trafego-de-rede.md`](../09-analises/0001-trafego-de-rede.md).
+- **Evidence:** [`09-findings/0001-network-traffic.md`](../09-findings/0001-network-traffic.md).
 - **Approach:** search the tree for `setSpellCheckerDictionaryDownloadURL`/`spellcheck` and test with the logging proxy. **1 h.**
 
 ## G10. Unsuitable L05 criterion
@@ -121,9 +121,9 @@ Editor (rustode, Phase 1):
 
 ## G13. The integrity check does not see files added to `01-app/`
 
-- **Missing:** `sha256sum -c` (§0.6) checks only the files the manifest lists. Files added to `01-app/` go unnoticed. On 2026-11-17, running the App in place wrote 3 new Node compile-cache files under `resources/app/node-compile-cache/extension-host/`, and the check still passed ([`09-analises/0002`](../09-analises/0002-entrada-virtual-wayland.md), "Limitations").
+- **Missing:** `sha256sum -c` (§0.6) checks only the files the manifest lists. Files added to `01-app/` go unnoticed. On 2026-11-17, running the App in place wrote 3 new Node compile-cache files under `resources/app/node-compile-cache/extension-host/`, and the check still passed ([`09-findings/0002`](../09-findings/0002-virtual-wayland-input.md), "Limitations").
 - **Impact:** §0.6 can pass while 01 no longer matches the analyzed app.
-- **Evidence today:** the file list matched the manifest on 2026-11-17 (3,008 files). Measured from `01-app/VSCode-linux-x64` with `diff <(find . -type f | sort) <(sed 's/^[0-9a-f]*  //' ../../02-engenharia-reversa/manifesto-sha256.txt | sort)`, which printed nothing.
+- **Evidence today:** the file list matched the manifest on 2026-11-17 (3,008 files). Measured from `01-app/VSCode-linux-x64` with `diff <(find . -type f | sort) <(sed 's/^[0-9a-f]*  //' ../../02-package-analysis/manifest-sha256.txt | sort)`, which printed nothing.
 - **Approach:** two changes, both proposed by finding 0002. **Owner decision**, because they change §0.6 and a skill. **30 min.**
   - Add the file-list comparison above to §0.6 and to the `compare-builds` skill. Editor benchmarks already run it on their copy (AGENTS.md §11.5).
   - Set `NODE_DISABLE_COMPILE_CACHE=1` in the `launch-built-app` skill and the QA launchers.
@@ -144,7 +144,7 @@ Editor (rustode, Phase 1):
 
 ## G16. The App lost the first injected keystroke once
 
-- **Missing:** the cause. In one of 3 App sessions through `org_kde_kwin_fake_input`, the first key (Shift+H) never reached the renderer ([`09-analises/0002`](../09-analises/0002-entrada-virtual-wayland.md), run 2). The finding's hypothesis is a race between the window getting focus or keymap and the first event from a newly created device. One case doesn't make a rule.
+- **Missing:** the cause. In one of 3 App sessions through `org_kde_kwin_fake_input`, the first key (Shift+H) never reached the renderer ([`09-findings/0002`](../09-findings/0002-virtual-wayland-input.md), run 2). The finding's hypothesis is a race between the window getting focus or keymap and the first event from a newly created device. One case doesn't make a rule.
 - **Impact:** a typing-latency run that loses keys times fewer events than it sent.
 - **Approach:** repeat with a warm-up key, through both paths, and check focus, keymap and device creation. **1–2 h.**
 
