@@ -391,13 +391,30 @@ fn rename_edits_open_and_closed_files_and_each_document_undoes_alone() {
         at(A, "helper", 1, 3),
         "the cursor stays in the word"
     );
+}
 
+#[test]
+fn each_document_undoes_its_part_of_a_rename_alone() {
+    let mut fx = Fixture::new("rename-undo");
+    fx.file("src/a.rs", A);
+    fx.file("src/b.rs", B);
+    let mut ws = fx.workspace(&[]);
+    let a = fx.open(&mut ws, "src/a.rs");
+    ws.set_cursor(a, at(A, "helper", 1, 3)).expect("cursor");
+    assert!(ws.rename_symbol(a, "assist").expect("request"));
+    let _ = fx.notice(&mut ws);
+    let b = ws
+        .tabs()
+        .iter()
+        .copied()
+        .find(|&t| t != a)
+        .expect("b opened");
     assert!(ws.undo(a).expect("undo a"));
     assert_eq!(text(&ws, a), A, "one step undoes the whole document");
     assert_eq!(text(&ws, b), "fn other() {\n    assist();\n}\n");
     assert!(ws.undo(b).expect("undo b"));
     assert_eq!(text(&ws, b), B);
-    // The server saw the new texts: a later request works on them.
+    // Redo brings the rename back.
     assert!(ws.redo(a).expect("redo"));
 }
 

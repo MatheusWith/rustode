@@ -126,6 +126,7 @@ impl Capabilities {
 
 /// The language features a server offers beyond syncing documents.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // one flag per capability the server offers
 pub(crate) struct Features {
     /// `hoverProvider`.
     pub hover: bool,

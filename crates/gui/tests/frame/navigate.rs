@@ -127,7 +127,7 @@ fn typing_narrows_the_list_and_escape_closes_it() {
     type_text(&mut harness, "other");
     assert_eq!(buttons(&harness), ["helper(); other.rs:2"]);
     press(&mut harness, Modifiers::NONE, Key::Escape);
-    assert!(buttons(&harness).is_empty());
+    assert_eq!(buttons(&harness).len(), 0);
     assert!(harness.state().workspace().locations().is_none());
 }
 
@@ -141,7 +141,7 @@ fn f12_goes_to_the_definition() {
             .and_then(|id| ws.document(id))
             .is_some_and(|doc| doc.primary_selection().head == 9)
     });
-    assert!(buttons(&harness).is_empty());
+    assert_eq!(buttons(&harness).len(), 0);
 }
 
 #[test]

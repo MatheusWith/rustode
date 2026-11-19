@@ -203,7 +203,7 @@ fn ctrl_shift_i_formats_and_says_when_there_is_nothing_to_do() {
         KeyCode::Char('I'),
         KeyModifiers::CONTROL | KeyModifiers::SHIFT,
     );
-    send(&mut app, &mut terminal, &[chord.clone()]);
+    send(&mut app, &mut terminal, std::slice::from_ref(&chord));
     wait_for(&mut app, &mut terminal, "Formatted the document");
     assert_eq!(
         text(&app),

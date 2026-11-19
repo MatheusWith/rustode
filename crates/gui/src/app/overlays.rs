@@ -131,10 +131,10 @@ impl EditorApp {
         }
         let outcome = find::show(ui, &mut self.workspace, &mut self.find, areas.editor);
         changed |= self.find_outcome(&ctx, outcome);
-        if ctx.memory(|memory| memory.has_focus(editor::id())) {
-            if let Some(id) = navigate::keys(&ctx) {
-                self.run_command(&ctx, id);
-            }
+        if ctx.memory(|memory| memory.has_focus(editor::id()))
+            && let Some(id) = navigate::keys(&ctx)
+        {
+            self.run_command(&ctx, id);
         }
         let outcome = self.navigator.show(&ctx, &mut self.workspace);
         changed |= !matches!(outcome, navigate::Outcome::None);
