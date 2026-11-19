@@ -26,8 +26,9 @@ pub use config::{
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
 pub use dap::{
-    CONTINUE_COMMAND, DebugError, DebugState, DebugStatus, LaunchConfiguration, START_COMMAND,
-    StopLocation,
+    CONTINUE_COMMAND, ConsoleKind, ConsoleLine, DebugError, DebugState, DebugStatus, DebugTree,
+    FrameInfo, LaunchConfiguration, PAUSE_COMMAND, START_COMMAND, STEP_INTO_COMMAND,
+    STEP_OUT_COMMAND, STEP_OVER_COMMAND, StepKind, StopLocation, ThreadInfo, VariableRow,
 };
 pub use document::{Document, DocumentId, Highlight};
 pub use explorer::{Explorer, ExplorerRow};

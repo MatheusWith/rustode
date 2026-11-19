@@ -55,13 +55,23 @@
 //! `:687`, `:767`, `:1169`; `debugEditorActions.ts:35-60`); the first three run
 //! without a document, and [`Workspace::debug_key_command`] says which of
 //! start and continue F5 means now.
+//! "Debug: Step Over" on F10, "Step Into" on F11, "Step Out" on Shift+F11
+//! and "Pause" on F6, each with VS Code's `when` clause
+//! (`debugCommands.ts:500-560`: stopped; not inactive; stopped with more than
+//! one frame; running); [`Workspace::command_applies`] evaluates it, which is
+//! how F6 pauses while the program runs and moves the focus otherwise.
+//! "Debug: Add Watch Expression" (`watchExpressionsView.ts:612`), "Remove
+//! Watch Expression" (`debugCommands.ts:77`; Delete in the Watch view) and the
+//! four "Focus on … View" commands (`debug.contribution.ts:471-473`,
+//! `repl.ts:1228`) are workbench commands: the frontend asks for the text
+//! or moves the focus.
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
 //! The palette lists matching commands alphabetically; VS Code also puts
 //! recently used ones first and matches word starts
 //! (`AbstractCommandsQuickAccessProvider`), which is not done yet.
 
-use crate::{DocumentId, Error, Workspace};
+use crate::{DocumentId, Error, StepKind, Workspace};
 use rustode_config::Chord;
 
 /// Who runs a command: the workspace on the active document, or the frontend.
@@ -83,6 +93,10 @@ pub struct CommandInfo {
     /// Who runs it.
     pub scope: CommandScope,
     default_key: Option<&'static str>,
+    /// The `when` clause of the default key, in VS Code's syntax: the key
+    /// means this command only while it holds
+    /// ([`Workspace::command_applies`]).
+    pub(crate) when: Option<&'static str>,
 }
 
 const fn command(
@@ -96,6 +110,15 @@ const fn command(
         label,
         scope,
         default_key,
+        when: None,
+    }
+}
+
+impl CommandInfo {
+    /// The same command, its default key limited by a `when` clause.
+    const fn when(mut self, clause: &'static str) -> Self {
+        self.when = Some(clause);
+        self
     }
 }
 
@@ -328,6 +351,77 @@ pub const COMMANDS: &[CommandInfo] = &[
         Some("F9"),
     ),
     command(
+        "workbench.action.debug.stepOver",
+        "Debug: Step Over",
+        Editor,
+        Some("F10"),
+    )
+    .when("debugState == 'stopped'"),
+    command(
+        "workbench.action.debug.stepInto",
+        "Debug: Step Into",
+        Editor,
+        Some("F11"),
+    )
+    .when("debugState != 'inactive'"),
+    command(
+        "workbench.action.debug.stepOut",
+        "Debug: Step Out",
+        Editor,
+        Some("Shift+F11"),
+    )
+    .when("debugState == 'stopped' && threadHasMultipleStackFrames"),
+    command(
+        "workbench.action.debug.pause",
+        "Debug: Pause",
+        Editor,
+        Some("F6"),
+    )
+    .when("debugState == 'running'"),
+    command(
+        "workbench.debug.viewlet.action.addWatchExpression",
+        "Debug: Add Watch Expression",
+        Workbench,
+        None,
+    ),
+    command(
+        "debug.removeWatchExpression",
+        "Debug: Remove Watch Expression",
+        Workbench,
+        Some("Delete"),
+    )
+    .when("watchExpressionsFocused"),
+    command(
+        "workbench.debug.viewlet.action.removeAllWatchExpressions",
+        "Debug: Remove All Watch Expressions",
+        Editor,
+        None,
+    ),
+    command(
+        "workbench.debug.action.focusCallStackView",
+        "Debug: Focus on Call Stack View",
+        Workbench,
+        None,
+    ),
+    command(
+        "workbench.debug.action.focusVariablesView",
+        "Debug: Focus on Variables View",
+        Workbench,
+        None,
+    ),
+    command(
+        "workbench.debug.action.focusWatchView",
+        "Debug: Focus on Watch View",
+        Workbench,
+        None,
+    ),
+    command(
+        "workbench.debug.action.focusRepl",
+        "Debug: Focus on Debug Console View",
+        Workbench,
+        None,
+    ),
+    command(
         "rustode.restartLanguageServer",
         "Language Server: Restart",
         Editor,
@@ -460,6 +554,15 @@ impl Workspace {
             "workbench.action.debug.stop" => {
                 return self.stop_debugging().map(|()| true).map_err(Error::Debug);
             }
+            "workbench.action.debug.stepOver" => return self.step_command(StepKind::Over),
+            "workbench.action.debug.stepInto" => return self.step_command(StepKind::Into),
+            "workbench.action.debug.stepOut" => return self.step_command(StepKind::Out),
+            "workbench.action.debug.pause" => {
+                return self.pause_debugging().map(|()| true).map_err(Error::Debug);
+            }
+            "workbench.debug.viewlet.action.removeAllWatchExpressions" => {
+                self.remove_all_watches();
+            }
             _ => {
                 let Some(document) = self.active_document() else {
                     return Ok(false);
@@ -496,6 +599,12 @@ impl Workspace {
             _ => return Ok(false),
         }
         Ok(true)
+    }
+
+    fn step_command(&mut self, kind: StepKind) -> Result<bool, Error> {
+        self.step_debugging(kind)
+            .map(|()| true)
+            .map_err(Error::Debug)
     }
 
     fn execute_on(&mut self, id: DocumentId, command: &str) -> Result<bool, Error> {
