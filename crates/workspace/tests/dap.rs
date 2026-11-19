@@ -203,8 +203,8 @@ fn launch_json_is_read_in_vs_codes_format_and_problems_are_reported() {
 fn a_missing_launch_json_is_no_configuration_and_no_problem() {
     let f = Fixture::new("no-launch-json");
     let mut ws = f.workspace(&[]);
-    assert!(ws.launch_configurations().is_empty());
-    assert!(ws.debug_problems().is_empty());
+    assert_eq!(ws.launch_configurations().len(), 0);
+    assert_eq!(ws.debug_problems().len(), 0);
     assert_eq!(ws.start_debugging(), Err(DebugError::NoConfiguration));
 }
 

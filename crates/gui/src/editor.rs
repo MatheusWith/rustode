@@ -452,30 +452,7 @@ fn pointer(
     };
     let offset = offset_at(ui, doc, layout, view, pos);
     if layout.gutter.contains(pos) {
-        // A press on the gutter sets or clears a breakpoint, as a click on
-        // VS Code's glyph margin does, and does not move the caret.
-        let pressed = ui.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(
-                    event,
-                    egui::Event::PointerButton {
-                        button: egui::PointerButton::Primary,
-                        pressed: true,
-                        ..
-                    }
-                )
-            })
-        });
-        if pressed {
-            let line = doc.position_of(offset).line;
-            let below_top = pos.y - layout.origin(view).y;
-            if below_top >= 0.0
-                && let Err(err) = workspace.toggle_breakpoint(document, line)
-            {
-                tracing::warn!(%err, "cannot toggle the breakpoint");
-            }
-        }
-        view.drag_anchor = None;
+        gutter_press(ui, workspace, document, layout, view, pos);
         return;
     }
     let press = ui.input(|input| {
@@ -503,6 +480,43 @@ fn pointer(
             workspace.set_selections(document, vec![Selection::new(anchor, offset)], 0)
     {
         tracing::warn!(%err, "cannot place the caret");
+    }
+}
+
+/// A press on the gutter sets or clears a breakpoint, as a click on VS
+/// Code's glyph margin does, and does not move the caret.
+fn gutter_press(
+    ui: &Ui,
+    workspace: &mut Workspace,
+    document: DocumentId,
+    layout: &Layout,
+    view: &mut View,
+    pos: Pos2,
+) {
+    view.drag_anchor = None;
+    let pressed = ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                }
+            )
+        })
+    });
+    let below_top = pos.y - layout.origin(view).y;
+    let Some(doc) = workspace.document(document) else {
+        return;
+    };
+    if pressed && below_top >= 0.0 {
+        let line = view.top + whole_lines(below_top, layout.line_height);
+        if line < doc.line_count()
+            && let Err(err) = workspace.toggle_breakpoint(document, line)
+        {
+            tracing::warn!(%err, "cannot toggle the breakpoint");
+        }
     }
 }
 
