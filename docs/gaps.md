@@ -139,8 +139,23 @@ Editor (rustode, Phase 1):
 - **Missing:** the App-side signal that marks two things:
   - the first frame at startup (ADR 0024, "startup to first frame"). The QA startup benchmark measures "workbench ready" instead (README, "Tests");
   - the frame that shows a typed key (ADR 0025). The decision names "a CDP frame trace event" but not which one.
-- **Impact:** without it, the App side of the typing-latency and first-frame scenarios has no end point.
+- **Impact:** without it, the App side of the typing-latency and first-frame scenarios has no end point. *Update 2026-11-19:* the startup half is bracketed, not resolved (G22); the typing half waits for ADR 0028.
 - **Approach:** record a CDP trace (`Tracing.start`) while keys are injected on the virtual display, and match the frame events against screenshots. **2–4 h.**
+
+## G22. Which first-frame events make the App comparison like for like?
+
+- **Missing:** the App has no event that equals rustode's "the first wgpu present returned" (G15's question, for startup). The first comparison ([`09-findings/0003`](../09-findings/0003-first-app-comparison.md)) brackets it: rustode's `first frame presented` line against the App's Chromium first contentful paint (read over CDP as a wall-clock time) and the first fixture line seen in the DOM (polled every 10 ms). The three are not the same event, so no ratio is claimed.
+- **Approach:** a CDP trace with `Tracing.start` and the `viz` frame events (`DrawFrame` or `SwapBuffers` with the workbench's first content) could give the App's first composited frame. It needs a prototype and a check of its overhead on the virtual display. **1 day.** Typing latency stays unmeasured until the owner accepts [ADR 0028](adr/0028-virtual-display-input.md).
+
+## G23. The QA harness's App runs may have used the GPU
+
+- **Missing:** whether the 2026-11-13 and 2026-11-16 QA runs rendered in software. Finding 0003 measured that, without extra environment, the App on `run_virtual.sh`'s display chose the machine's NVIDIA GPU (`SystemInfo.getInfo`: `gpu_compositing: enabled`, ANGLE on `NVIDIA GeForce RTX 3050`), although `run_virtual.sh` states that the Chromium there renders in software, and ADR 0006 says so too. The benchmark runner now sets Mesa's llvmpipe for both editors (`rustode bench`, `plan.rs: software_rendering_env`). The QA runs' `app.log` and `sampler.jsonl` do not record the GPU, so their rendering is a hypothesis.
+- **Approach:** re-run one QA startup benchmark with the software-rendering environment and compare with the `…-startup-bench` figures in the ROADMAP. **0.5 day.**
+
+## G24. `rustode-gui` exits with code 0 and no message when it finds no graphics adapter
+
+- **Missing:** a GUI that cannot create its wgpu adapter logs the error through the `log` crate, which `rustode-trace` did not forward, and exits with status 0 (eframe turns the error into an exit of the event loop). Found while building the benchmark runner: on the virtual display with the machine's default EGL driver, `rustode-gui` returned after 70 ms with nothing on stderr. `tracing-subscriber`'s `tracing-log` feature is now on, so `RUSTODE_LOG=info` prints eframe's "Exiting because of error: WGPU error: No suitable graphics adapter found". The exit status is still 0.
+- **Approach:** have `rustode_gui::run` return an error when the window never presented a frame (for example, when `FirstFrame` never fired before the loop exited), so `main` prints it and exits with 1 (§11.7.1: an error the user can act on). **0.5 day.**
 
 ## G16. The App lost the first injected keystroke once
 
@@ -194,6 +209,7 @@ Editor (rustode, Phase 1):
 |---|---|---|
 | 2026-11-19 | minor | G21: editor groups against VS Code's |
 | 2026-11-19 | minor | G20: replace across files against VS Code's; owner decision: save only clean files |
+| 2026-11-19 | minor | G22–G24: first-frame events, the QA harness's GPU, the GUI's silent exit without an adapter |
 | 2026-11-17 | minor | G17 and G18: the TUI's provisional layout from 60 to 79 columns and its Dark Modern colors, left for the owner to confirm |
 | 2026-11-17 | minor | Editor questions G13–G19 (integrity, benchmark method, TUI layout, theme, branch protection) |
 | 2026-11-16 | minor | Translated to English; G1 mentions REA |

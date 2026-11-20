@@ -36,7 +36,7 @@ warmup = 1
 repetitions = 3
 timeout_s = 5
 poll_ms = 10
-driver = "app/open_file.cjs"
+driver = "launch.cjs"
 settings = "app/settings.json"
 "#;
 
@@ -46,8 +46,10 @@ const FAKE_RUN_VIRTUAL: &str = r#"#!/usr/bin/env python3
 import json, os, sys
 calls = os.environ["FAKE_CALLS"]
 config = json.load(open(sys.argv[-1]))
-codium = [a for a in config["app_command"] if a.endswith("/codium")][0]
-with open(os.path.join(calls, "run_virtual.json"), "w") as f:
+target = config.get("target", "app")
+codium = ([a for a in config["app_command"] if a.endswith("/codium")] or [config["app_command"][0]])[0]
+name = "run_virtual.json" if target == "app" else "run_virtual-%s.json" % target
+with open(os.path.join(calls, name), "w") as f:
     json.dump({"argv": sys.argv[1:], "codium_exists": os.path.isfile(codium), "config": config}, f)
 if os.environ.get("FAKE_WRITE_INTO"):
     with open(os.environ["FAKE_WRITE_INTO"], "w") as f:
@@ -55,8 +57,16 @@ if os.environ.get("FAKE_WRITE_INTO"):
 def launch(label, warmup, i):
     return {"label": label, "warmup": warmup, "spawn_to_cdp_ms": 200.0 + i,
             "spawn_to_workbench_ms": 1800.0 + 10 * i, "spawn_to_first_line_ms": 2000.0 + 100 * i,
+            "spawn_to_first_paint_ms": 900.0 + i, "ready_rss_mb": 1100.5 + i, "ready_pss_mb": 700.5 + i, "idle_rss_mb": 1200.5 + i, "idle_pss_mb": 800.5 + i,
             "shutdown_ms": 300.0, "peak_rss_mb": 900 + i,
             "needed_sigkill": label in os.environ.get("FAKE_SIGKILL", "").split(",")}
+def gui_launch(label, warmup, i):
+    return {"label": label, "warmup": warmup, "spawn_to_first_frame_ms": 300.0 + i,
+            "first_frame_after_main_ms": 250.0 + i, "ready_rss_mb": 120.5 + i, "ready_pss_mb": 100.5 + i, "idle_rss_mb": 150.5 + i, "idle_pss_mb": 140.5 + i,
+            "shutdown_ms": 20.0, "peak_rss_mb": 160 + i, "needed_sigkill": False,
+            "evict_attempts": 5 if i == 2 else 1, "cache_reference_resident_pct": 28.4 if i == 2 else 0.0}
+if target == "gui":
+    launch = gui_launch
 launches = [launch("warmup-%d" % i, True, 9) for i in range(1, config["warmup"] + 1)]
 launches += [launch("rep-%d" % i, False, i) for i in range(1, config["repetitions"] + 1)]
 status = os.environ.get("FAKE_STATUS", "ok")
@@ -90,7 +100,7 @@ impl Sandbox {
         fs::create_dir_all(&root).expect("sandbox");
         let sandbox = Self { root };
         sandbox.write("bench/scenarios.toml", TINY_LIST);
-        sandbox.write("bench/app/open_file.cjs", "// fake driver, never run\n");
+        sandbox.write("bench/launch.cjs", "// fake driver, never run\n");
         sandbox.write("bench/app/settings.json", "{}\n");
         sandbox.fake_app();
         sandbox.fake_harness();
@@ -154,6 +164,7 @@ impl Sandbox {
     fn fake_harness(&self) {
         self.write_executable("qa/suite/tools/run_virtual.sh", FAKE_RUN_VIRTUAL);
         self.write("qa/suite/collectors/sampler.py", "# fake, never run\n");
+        self.write("qa/50_mesa.json", "{}\n");
         self.write("qa/suite/scenarios/lib.cjs", "// fake, never run\n");
         self.write("node_modules/playwright-core/package.json", "{}\n");
         self.write_executable("bin/node", "#!/bin/sh\nexit 1\n");
@@ -195,6 +206,7 @@ impl Sandbox {
             .env("RUSTODE_NODE", self.path("bin/node"))
             .env("RUSTODE_BENCH_LOCK", self.path("bench.lock"))
             .env("RUSTODE_BENCH_PROC", self.path("proc"))
+            .env("RUSTODE_BENCH_MESA_EGL", self.path("qa/50_mesa.json"))
             .env("FAKE_CALLS", self.path("calls"))
             .env_remove("RUSTODE_LOG");
         command
@@ -314,7 +326,7 @@ fn the_versioned_scenario_list_has_the_open_file_scenario() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("bench/scenarios.toml"), "{text}");
-    assert!(text.contains("version 1"), "{text}");
+    assert!(text.contains("version 2"), "{text}");
     assert!(text.contains("open-file-1mb"), "{text}");
     assert!(text.contains("1048576 bytes"), "{text}");
 }
@@ -340,7 +352,7 @@ fn dry_run_prints_the_plan_and_launches_nothing() {
         "command ",
         "folder ",
         "open-file-1mb",
-        "list version 1",
+        "list version 2",
         "1048576 bytes",
         "Workspace::open",
         "sha256sum -c --quiet",
@@ -487,7 +499,7 @@ fn assert_launched_from_the_copy(sandbox: &Sandbox) {
         ]
     );
     assert_eq!(argv[6], sandbox.path("bin/node").to_str().expect("utf-8"));
-    assert!(argv[7].ends_with("bench/app/open_file.cjs"), "{argv:?}");
+    assert!(argv[7].ends_with("bench/launch.cjs"), "{argv:?}");
     let app_command = strings(&call["config"]["app_command"]);
     for flag in [
         "--user-data-dir={profile}/ud",
@@ -701,7 +713,7 @@ fn the_app_driver_is_valid_javascript() {
     }
     let out = Command::new(&node)
         .arg("--check")
-        .arg(repo_root().join("bench/app/open_file.cjs"))
+        .arg(repo_root().join("bench/launch.cjs"))
         .output()
         .expect("node runs");
     assert!(out.status.success(), "{}", stderr(&out));
@@ -725,4 +737,274 @@ fn launches_killed_after_sigterm_are_flagged() {
     assert!(text.contains("warmup-1, rep-2"), "{text}");
     let report = fs::read_to_string(sandbox.run_folder().join("report.txt")).expect("report.txt");
     assert!(report.contains("warmup-1, rep-2"), "{report}");
+}
+
+/// A list with one scenario of each kind that launches the GUI.
+const LAUNCH_LIST: &str = r#"
+version = 3
+
+[[scenario]]
+id = "startup-tiny"
+title = "Startup, tiny"
+kind = "launch"
+
+[scenario.fixture]
+bytes = 4100
+line_bytes = 64
+
+[scenario.launch]
+measure = "idle"
+cache = "cold"
+settle_s = 3
+
+[scenario.gui]
+warmup = 1
+repetitions = 4
+timeout_s = 5
+
+[scenario.app]
+warmup = 1
+repetitions = 3
+timeout_s = 5
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+"#;
+
+impl Sandbox {
+    /// A `rustode-gui` that is never run (the fake harness stands in for the driver).
+    fn fake_gui(&self) -> PathBuf {
+        self.write_executable(
+            "bin/rustode-gui",
+            "#!/bin/sh\necho 'rustode-gui 0.0.0-fake'\n",
+        );
+        self.path("bin/rustode-gui")
+    }
+
+    fn bench_launch(&self, extra: &[&str]) -> Output {
+        self.write("bench/scenarios.toml", LAUNCH_LIST);
+        self.write("bench/evict.py", "# fake, never run\n");
+        let gui = self.fake_gui();
+        let project = self.path("project");
+        let copies = self.path("copies");
+        let mut args = vec![
+            "bench",
+            "startup-tiny",
+            "--project",
+            project.to_str().expect("utf-8"),
+            "--out",
+            "out",
+            "--app-copy-dir",
+            copies.to_str().expect("utf-8"),
+            "--gui-bin",
+            gui.to_str().expect("utf-8"),
+        ];
+        args.extend_from_slice(extra);
+        self.command(&args).output().expect("rustode runs")
+    }
+}
+
+/// The GUI's driver call: its own target, the settings of the scenario, the
+/// software-rendering environment, and no way to reach the machine's GPU.
+fn assert_gui_call(sandbox: &Sandbox) {
+    let gui: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(sandbox.path("calls/run_virtual-gui.json")).expect("gui call"),
+    )
+    .expect("json");
+    let config = &gui["config"];
+    assert_eq!(config["target"], "gui");
+    assert_eq!(config["measure"], "idle");
+    assert_eq!(config["cache"], "cold");
+    assert_eq!(config["repetitions"], 4);
+    assert_eq!(config["timeout_is_result"], false);
+    assert!(strings(&config["app_command"])[0].ends_with("bin/rustode-gui"));
+    assert_eq!(config["env"]["RUSTODE_REPORT_FIRST_FRAME"], "1");
+    assert_eq!(config["env"]["LIBGL_ALWAYS_SOFTWARE"], "1");
+    assert!(
+        config["env"]["__EGL_VENDOR_LIBRARY_FILENAMES"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("50_mesa.json")),
+        "the GPU's EGL driver stays out: {config}"
+    );
+    assert!(strings(&config["sampler_command"]).contains(&"{pid}"));
+    assert_eq!(
+        gui["argv"][0], "bwrap",
+        "run_virtual.sh runs bwrap, then the driver"
+    );
+    assert!(strings(&gui["argv"]).contains(&"--unshare-net"));
+}
+
+/// Every metric of both sides is there, once per recorded launch.
+fn assert_launch_rows(report: &serde_json::Value) {
+    let first = result(report, "rustode", "launch_to_first_frame");
+    assert_eq!(first["n"], 4, "warm-ups are not recorded");
+    assert_eq!(first["label"], "measured");
+    for (side, metric, n) in [
+        ("rustode", "idle_pss", 4),
+        ("rustode", "ready_rss", 4),
+        ("app", "ready_pss", 3),
+        ("app", "launch_to_first_paint", 3),
+        ("app", "idle_pss", 3),
+    ] {
+        assert_eq!(result(report, side, metric)["n"], n, "{side} {metric}");
+    }
+}
+
+#[test]
+fn a_launch_scenario_runs_the_gui_and_the_app_through_the_same_driver() {
+    let sandbox = Sandbox::new("launch");
+    let out = sandbox.bench_launch(&[]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = sandbox.report();
+    assert_eq!(report["scenario"]["kind"], "launch");
+    assert_eq!(report["inputs"]["launch"]["cache"], "cold");
+    assert_eq!(report["inputs"]["launch"]["settle_s"], 3);
+    assert_eq!(report["gui"]["status"], "ok");
+    assert_eq!(report["gui"]["version"], "rustode-gui 0.0.0-fake");
+    assert_eq!(report["like_for_like"], false);
+
+    // The GUI ran first, as its own target; then the App, as before.
+    assert_gui_call(&sandbox);
+    let app = sandbox.harness_call().expect("the App ran");
+    assert_eq!(app["config"]["target"], "app");
+    assert_eq!(app["config"]["cache"], "cold");
+    assert_launch_rows(&report);
+
+    let text = fs::read_to_string(sandbox.run_folder().join("report.txt")).expect("report.txt");
+    for needle in [
+        "rustode GUI",
+        "cold cache",
+        "no common 'first frame' event",
+        "wgpu present",
+        "1 of 4 recorded launches were not fully cold",
+        "rep-2 (28.4% after 5 attempts)",
+    ] {
+        assert!(text.contains(needle), "report lacks {needle:?}:\n{text}");
+    }
+}
+
+#[test]
+fn a_launch_scenario_without_a_gui_or_launch_table_is_refused() {
+    let sandbox = Sandbox::new("launch-bad");
+    sandbox.write(
+        "bench/scenarios.toml",
+        &LAUNCH_LIST.replace(
+            "[scenario.gui]\nwarmup = 1\nrepetitions = 4\ntimeout_s = 5\n",
+            "",
+        ),
+    );
+    let out = sandbox.run(&["bench", "--list"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("scenario.gui"), "{}", stderr(&out));
+}
+
+#[test]
+fn an_idle_scenario_needs_a_settle_time() {
+    let sandbox = Sandbox::new("launch-settle");
+    sandbox.write(
+        "bench/scenarios.toml",
+        &LAUNCH_LIST.replace("settle_s = 3", "settle_s = 0"),
+    );
+    let out = sandbox.run(&["bench", "--list"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("settle_s"), "{}", stderr(&out));
+}
+
+#[test]
+fn a_missing_gui_binary_is_a_usage_error_before_anything_is_written() {
+    let sandbox = Sandbox::new("launch-nogui");
+    sandbox.write("bench/scenarios.toml", LAUNCH_LIST);
+    let project = sandbox.path("project");
+    let out = sandbox.run(&[
+        "bench",
+        "startup-tiny",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--out",
+        "out",
+        "--gui-bin",
+        "/nonexistent/rustode-gui",
+    ]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(stderr(&out).contains("rustode-gui"), "{}", stderr(&out));
+    assert!(!sandbox.path("out").exists());
+}
+
+#[test]
+fn the_dry_run_of_a_launch_scenario_plans_the_gui_without_launching_it() {
+    let sandbox = Sandbox::new("launch-dry");
+    let list = repo_root().join("bench/scenarios.toml");
+    let out = sandbox.run(&[
+        "bench",
+        "--dry-run",
+        "startup-cold",
+        "--scenarios",
+        list.to_str().expect("utf-8"),
+        "--out",
+        "out",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let plan = stdout(&out);
+    for needle in [
+        "rustode GUI",
+        "RUSTODE_REPORT_FIRST_FRAME=1",
+        "WGPU_BACKEND=gl",
+        "file cache cold",
+        "--unshare-net",
+    ] {
+        assert!(plan.contains(needle), "plan lacks {needle:?}:\n{plan}");
+    }
+    assert!(
+        !plan.contains("Workspace::open"),
+        "a launch scenario has no in-process side"
+    );
+    assert!(!sandbox.path("out").exists());
+}
+
+#[test]
+fn the_versioned_list_has_the_ticket_26_scenarios() {
+    let out = Command::new(RUSTODE)
+        .args(["bench", "--list"])
+        .current_dir(repo_root())
+        .output()
+        .expect("runs");
+    let text = stdout(&out);
+    for id in [
+        "open-file-1mb",
+        "open-file-100mb",
+        "open-file-1gb",
+        "startup-cold",
+        "startup-warm",
+        "idle-rss",
+    ] {
+        assert!(text.contains(id), "{id} missing: {text}");
+    }
+    assert!(
+        !text.contains("typing"),
+        "typing latency waits for ADR 0028: {text}"
+    );
+}
+
+#[test]
+fn the_eviction_helper_drops_files_and_says_how_many() {
+    let sandbox = Sandbox::new("evict");
+    sandbox.write("cache/a.bin", "aaaa");
+    sandbox.write("cache/sub/b.bin", "bbbbbbbb");
+    let out = Command::new("python3")
+        .arg("-I")
+        .arg(repo_root().join("bench/evict.py"))
+        .arg(sandbox.path("cache"))
+        .arg(sandbox.path("no-such-file"))
+        .output();
+    let Ok(out) = out else {
+        eprintln!("skipped: no python3");
+        return;
+    };
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "evicted 2 files, 0 MiB");
+    assert_eq!(
+        fs::read_to_string(sandbox.path("cache/a.bin")).expect("still there"),
+        "aaaa",
+        "eviction never changes a file"
+    );
 }

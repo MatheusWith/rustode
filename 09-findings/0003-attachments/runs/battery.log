@@ -1,0 +1,14 @@
+== startup-cold start 2026-11-19T17:04:21Z
+== startup-cold exit=0 end 2026-11-19T17:07:17Z avail=4180MB
+== startup-warm start 2026-11-19T17:07:17Z
+== startup-warm exit=0 end 2026-11-19T17:10:21Z avail=4149MB
+== idle-rss start 2026-11-19T17:10:21Z
+== idle-rss exit=0 end 2026-11-19T17:15:24Z avail=3767MB
+== open-file-1mb start 2026-11-19T17:15:24Z
+== open-file-1mb exit=0 end 2026-11-19T17:17:25Z avail=3782MB
+== open-file-100mb start 2026-11-19T17:17:25Z
+== open-file-100mb exit=0 end 2026-11-19T17:39:28Z avail=3110MB
+== open-file-1gb start 2026-11-19T17:39:28Z
+== open-file-1gb exit=0 end 2026-11-19T17:41:41Z avail=3929MB
+== done
+== cold-rerun exit=0 2026-11-19T17:50:32Z

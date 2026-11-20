@@ -17,6 +17,7 @@ use serde_json::json;
 use super::guard::MIN_AVAILABLE_MB;
 use super::integrity::{self, Integrity};
 use super::plan::{APP_FOLDER, CDP_PORT, Plan};
+use super::scenario::Kind;
 use super::{Failure, Status, display, guard};
 
 /// Kills what the reaper finds once the run should long be over, if this
@@ -44,6 +45,9 @@ pub(crate) struct DriverResults {
     /// The `playwright-core` version.
     #[serde(default)]
     pub playwright_core: Option<String>,
+    /// Which GPU path the App's Chromium chose (App only).
+    #[serde(default)]
+    pub gpu: Option<serde_json::Value>,
     /// One entry per launch, warm-ups first.
     #[serde(default)]
     pub launches: Vec<Launch>,
@@ -69,6 +73,46 @@ pub(crate) struct Launch {
     pub needed_sigkill: Option<bool>,
     /// Peak total RSS in the watchdog's samples.
     pub peak_rss_mb: Option<f64>,
+    /// App: Chromium's first contentful paint.
+    #[serde(default)]
+    pub spawn_to_first_paint_ms: Option<f64>,
+    /// GUI: the driver's clock when the GUI's first-frame line arrived.
+    #[serde(default)]
+    pub spawn_to_first_frame_ms: Option<f64>,
+    /// GUI: the GUI's own clock, `main` to its first presented frame.
+    #[serde(default)]
+    pub first_frame_after_main_ms: Option<f64>,
+    /// Summed RSS of the editor's processes right after the end point.
+    #[serde(default)]
+    pub ready_rss_mb: Option<f64>,
+    /// Summed PSS of the same processes at the same moment.
+    #[serde(default)]
+    pub ready_pss_mb: Option<f64>,
+    /// Idle: summed RSS of the editor's processes after settling.
+    #[serde(default)]
+    pub idle_rss_mb: Option<f64>,
+    /// Idle: summed PSS of the editor's processes after settling.
+    #[serde(default)]
+    pub idle_pss_mb: Option<f64>,
+    /// Idle: how many processes were summed.
+    #[serde(default)]
+    pub idle_procs: Option<u32>,
+    /// `timeout` or `exited-first`: the launch never reached its end point.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// Why, in the driver's words.
+    #[serde(default)]
+    pub outcome_detail: Option<String>,
+    /// App: what the workbench said when it could not show the file.
+    #[serde(default)]
+    pub complaint: Option<String>,
+    /// Cold launches: how many eviction attempts it took.
+    #[serde(default)]
+    pub evict_attempts: Option<u32>,
+    /// Cold launches: how much of the editor's main file the page cache still
+    /// held after the eviction, in percent.
+    #[serde(default)]
+    pub cache_reference_resident_pct: Option<f64>,
 }
 
 /// How the App side went.
@@ -97,7 +141,7 @@ pub(crate) struct Outcome {
 }
 
 impl Outcome {
-    fn fail(&mut self, status: Status, reason: String) {
+    pub(super) fn fail(&mut self, status: Status, reason: String) {
         if self.status == Status::Ok || status == Status::Invalid {
             self.status = status;
         }
@@ -222,7 +266,13 @@ fn in_copy(plan: &Plan, copy: &Copy, outcome: &mut Outcome) {
         return outcome.fail(Status::Failed, err);
     }
     match launch(plan, &copy.profiles()) {
-        Ok((exit, results)) => take_results(plan, outcome, exit, results),
+        Ok((exit, results)) => {
+            let taken = take_results(&plan.app_out(), exit, results);
+            if let Some(reason) = taken.reason {
+                outcome.fail(taken.status, reason);
+            }
+            outcome.results = taken.results;
+        }
         Err(err) => outcome.fail(Status::Failed, err),
     }
 }
@@ -231,39 +281,82 @@ fn write_config(plan: &Plan, copy: &Copy) -> Result<(), String> {
     let out = plan.app_out();
     fs::create_dir_all(&out).map_err(|err| format!("cannot create {}: {err}", out.display()))?;
     let app = &plan.scenario.app;
-    let s = |path: &Path| path.to_string_lossy().into_owned();
-    let config = json!({
-        "schema": "rustode-bench-app-driver/1",
-        "qa_root": s(&plan.qa_root),
-        "playwright_core": s(&plan.playwright_core()),
-        "out_dir": s(&out),
-        "profiles_root": s(&copy.profiles()),
-        "settings": s(&plan.settings()),
-        "fixture": s(&plan.fixture()),
-        "first_line": plan.first_line(),
-        "cdp_port": CDP_PORT,
-        "warmup": app.warmup,
-        "repetitions": app.repetitions,
-        "timeout_ms": u64::from(app.timeout_s) * 1_000,
-        "poll_ms": app.poll_ms,
-        "min_available_mb": MIN_AVAILABLE_MB,
-        "app_command": plan.app_command(&copy.app_dir().join("codium")),
-        "sampler_command": plan.sampler_command(),
-    });
+    let codium = copy.app_dir().join("codium");
+    let mut config = driver_config(plan, "app", &out, &copy.profiles());
+    config["settings"] = json!(plan.settings().to_string_lossy());
+    config["warmup"] = json!(app.warmup);
+    config["repetitions"] = json!(app.repetitions);
+    config["timeout_ms"] = json!(u64::from(app.timeout_s) * 1_000);
+    config["poll_ms"] = json!(app.poll_ms);
+    config["app_command"] = json!(plan.app_command(&codium));
+    config["sampler_command"] = json!(plan.sampler_command());
+    config["env"] = json!(
+        plan.software_rendering_env()
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>()
+    );
+    config["evict_paths"] = json!([copy.app_dir().to_string_lossy()]);
+    config["cache_reference"] = json!(codium.to_string_lossy());
     let text = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
     fs::write(plan.driver_config(), text + "\n")
         .and_then(|()| fs::copy(plan.settings(), out.join("settings.json")).map(drop))
         .map_err(|err| format!("cannot write the driver config: {err}"))
 }
 
+/// The driver configuration the two targets share.
+pub(super) fn driver_config(
+    plan: &Plan,
+    target: &str,
+    out: &Path,
+    profiles: &Path,
+) -> serde_json::Value {
+    let s = |path: &Path| path.to_string_lossy().into_owned();
+    let launch = plan.scenario.launch;
+    let measure = launch.map_or("open", |l| l.measure.as_str());
+    json!({
+        "schema": "rustode-bench-app-driver/2",
+        "target": target,
+        "measure": measure,
+        "cache": plan.cache().as_str(),
+        "settle_s": launch.map_or(0, |l| l.settle_s),
+        "timeout_is_result": plan.scenario.kind == Kind::OpenFile,
+        "qa_root": s(&plan.qa_root),
+        "playwright_core": s(&plan.playwright_core()),
+        "out_dir": s(out),
+        "profiles_root": s(profiles),
+        "fixture": s(&plan.fixture()),
+        "first_line": plan.first_line(),
+        "cdp_port": CDP_PORT,
+        "min_available_mb": MIN_AVAILABLE_MB,
+        "evict_script": s(&plan.evict_script()),
+    })
+}
+
 fn launch(plan: &Plan, profiles: &Path) -> Result<(ExitStatus, Option<DriverResults>), String> {
-    let log_path = plan.app_out().join("driver.log");
+    run_driver(
+        plan,
+        profiles,
+        &plan.app_out(),
+        &plan.driver_config(),
+        ("the App", plan.app_deadline()),
+    )
+}
+
+/// Runs the driver with `config` on the virtual display; reads `out/results.json`.
+pub(super) fn run_driver(
+    plan: &Plan,
+    profiles: &Path,
+    out: &Path,
+    config: &Path,
+    (what, deadline): (&str, Duration),
+) -> Result<(ExitStatus, Option<DriverResults>), String> {
+    let log_path = out.join("driver.log");
     let log =
         File::create(&log_path).map_err(|err| format!("cannot create the driver log: {err}"))?;
     let err_log = log.try_clone().map_err(|err| err.to_string())?;
-    let command = plan.launch_command();
+    let command = plan.launch_command(config);
     eprintln!(
-        "bench: launching the App on the virtual display (log: {})",
+        "bench: launching {what} on the virtual display (log: {})",
         display::path(&log_path)
     );
     let mut child = Command::new(&command[0])
@@ -278,8 +371,8 @@ fn launch(plan: &Plan, profiles: &Path) -> Result<(ExitStatus, Option<DriverResu
                 display::path(Path::new(&command[0]))
             )
         })?;
-    let exit = wait(plan, &mut child, profiles)?;
-    let results_path = plan.app_out().join("results.json");
+    let exit = wait(&mut child, (profiles, config), deadline)?;
+    let results_path = out.join("results.json");
     let results = match fs::read_to_string(&results_path) {
         Ok(text) => Some(
             serde_json::from_str(&text)
@@ -291,18 +384,19 @@ fn launch(plan: &Plan, profiles: &Path) -> Result<(ExitStatus, Option<DriverResu
 }
 
 /// Waits for the driver; past the deadline, stops the App and the driver.
-fn wait(plan: &Plan, child: &mut Child, profiles: &Path) -> Result<ExitStatus, String> {
-    let deadline = Instant::now() + plan.app_deadline();
+fn wait(
+    child: &mut Child,
+    (profiles, config): (&Path, &Path),
+    allowed: Duration,
+) -> Result<ExitStatus, String> {
+    let deadline = Instant::now() + allowed;
     loop {
         if let Some(exit) = child.try_wait().map_err(|err| err.to_string())? {
             return Ok(exit);
         }
         if Instant::now() >= deadline {
             stop_launches(profiles);
-            pkill(
-                "-TERM",
-                &ere_escape(&plan.driver_config().to_string_lossy()),
-            );
+            pkill("-TERM", &ere_escape(&config.to_string_lossy()));
             for _ in 0..50 {
                 if child.try_wait().ok().flatten().is_some() {
                     break;
@@ -312,33 +406,40 @@ fn wait(plan: &Plan, child: &mut Child, profiles: &Path) -> Result<ExitStatus, S
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "the App side took longer than {} s and was stopped",
-                plan.app_deadline().as_secs()
+                "the driver took longer than {} s and was stopped",
+                allowed.as_secs()
             ));
         }
         std::thread::sleep(Duration::from_millis(200));
     }
 }
 
-fn take_results(
-    plan: &Plan,
-    outcome: &mut Outcome,
-    exit: ExitStatus,
-    results: Option<DriverResults>,
-) {
+/// What the driver's exit and `results.json` add up to.
+pub(super) struct Taken {
+    /// The status the results imply.
+    pub status: Status,
+    /// Why, when not ok.
+    pub reason: Option<String>,
+    /// The parsed results, if the driver wrote them.
+    pub results: Option<DriverResults>,
+}
+
+/// Reads what a driver run left in `out`: its status, and why if it is not ok.
+pub(super) fn take_results(out: &Path, exit: ExitStatus, results: Option<DriverResults>) -> Taken {
     let Some(results) = results else {
-        let log = plan.app_out().join("driver.log");
+        let log = out.join("driver.log");
         let tail = fs::read_to_string(&log).unwrap_or_default();
         let tail: Vec<&str> = tail.lines().rev().take(8).collect();
         let tail: Vec<&str> = tail.into_iter().rev().collect();
-        return outcome.fail(
-            Status::Failed,
-            format!(
+        return Taken {
+            status: Status::Failed,
+            reason: Some(format!(
                 "the driver wrote no results ({exit}; run_virtual.sh exits 99 when the virtual display did not start); last lines of {}:\n  {}",
                 display::path(&log),
                 tail.join("\n  ")
-            ),
-        );
+            )),
+            results: None,
+        };
     };
     // "ok" with a failing exit status is a failure too.
     let status = match results.status.as_str() {
@@ -347,18 +448,21 @@ fn take_results(
         "refused" => Status::Refused,
         _ => Status::Failed,
     };
-    if status != Status::Ok {
-        let reason = results
+    let reason = (status != Status::Ok).then(|| {
+        results
             .reason
             .clone()
-            .unwrap_or_else(|| format!("the driver exited with {exit}"));
-        outcome.fail(status, reason);
+            .unwrap_or_else(|| format!("the driver exited with {exit}"))
+    });
+    Taken {
+        status,
+        reason,
+        results: Some(results),
     }
-    outcome.results = Some(results);
 }
 
 /// Stops any App process of these profiles; returns whether one was running.
-fn stop_launches(profiles: &Path) -> bool {
+pub(super) fn stop_launches(profiles: &Path) -> bool {
     let pattern = format!(
         "[-]-user-data-dir={}/",
         ere_escape(&profiles.to_string_lossy())
@@ -372,7 +476,7 @@ fn stop_launches(profiles: &Path) -> bool {
 }
 
 /// `pkill <signal> -f -- <pattern>`; whether a process matched.
-fn pkill(signal: &str, pattern: &str) -> bool {
+pub(super) fn pkill(signal: &str, pattern: &str) -> bool {
     Command::new("pkill")
         .args([signal, "-f", "--", pattern])
         .stdout(Stdio::null())
@@ -382,7 +486,7 @@ fn pkill(signal: &str, pattern: &str) -> bool {
 }
 
 /// `s` as a POSIX extended regular expression that matches only itself.
-fn ere_escape(s: &str) -> String {
+pub(super) fn ere_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         if ".[]()*+?{}|^$\\".contains(c) {

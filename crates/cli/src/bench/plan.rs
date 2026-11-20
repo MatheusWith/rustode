@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use super::args::{Options, Side};
 use super::guard::{ABORT_BELOW_MB, ABORT_PSI, MIN_AVAILABLE_MB};
-use super::scenario::{List, Scenario};
+use super::scenario::{Cache, GuiSide, Kind, List, Scenario};
 use super::{Failure, display, fixture, guard};
 
 /// The CDP port of the App; inside its own network namespace, so it never
@@ -59,6 +59,19 @@ pub(crate) struct Plan<'a> {
     pub lock: PathBuf,
     /// `/proc`, or a stand-in for tests (`RUSTODE_BENCH_PROC`).
     pub proc_dir: PathBuf,
+    /// The rustode GUI binary for launch scenarios.
+    pub gui_bin: PathBuf,
+    /// Mesa's EGL vendor file: makes the GUI's GL use Mesa's llvmpipe instead
+    /// of the machine's GPU driver (`RUSTODE_BENCH_MESA_EGL`).
+    pub mesa_egl: PathBuf,
+}
+
+/// `rustode-gui` in the folder of the running `rustode`.
+fn default_gui_bin() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("rustode-gui")))
+        .unwrap_or_else(|| PathBuf::from("rustode-gui"))
 }
 
 impl<'a> Plan<'a> {
@@ -109,7 +122,25 @@ impl<'a> Plan<'a> {
             ),
             lock: env_path("RUSTODE_BENCH_LOCK", runtime.join("rustode-bench.lock")),
             proc_dir: env_path("RUSTODE_BENCH_PROC", PathBuf::from("/proc")),
+            mesa_egl: env_path(
+                "RUSTODE_BENCH_MESA_EGL",
+                PathBuf::from("/usr/share/glvnd/egl_vendor.d/50_mesa.json"),
+            ),
+            gui_bin: options
+                .gui_bin
+                .as_deref()
+                .map_or_else(default_gui_bin, guard::resolve),
         })
+    }
+
+    /// Whether rustode's in-process side runs (`open-file` scenarios).
+    pub(crate) fn runs_in_process(&self) -> bool {
+        self.runs_rustode() && self.scenario.kind == Kind::OpenFile
+    }
+
+    /// Whether the rustode GUI is launched.
+    pub(crate) fn runs_gui(&self) -> bool {
+        self.runs_rustode() && self.scenario.gui.is_some()
     }
 
     /// Whether the rustode side runs.
@@ -193,6 +224,83 @@ impl<'a> Plan<'a> {
         self.app_out().join("driver-config.json")
     }
 
+    /// Where the GUI driver writes its results and logs.
+    pub(crate) fn gui_out(&self) -> PathBuf {
+        self.run_folder.join("gui")
+    }
+
+    /// The GUI driver configuration file.
+    pub(crate) fn gui_driver_config(&self) -> PathBuf {
+        self.gui_out().join("driver-config.json")
+    }
+
+    /// The page-cache eviction helper.
+    pub(crate) fn evict_script(&self) -> PathBuf {
+        self.list_dir().join("evict.py")
+    }
+
+    /// One launch of the rustode GUI with the fixture. `{profile}` is filled
+    /// in by the driver.
+    pub(crate) fn gui_command(&self) -> Vec<String> {
+        vec![
+            self.gui_bin.to_string_lossy().into_owned(),
+            self.fixture().to_string_lossy().into_owned(),
+        ]
+    }
+
+    /// Software rendering for either editor: the virtual display has no GPU,
+    /// this machine has no Vulkan software driver (lavapipe), and its default
+    /// GL driver is the NVIDIA one, so both editors are pointed at Mesa's
+    /// llvmpipe through GL: the vendor file keeps the NVIDIA EGL driver out and
+    /// the empty Vulkan ICD list keeps its Vulkan driver out.
+    pub(crate) fn software_rendering_env(&self) -> Vec<(String, String)> {
+        let kv = |k: &str, v: &str| (k.to_owned(), v.to_owned());
+        vec![
+            kv("LIBGL_ALWAYS_SOFTWARE", "1"),
+            kv("GALLIUM_DRIVER", "llvmpipe"),
+            kv(
+                "__EGL_VENDOR_LIBRARY_FILENAMES",
+                &self.mesa_egl.to_string_lossy(),
+            ),
+            kv("__GLX_VENDOR_LIBRARY_NAME", "mesa"),
+            kv("VK_ICD_FILENAMES", "/nonexistent"),
+        ]
+    }
+
+    /// The environment of a GUI launch: its own profile folders (never the
+    /// user's), the first-frame report, wgpu's GL backend and software
+    /// rendering.
+    pub(crate) fn gui_env(&self) -> Vec<(String, String)> {
+        let kv = |k: &str, v: &str| (k.to_owned(), v.to_owned());
+        let mut env = vec![
+            kv("RUSTODE_REPORT_FIRST_FRAME", "1"),
+            kv("RUSTODE_USER_DIR", "{profile}/user"),
+            kv("XDG_CONFIG_HOME", "{profile}/config"),
+            kv("XDG_DATA_HOME", "{profile}/data"),
+            kv("XDG_STATE_HOME", "{profile}/state"),
+            kv("XDG_CACHE_HOME", "{profile}/cache"),
+            kv("WGPU_BACKEND", "gl"),
+        ];
+        env.extend(self.software_rendering_env());
+        env
+    }
+
+    /// The watchdog for one GUI launch: by process id, `{pid}` filled in by
+    /// the driver.
+    pub(crate) fn gui_sampler_command(&self) -> Vec<String> {
+        let mut command = self.sampler_command();
+        if let Some(i) = command.iter().position(|a| a == "--match") {
+            "--pid".clone_into(&mut command[i]);
+            "{pid}".clone_into(&mut command[i + 1]);
+        }
+        command
+    }
+
+    /// The cache state of the scenario's launches.
+    pub(crate) fn cache(&self) -> Cache {
+        self.scenario.launch.map_or(Cache::Warm, |l| l.cache)
+    }
+
     /// One launch of the App: the QA launcher's memory cap, an isolated
     /// profile, CDP, and the fixture on the command line. `{profile}` is
     /// filled in by the driver for each launch.
@@ -234,7 +342,7 @@ impl<'a> Plan<'a> {
     }
 
     /// The driver on the QA harness's virtual display, without network.
-    pub(crate) fn launch_command(&self) -> Vec<String> {
+    pub(crate) fn launch_command(&self, config: &Path) -> Vec<String> {
         let mut command = vec![self.run_virtual().to_string_lossy().into_owned()];
         command.extend(
             [
@@ -248,7 +356,7 @@ impl<'a> Plan<'a> {
             .map(str::to_owned),
         );
         command.extend(
-            [&self.node, &self.driver(), &self.driver_config()]
+            [&self.node, &self.driver(), &config.to_path_buf()]
                 .map(|p| p.to_string_lossy().into_owned()),
         );
         command
@@ -258,7 +366,22 @@ impl<'a> Plan<'a> {
     pub(crate) fn app_deadline(&self) -> Duration {
         let app = &self.scenario.app;
         let launches = u64::from(app.warmup + app.repetitions);
-        Duration::from_secs(launches * (u64::from(app.timeout_s) + 20) + 60)
+        Duration::from_secs(launches * (u64::from(app.timeout_s) + self.settle_s() + 20) + 60)
+    }
+
+    /// The longest the GUI phase may take before it is killed.
+    pub(crate) fn gui_deadline(&self) -> Duration {
+        let gui = self.scenario.gui.unwrap_or(GuiSide {
+            warmup: 0,
+            repetitions: 0,
+            timeout_s: 0,
+        });
+        let launches = u64::from(gui.warmup + gui.repetitions);
+        Duration::from_secs(launches * (u64::from(gui.timeout_s) + self.settle_s() + 20) + 60)
+    }
+
+    fn settle_s(&self) -> u64 {
+        self.scenario.launch.map_or(0, |l| u64::from(l.settle_s))
     }
 
     /// The `--dry-run` output.
@@ -299,7 +422,7 @@ impl<'a> Plan<'a> {
             s.fixture.bytes,
             s.fixture.line_bytes
         );
-        if self.runs_rustode() {
+        if self.runs_in_process() {
             let build = if cfg!(debug_assertions) {
                 "debug"
             } else {
@@ -311,6 +434,9 @@ impl<'a> Plan<'a> {
                 s.rustode.warmup, s.rustode.repetitions
             );
         }
+        if self.runs_gui() {
+            self.describe_gui(out);
+        }
         if self.runs_app() {
             self.describe_app(out);
         }
@@ -319,6 +445,49 @@ impl<'a> Plan<'a> {
             "  7. report: {} and report.json",
             display::path(&self.run_folder.join("report.txt"))
         );
+    }
+
+    fn describe_gui(&self, out: &mut String) {
+        let Some(gui) = self.scenario.gui else {
+            return;
+        };
+        let _ = writeln!(
+            out,
+            "  2b. rustode GUI: {} on the virtual display, without network, {} warm-up + {} recorded, timeout {} s each:",
+            display::path(&self.gui_bin),
+            gui.warmup,
+            gui.repetitions,
+            gui.timeout_s
+        );
+        let _ = writeln!(
+            out,
+            "       {}",
+            display::command(&self.launch_command(&self.gui_driver_config()))
+        );
+        let _ = writeln!(
+            out,
+            "       launch: {}",
+            display::command(&self.gui_command())
+        );
+        let env: Vec<String> = self
+            .gui_env()
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        let _ = writeln!(out, "       environment: {}", env.join(" "));
+        if let Some(launch) = self.scenario.launch {
+            let _ = writeln!(
+                out,
+                "       measures {}; file cache {}{}",
+                launch.measure.as_str(),
+                launch.cache.as_str(),
+                if launch.settle_s > 0 {
+                    format!("; memory read {} s after the first frame", launch.settle_s)
+                } else {
+                    String::new()
+                }
+            );
+        }
     }
 
     fn describe_app(&self, out: &mut String) {
@@ -345,7 +514,7 @@ impl<'a> Plan<'a> {
             ),
             format!(
                 "  5. App launches: {}",
-                display::command(&self.launch_command())
+                display::command(&self.launch_command(&self.driver_config()))
             ),
             format!(
                 "     {} warm-up + {} recorded; each with a fresh profile {{profile}} in {}:",

@@ -22,6 +22,7 @@ Options:
   --out <DIR>           where run folders go [default: target/bench]
   --project <DIR>       the folder with 01-app/ and 02-package-analysis/ [default: .]
   --app-copy-dir <DIR>  where the App copy and profiles go, on disk [default: the run folder]
+  --gui-bin <FILE>      the rustode GUI for launch scenarios [default: rustode-gui next to this binary]
   -h, --help            print this help
 
 Environment:
@@ -78,6 +79,8 @@ pub(crate) struct Options {
     pub project: PathBuf,
     /// Where the App copy goes, if not in the run folder.
     pub app_copy_dir: Option<PathBuf>,
+    /// The rustode GUI binary, if not `rustode-gui` next to this one.
+    pub gui_bin: Option<PathBuf>,
     /// The scenario id.
     pub scenario: Option<String>,
 }
@@ -91,6 +94,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, Failure> {
         out: PathBuf::from("target/bench"),
         project: PathBuf::from("."),
         app_copy_dir: None,
+        gui_bin: None,
         scenario: None,
     };
     let (mut help, mut list, mut dry_run) = (false, false, false);
@@ -104,7 +108,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, Failure> {
             "-h" | "--help" => help = true,
             "--list" => list = true,
             "--dry-run" => dry_run = true,
-            "--side" | "--scenarios" | "--out" | "--project" | "--app-copy-dir" => {
+            "--side" | "--scenarios" | "--out" | "--project" | "--app-copy-dir" | "--gui-bin" => {
                 let value = inline
                     .or_else(|| rest.next().cloned())
                     .ok_or_else(|| Failure::Usage(format!("{flag} needs a value")))?;
@@ -153,6 +157,7 @@ fn set(options: &mut Options, flag: &str, value: String) -> Result<(), Failure> 
         "--scenarios" => options.scenarios = PathBuf::from(value),
         "--out" => options.out = PathBuf::from(value),
         "--project" => options.project = PathBuf::from(value),
+        "--gui-bin" => options.gui_bin = Some(PathBuf::from(value)),
         _ => options.app_copy_dir = Some(PathBuf::from(value)),
     }
     Ok(())

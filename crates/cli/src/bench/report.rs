@@ -13,7 +13,9 @@ use serde_json::{Value, json};
 
 use super::app_side::{DriverResults, Launch, Outcome};
 use super::guard::{ABORT_BELOW_MB, ABORT_PSI, MIN_AVAILABLE_MB};
+use super::gui_side;
 use super::plan::{CDP_PORT, Plan};
+use super::scenario::{Cache, Kind};
 use super::{Status, display, guard};
 
 /// Why the two sides cannot be compared yet (spec, "Performance contract").
@@ -21,6 +23,11 @@ const NOT_LIKE_FOR_LIKE: &str = "The two sides are not like-for-like until the G
 rustode's number is an in-process open with no process start, window or rendering; the App's \
 numbers include starting Electron and the workbench and rendering on a software-rendered virtual \
 display. Do not divide one by the other.";
+
+const NOT_LIKE_FOR_LIKE_IN_PROCESS: &str = "rustode's in-process `Workspace::open` has no process start, window or rendering and is not comparable with any App number.";
+
+/// The frame events differ between the two editors (ADR 0024; gaps.md G15).
+const BRACKET: &str = "The two editors have no common 'first frame' event: rustode's is the return from its first wgpu present, the App's closest events are Chromium's first contentful paint and the first fixture line seen in the DOM (polled over CDP). The comparison is therefore approximate: read the rustode number against the interval between the App's two, and do not divide one by the other.";
 
 /// Summary of samples with nearest-rank percentiles, the definition that
 /// `rustode_workspace::trace::LatencyRecorder` uses.
@@ -156,6 +163,8 @@ pub(crate) struct Report<'a> {
     pub fixture_sha256: Option<String>,
     /// The recorded rustode opens, if that side ran and succeeded.
     pub rustode: Option<Vec<Duration>>,
+    /// The rustode GUI side, if it ran.
+    pub gui: Option<gui_side::Outcome>,
     /// The App side, if it ran.
     pub app: Option<Outcome>,
 }
@@ -173,6 +182,10 @@ impl Report<'_> {
                 samples: durations.iter().map(|d| round3(d.as_secs_f64() * 1e3)).collect(),
                 meaning: "`Workspace::open` on a fresh `Workspace` in this process: read the file, detect encoding and line endings, build the buffer, hash the bytes for external-change detection and start watching the file; no window and no rendering (rustode has no GUI until M3); clock: `std::time::Instant`".to_owned(),
             });
+        }
+        if let Some(results) = self.gui.as_ref().and_then(|g| g.results.as_ref()) {
+            let recorded: Vec<&Launch> = results.launches.iter().filter(|l| !l.warmup).collect();
+            rows.extend(gui_rows(&recorded));
         }
         if let Some(results) = self.app.as_ref().and_then(|a| a.results.as_ref()) {
             let recorded: Vec<&Launch> = results.launches.iter().filter(|l| !l.warmup).collect();
@@ -206,6 +219,7 @@ impl Report<'_> {
         }
         self.text_inputs(&mut out);
         self.text_environment(&mut out);
+        self.text_gui(&mut out);
         self.text_app(&mut out);
         self.text_results(&mut out);
         self.text_notes(&mut out);
@@ -223,11 +237,41 @@ impl Report<'_> {
             s.fixture.line_bytes,
             self.fixture_sha256.as_deref().unwrap_or("unknown")
         );
-        let _ = writeln!(
-            out,
-            "  rustode     {} warm-up + {} recorded opens",
-            s.rustode.warmup, s.rustode.repetitions
-        );
+        if self.plan.scenario.kind == Kind::OpenFile {
+            let _ = writeln!(
+                out,
+                "  rustode     {} warm-up + {} recorded in-process opens",
+                s.rustode.warmup, s.rustode.repetitions
+            );
+        }
+        if let Some(gui) = s.gui {
+            let _ = writeln!(
+                out,
+                "  rustode GUI {} warm-up + {} recorded launches; timeout {} s each",
+                gui.warmup, gui.repetitions, gui.timeout_s
+            );
+        }
+        if let Some(launch) = s.launch {
+            let _ = writeln!(
+                out,
+                "  launch      measures {}; {} cache (editor files {}){}",
+                launch.measure.as_str(),
+                launch.cache.as_str(),
+                if launch.cache == Cache::Cold {
+                    "dropped from the page cache before each launch"
+                } else {
+                    "left in the page cache by the previous launch"
+                },
+                if launch.settle_s > 0 {
+                    format!(
+                        "; memory read {} s after the editor is ready",
+                        launch.settle_s
+                    )
+                } else {
+                    String::new()
+                }
+            );
+        }
         let _ = writeln!(
             out,
             "  App         {} warm-up + {} recorded launches; timeout {} s each; first line checked every {} ms",
@@ -269,6 +313,52 @@ impl Report<'_> {
             mb(e.mem_total_mb),
             mb(e.mem_available_mb)
         );
+    }
+
+    fn text_gui(&self, out: &mut String) {
+        let Some(gui) = &self.gui else {
+            return;
+        };
+        let bin = display::path(&self.plan.gui_bin);
+        let profile = if bin.contains("/release/") {
+            "release build"
+        } else if bin.contains("/debug/") {
+            "debug build"
+        } else {
+            "build profile unknown"
+        };
+        let _ = writeln!(out, "\nrustode GUI (measured)");
+        let _ = writeln!(
+            out,
+            "  binary      {bin} ({profile}, from its path); {}; sha256 {}",
+            gui.version.as_deref().unwrap_or("version unknown"),
+            gui.binary_sha256.as_deref().unwrap_or("unknown")
+        );
+        let _ = writeln!(
+            out,
+            "  rendering   {}",
+            self.plan
+                .gui_env()
+                .iter()
+                .filter(|(k, _)| matches!(
+                    k.as_str(),
+                    "WGPU_BACKEND"
+                        | "LIBGL_ALWAYS_SOFTWARE"
+                        | "GALLIUM_DRIVER"
+                        | "VK_ICD_FILENAMES"
+                ))
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        if let Some(results) = &gui.results {
+            let _ = writeln!(
+                out,
+                "  driver      Node {}; status {}",
+                results.node.as_deref().unwrap_or("unknown"),
+                results.status
+            );
+        }
     }
 
     fn text_app(&self, out: &mut String) {
@@ -315,6 +405,23 @@ impl Report<'_> {
             }
         }
         if let Some(results) = &app.results {
+            if let Some(gpu) = &results.gpu {
+                let _ = writeln!(
+                    out,
+                    "  rendering   {}",
+                    [
+                        "gl_renderer",
+                        "gl_implementation",
+                        "gpu_compositing",
+                        "opengl",
+                        "vulkan"
+                    ]
+                    .iter()
+                    .filter_map(|k| Some(format!("{k}={}", gpu.get(k)?.as_str()?)))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+                );
+            }
             let _ = writeln!(
                 out,
                 "  driver      Node {}, playwright-core {}; status {}",
@@ -388,18 +495,97 @@ impl Report<'_> {
                 ));
             }
         }
-        if cfg!(debug_assertions) && self.rustode.is_some() {
+        if cfg!(debug_assertions) && (self.rustode.is_some() || self.gui.is_some()) {
             notes.push((
                 None,
                 "rustode ran as a debug build; build with --release for numbers worth comparing."
                     .to_owned(),
             ));
         }
-        notes.push((None, NOT_LIKE_FOR_LIKE.to_owned()));
+        notes.extend(self.outcome_notes());
+        notes.push((None, self.comparison_note()));
         for reason in &self.reasons {
             notes.push((Some("problem"), reason.clone()));
         }
         notes
+    }
+
+    /// Launches that never reached their end point, for each side.
+    fn outcome_notes(&self) -> Vec<(Option<&'static str>, String)> {
+        let mut notes = Vec::new();
+        let sides = [
+            (
+                "rustode GUI",
+                self.gui.as_ref().and_then(|g| g.results.as_ref()),
+            ),
+            ("App", self.app.as_ref().and_then(|a| a.results.as_ref())),
+        ];
+        for (name, results) in sides {
+            let Some(results) = results else { continue };
+            let recorded: Vec<&Launch> = results.launches.iter().filter(|l| !l.warmup).collect();
+            let failed: Vec<String> = recorded
+                .iter()
+                .filter_map(|l| {
+                    let outcome = l.outcome.as_deref()?;
+                    let complaint = l.complaint.as_deref().filter(|c| !c.is_empty());
+                    Some(format!(
+                        "{} ({outcome}: {}{})",
+                        l.label,
+                        l.outcome_detail.as_deref().unwrap_or(""),
+                        complaint
+                            .map_or_else(String::new, |c| format!("; the workbench said: {c}"))
+                    ))
+                })
+                .collect();
+            let warm: Vec<String> = recorded
+                .iter()
+                .filter(|l| l.cache_reference_resident_pct.is_some_and(|pct| pct >= 1.0))
+                .map(|l| {
+                    format!(
+                        "{} ({:.1}% after {} attempts)",
+                        l.label,
+                        l.cache_reference_resident_pct.unwrap_or_default(),
+                        l.evict_attempts.unwrap_or_default()
+                    )
+                })
+                .collect();
+            if !warm.is_empty() {
+                notes.push((
+                    Some("measured"),
+                    format!(
+                        "{name}: {} of {} recorded launches were not fully cold: part of the editor's main file was still in the page cache after the eviction: {}.",
+                        warm.len(),
+                        recorded.len(),
+                        warm.join("; ")
+                    ),
+                ));
+            }
+            if !failed.is_empty() {
+                notes.push((
+                    Some("measured"),
+                    format!(
+                        "{name}: {} of {} recorded launches never reached the end point and have no time in the results above: {}.",
+                        failed.len(),
+                        recorded.len(),
+                        failed.join("; ")
+                    ),
+                ));
+            }
+        }
+        notes
+    }
+
+    /// What may and may not be concluded from the two sides' numbers.
+    fn comparison_note(&self) -> String {
+        match self.plan.scenario.kind {
+            Kind::OpenFile if self.plan.scenario.gui.is_some() => format!(
+                "{NOT_LIKE_FOR_LIKE_IN_PROCESS} Compare the GUI's \"launch to first frame\" with the App's \"launch to first paint\" and \"launch to first line shown\" (a bracket, not one number): the GUI's first frame already shows the file, Chromium's first paint is not tied to the file, and the first line is polled over CDP. {BRACKET}"
+            ),
+            Kind::OpenFile => NOT_LIKE_FOR_LIKE.to_owned(),
+            Kind::Launch => format!(
+                "{BRACKET} Both editors ran on the same virtual display with software rendering, with the same fixture on their command line."
+            ),
+        }
     }
 
     fn text_notes(&self, out: &mut String) {
@@ -453,6 +639,7 @@ impl Report<'_> {
                 "copy": app.copy.as_ref().map(super::integrity::Integrity::to_json),
                 "after": app.after.as_ref().map(super::integrity::Integrity::to_json),
             })),
+            "gui": self.gui_json(),
             "app": self.app_json(),
             "results": results,
             "notes": notes,
@@ -472,6 +659,8 @@ impl Report<'_> {
                 "first_line": plan.first_line(),
             },
             "rustode": { "warmup": s.rustode.warmup, "repetitions": s.rustode.repetitions },
+            "gui": s.gui.map(|g| json!({ "warmup": g.warmup, "repetitions": g.repetitions, "timeout_s": g.timeout_s })),
+            "launch": s.launch.map(|l| json!({ "measure": l.measure.as_str(), "cache": l.cache.as_str(), "settle_s": l.settle_s })),
             "app": {
                 "warmup": s.app.warmup,
                 "repetitions": s.app.repetitions,
@@ -505,6 +694,24 @@ impl Report<'_> {
         })
     }
 
+    fn gui_json(&self) -> Value {
+        let Some(gui) = &self.gui else {
+            return json!({ "status": "skipped" });
+        };
+        let results = gui.results.as_ref();
+        json!({
+            "status": gui.status.as_str(),
+            "reason": (!gui.reasons.is_empty()).then(|| gui.reasons.join("\n")),
+            "binary": display::path(&self.plan.gui_bin),
+            "binary_sha256": gui.binary_sha256,
+            "version": gui.version,
+            "leftovers_killed": gui.leftovers_killed,
+            "env": self.plan.gui_env().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
+            "node": results.and_then(|r| r.node.clone()),
+            "launches": results.map(|r| launches_json(&r.launches)),
+        })
+    }
+
     fn app_json(&self) -> Value {
         let Some(app) = &self.app else {
             return json!({ "status": "skipped", "reason": "--side rustode" });
@@ -519,18 +726,41 @@ impl Report<'_> {
             "leftovers_killed": app.leftovers_killed,
             "node": results.and_then(|r| r.node.clone()),
             "playwright_core": results.and_then(|r| r.playwright_core.clone()),
-            "launches": results.map(|r| r.launches.iter().map(|l| json!({
+            "gpu": results.and_then(|r| r.gpu.clone()),
+            "launches": results.map(|r| launches_json(&r.launches)),
+        })
+    }
+}
+
+fn launches_json(launches: &[Launch]) -> Vec<Value> {
+    launches
+        .iter()
+        .map(|l| {
+            json!({
                 "label": l.label,
                 "warmup": l.warmup,
                 "spawn_to_cdp_ms": l.spawn_to_cdp_ms,
+                "spawn_to_first_paint_ms": l.spawn_to_first_paint_ms,
                 "spawn_to_workbench_ms": l.spawn_to_workbench_ms,
                 "spawn_to_first_line_ms": l.spawn_to_first_line_ms,
+                "spawn_to_first_frame_ms": l.spawn_to_first_frame_ms,
+                "first_frame_after_main_ms": l.first_frame_after_main_ms,
                 "shutdown_ms": l.shutdown_ms,
                 "needed_sigkill": l.needed_sigkill,
                 "peak_rss_mb": l.peak_rss_mb,
-            })).collect::<Vec<_>>()),
+                "ready_rss_mb": l.ready_rss_mb,
+                "ready_pss_mb": l.ready_pss_mb,
+                "idle_rss_mb": l.idle_rss_mb,
+                "idle_pss_mb": l.idle_pss_mb,
+                "idle_procs": l.idle_procs,
+                "outcome": l.outcome,
+                "outcome_detail": l.outcome_detail,
+                "complaint": l.complaint,
+                "evict_attempts": l.evict_attempts,
+                "cache_reference_resident_pct": l.cache_reference_resident_pct,
+            })
         })
-    }
+        .collect()
 }
 
 /// Which launches did not exit within 10 s of SIGTERM, if any: their
@@ -588,6 +818,8 @@ fn app_rows(plan: &Plan, launches: &[&Launch]) -> Vec<Row> {
     vec![
         row("launch_to_cdp", "launch to CDP endpoint", "ms", pick(|l| l.spawn_to_cdp_ms),
             format!("{launch} its CDP endpoint answering `/json/version`, checked every 25 ms")),
+        row("launch_to_first_paint", "launch to first paint", "ms", pick(|l| l.spawn_to_first_paint_ms),
+            format!("{launch} Chromium's first contentful paint in the workbench page (`performance` paint timing, a wall-clock time read over CDP, minus the wall-clock time of the spawn): the first frame with content that Chromium painted, which can be before the editor is usable")),
         row("launch_to_workbench", "launch to workbench", "ms", pick(|l| l.spawn_to_workbench_ms),
             format!("{launch} the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's \"workbench ready\"")),
         row("launch_to_first_line", "launch to first line shown", "ms", pick(|l| l.spawn_to_first_line_ms),
@@ -598,7 +830,49 @@ fn app_rows(plan: &Plan, launches: &[&Launch]) -> Vec<Row> {
         row("shutdown", "shutdown after SIGTERM", "ms", pick(|l| l.shutdown_ms),
             "SIGTERM to the App's main process until no process of its profile is left (SIGKILL after 10 s), as the QA startup benchmark does".to_owned()),
         row("peak_rss", "peak RSS, all processes", "MB", pick(|l| l.peak_rss_mb),
-            "the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py)".to_owned()),
+            "the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py); the App is stopped about a second after its first line, so this is one to three samples: prefer the RSS at the first line".to_owned()),
+        row("ready_rss", "RSS at first line", "MB", pick(|l| l.ready_rss_mb),
+            "summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup right after the first line was seen (the App is still starting some processes then); shared pages are counted once per process".to_owned()),
+        row("ready_pss", "PSS at first line", "MB", pick(|l| l.ready_pss_mb),
+            "summed `Pss` of the same processes at the same moment".to_owned()),
+        row("idle_rss", "idle RSS, all processes", "MB", pick(|l| l.idle_rss_mb),
+            "summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup after the settle time: shared pages are counted once per process, so it over-counts".to_owned()),
+        row("idle_pss", "idle PSS, all processes", "MB", pick(|l| l.idle_pss_mb),
+            "summed `Pss` (proportional set size: shared pages split among their users) of the same processes, read at the same moment: the figure that adds up".to_owned()),
+    ]
+}
+
+fn gui_rows(launches: &[&Launch]) -> Vec<Row> {
+    let pick = |f: fn(&Launch) -> Option<f64>| -> Vec<f64> {
+        launches.iter().filter_map(|l| f(l)).map(round3).collect()
+    };
+    let launch = "from spawning `rustode-gui` (release build, the fixture on its command line, a fresh profile folder, software rendering) to";
+    let row = |metric, name, unit, samples, meaning: String| Row {
+        side: "rustode",
+        metric,
+        name,
+        unit,
+        decimals: 0,
+        samples,
+        meaning,
+    };
+    vec![
+        row("launch_to_first_frame", "launch to first frame", "ms", pick(|l| l.spawn_to_first_frame_ms),
+            format!("{launch} the arrival of the line the GUI prints after returning from its first `RedrawRequested` (eframe has painted and called `wgpu::Queue::present`); the driver's clock, the same one the App's times use. The file is already open in that frame, because the GUI opens its arguments before it creates the window")),
+        row("main_to_first_frame", "main to first frame", "ms", pick(|l| l.first_frame_after_main_ms),
+            "the GUI's own `Instant`: from `rustode_trace::init_from_env` (the first thing `main` does) to the same first present; it leaves out exec, dynamic linking and the driver's pipe".to_owned()),
+        row("shutdown", "shutdown after SIGTERM", "ms", pick(|l| l.shutdown_ms),
+            "SIGTERM to the GUI process until no process of its tree is left (SIGKILL after 10 s)".to_owned()),
+        row("peak_rss", "peak RSS, all processes", "MB", pick(|l| l.peak_rss_mb),
+            "the largest total RSS of the GUI's process tree in the QA watchdog's 1 s samples (collectors/sampler.py); the GUI is stopped as soon as its first frame arrives, so this is usually one sample taken at the start: prefer the RSS at the first frame".to_owned()),
+        row("ready_rss", "RSS at first frame", "MB", pick(|l| l.ready_rss_mb),
+            "summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup right after the first-frame line arrived: the memory of the open file and the first frame".to_owned()),
+        row("ready_pss", "PSS at first frame", "MB", pick(|l| l.ready_pss_mb),
+            "summed `Pss` of the same processes at the same moment".to_owned()),
+        row("idle_rss", "idle RSS, all processes", "MB", pick(|l| l.idle_rss_mb),
+            "summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup after the settle time".to_owned()),
+        row("idle_pss", "idle PSS, all processes", "MB", pick(|l| l.idle_pss_mb),
+            "summed `Pss` of the same processes at the same moment".to_owned()),
     ]
 }
 

@@ -65,7 +65,7 @@ tree-sitter-yaml = "0.7.2"
 tree-sitter-html = "0.23.2"
 tree-sitter-css = "0.25.0"
 unicode-width = "0.2.3"
-tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "env-filter", "fmt", "json", "std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "env-filter", "fmt", "json", "std", "tracing-log"] }
 # Client-side decorations without a title font (sctk-adwaita without
 # ab_glyph): ab_glyph pulls the unmaintained ttf-parser (RUSTSEC-2026-0192).
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-csd-adwaita-notitle", "wayland-dlopen", "x11"] }

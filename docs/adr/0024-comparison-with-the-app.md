@@ -48,4 +48,4 @@ Every comparison is like for like (same scenario, same display, same rendering, 
 - Measured on 2026-11-17: the App is intact. From `01-app/VSCode-linux-x64`, `sha256sum -c --quiet` against the manifest printed nothing, and the file list equals the manifest's 3,008 entries.
 - A relocated copy may not reuse the App's Node compile cache. If it does not, cold-start numbers differ from those of in-place runs ([`gaps.md`](../gaps.md) G14).
 - The App side of "first frame" and of a typed key's frame still needs a defined event ([`gaps.md`](../gaps.md) G15). The QA startup benchmark measures "workbench ready" instead.
-- The versioned scenario list does not exist yet. It comes with the benchmark runner (`rustode bench`, M1).
+- The versioned scenario list exists (`bench/scenarios.toml`, `rustode bench`). *Update 2026-11-19:* the first M3 comparison ran with list version 2 ([`09-findings/0003`](../../09-findings/0003-first-app-comparison.md)); it brackets "first frame" with two App events (G22), sets Mesa's llvmpipe for both editors because the App otherwise used the GPU (G23), and leaves typing latency unmeasured until ADR 0028 is accepted.

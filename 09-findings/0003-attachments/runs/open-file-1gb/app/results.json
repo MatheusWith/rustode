@@ -1,0 +1,66 @@
+{
+ "schema": "rustode-bench-app-results/2",
+ "target": "app",
+ "measure": "open",
+ "cache": "warm",
+ "status": "ok",
+ "node": "v24.22.1",
+ "playwright_core": "1.61.0-alpha-2026-06-04",
+ "launches": [
+  {
+   "label": "rep-1",
+   "warmup": false,
+   "spawn_to_cdp_ms": 363.2,
+   "spawn_to_workbench_ms": 2077.5,
+   "spawn_to_first_line_ms": 6743.8,
+   "spawn_to_first_paint_ms": 2086.2,
+   "ready_rss_mb": 2324,
+   "ready_pss_mb": 1757,
+   "ready_procs": 7,
+   "needed_sigkill": true,
+   "shutdown_ms": 10593.5,
+   "app_exit": "SIGKILL",
+   "peak_rss_mb": 2428
+  },
+  {
+   "label": "rep-2",
+   "warmup": false,
+   "spawn_to_cdp_ms": 298.8,
+   "spawn_to_workbench_ms": 1762.7,
+   "spawn_to_first_line_ms": 6198.7,
+   "spawn_to_first_paint_ms": 1771.8,
+   "ready_rss_mb": 2307.8,
+   "ready_pss_mb": 1739,
+   "ready_procs": 7,
+   "needed_sigkill": true,
+   "shutdown_ms": 10544.7,
+   "app_exit": "SIGKILL",
+   "peak_rss_mb": 2466
+  },
+  {
+   "label": "rep-3",
+   "warmup": false,
+   "spawn_to_cdp_ms": 303.8,
+   "spawn_to_workbench_ms": 1779.6,
+   "spawn_to_first_line_ms": 6232.5,
+   "spawn_to_first_paint_ms": 1792.2,
+   "ready_rss_mb": 2264.3,
+   "ready_pss_mb": 1697.8,
+   "ready_procs": 7,
+   "needed_sigkill": true,
+   "shutdown_ms": 10541.3,
+   "app_exit": "SIGKILL",
+   "peak_rss_mb": 2448
+  }
+ ],
+ "gpu": {
+  "gl_renderer": "ANGLE (Mesa, llvmpipe (LLVM 23.1.4 256 bits), OpenGL ES 3.2 Mesa 26.2.7-arch1.1)",
+  "gl_vendor": "Google Inc. (Mesa)",
+  "gl_implementation": "(gl=egl-angle,angle=opengl)",
+  "skia_backend": "GaneshGL",
+  "display_type": "ANGLE_OPENGL",
+  "gpu_compositing": "unavailable_off",
+  "opengl": "unavailable_off",
+  "vulkan": "disabled_off"
+ }
+}

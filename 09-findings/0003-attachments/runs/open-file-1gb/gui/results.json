@@ -1,0 +1,50 @@
+{
+ "schema": "rustode-bench-app-results/2",
+ "target": "gui",
+ "measure": "open",
+ "cache": "warm",
+ "status": "ok",
+ "node": "v24.22.1",
+ "playwright_core": null,
+ "launches": [
+  {
+   "label": "rep-1",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 3143.4,
+   "first_frame_after_main_ms": 3140.2,
+   "ready_rss_mb": 1292.9,
+   "ready_pss_mb": 1260.4,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 118.9,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 1859
+  },
+  {
+   "label": "rep-2",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 3022.7,
+   "first_frame_after_main_ms": 3016.7,
+   "ready_rss_mb": 1310.5,
+   "ready_pss_mb": 1278.1,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 61.7,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 1031
+  },
+  {
+   "label": "rep-3",
+   "warmup": false,
+   "spawn_to_first_frame_ms": 2089.9,
+   "first_frame_after_main_ms": 2085.4,
+   "ready_rss_mb": 1308.9,
+   "ready_pss_mb": 1276.4,
+   "ready_procs": 1,
+   "needed_sigkill": false,
+   "shutdown_ms": 61.8,
+   "app_exit": "SIGTERM",
+   "peak_rss_mb": 1300
+  }
+ ]
+}

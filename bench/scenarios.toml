@@ -13,8 +13,18 @@
 # - add new scenarios under new ids instead of reusing an old id;
 # - fixtures are generated, never real user files;
 # - only operations that exist on both sides belong here (spec, "Performance
-#   contract"); scenarios that need the GUI arrive with M3.
-version = 1
+#   contract").
+#
+# Version history:
+# - 1: `open-file-1mb`, rustode in-process against the App.
+# - 2 (ticket 26, M3): the GUI exists, so the list gains GUI launches. The
+#   driver is now `launch.cjs` (it also drives `rustode-gui`); the App runs
+#   with NODE_DISABLE_COMPILE_CACHE=1 (AGENTS.md section 11.5.3) and its first
+#   contentful paint is recorded; `open-file-1mb` gets 5 App launches instead
+#   of 3 and a GUI side. New: `open-file-100mb`, `open-file-1gb`,
+#   `startup-cold`, `startup-warm`, `idle-rss`. Typing latency is not in the
+#   list: it waits for ADR 0028 (AGENTS.md section 11.5.5).
+version = 2
 
 [[scenario]]
 id = "open-file-1mb"
@@ -35,6 +45,15 @@ line_bytes = 80
 warmup = 1
 repetitions = 20
 
+# GUI side: `rustode-gui` (release build) with the fixture on its command line,
+# on the same virtual display, without network, software rendering, a fresh
+# profile folder each time, until it presents its first frame. The same
+# `driver` runs it.
+[scenario.gui]
+warmup = 1
+repetitions = 5
+timeout_s = 60
+
 # App side: a cold launch of a verified copy of the App with the fixture on
 # its command line, on the QA harness's virtual display, with a fresh
 # isolated profile each time, until the editor shows the fixture's first
@@ -43,8 +62,149 @@ repetitions = 20
 # `settings` are relative to this file.
 [scenario.app]
 warmup = 1
-repetitions = 3
+repetitions = 5
 timeout_s = 60
 poll_ms = 10
-driver = "app/open_file.cjs"
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+[[scenario]]
+id = "open-file-100mb"
+title = "Open a 100 MiB text file"
+kind = "open-file"
+
+[scenario.fixture]
+bytes = 104_857_600
+line_bytes = 80
+
+[scenario.rustode]
+warmup = 1
+repetitions = 10
+
+[scenario.gui]
+warmup = 1
+repetitions = 5
+timeout_s = 120
+
+[scenario.app]
+warmup = 1
+repetitions = 5
+timeout_s = 120
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+# A launch that never reaches its end point (the editor refuses, runs out of
+# memory or times out) is a result for the open-file scenarios, not a harness
+# error: the report lists it.
+[[scenario]]
+id = "open-file-1gb"
+title = "Open a 1 GiB text file"
+kind = "open-file"
+
+[scenario.fixture]
+bytes = 1_073_741_824
+line_bytes = 80
+
+[scenario.rustode]
+warmup = 1
+repetitions = 3
+
+[scenario.gui]
+warmup = 0
+repetitions = 3
+timeout_s = 180
+
+[scenario.app]
+warmup = 0
+repetitions = 3
+timeout_s = 180
+poll_ms = 50
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+# Launch scenarios have no in-process side. The fixture is small (4 KiB) and
+# is the same file on both command lines, so each editor shows a file in its
+# first frame. `cache = "cold"` drops the editor's own files (the App copy,
+# the GUI binary) from the page cache before each launch; libraries shared
+# with other programs stay cached. `warm` leaves them cached.
+[[scenario]]
+id = "startup-cold"
+title = "Startup to first frame, cold file cache"
+kind = "launch"
+
+[scenario.fixture]
+bytes = 4096
+line_bytes = 80
+
+[scenario.launch]
+measure = "startup"
+cache = "cold"
+
+[scenario.gui]
+warmup = 0
+repetitions = 20
+timeout_s = 60
+
+[scenario.app]
+warmup = 0
+repetitions = 20
+timeout_s = 60
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+[[scenario]]
+id = "startup-warm"
+title = "Startup to first frame, warm file cache"
+kind = "launch"
+
+[scenario.fixture]
+bytes = 4096
+line_bytes = 80
+
+[scenario.launch]
+measure = "startup"
+cache = "warm"
+
+[scenario.gui]
+warmup = 1
+repetitions = 20
+timeout_s = 60
+
+[scenario.app]
+warmup = 1
+repetitions = 20
+timeout_s = 60
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+# Idle memory: Rss and Pss of every process of the editor, `settle_s` seconds
+# after it is ready, with nothing typed or clicked.
+[[scenario]]
+id = "idle-rss"
+title = "Idle memory, 20 s after the editor is ready"
+kind = "launch"
+
+[scenario.fixture]
+bytes = 4096
+line_bytes = 80
+
+[scenario.launch]
+measure = "idle"
+cache = "warm"
+settle_s = 20
+
+[scenario.gui]
+warmup = 1
+repetitions = 5
+timeout_s = 60
+
+[scenario.app]
+warmup = 1
+repetitions = 5
+timeout_s = 60
+poll_ms = 10
+driver = "launch.cjs"
 settings = "app/settings.json"
