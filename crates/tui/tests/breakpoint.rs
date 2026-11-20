@@ -328,3 +328,36 @@ fn the_palette_on_a_short_screen_draws_fewer_rows_instead_of_panicking() {
     terminal.draw(|frame| app.draw(frame)).expect("draw");
     assert!(screen(&terminal).contains("program.txt"));
 }
+
+#[test]
+fn breakpoint_marks_draw_in_every_pane_that_shows_the_file() {
+    let (mut app, _dir) = open_program("panes", "print a\nprint b\nprint c\n");
+    let mut terminal = terminal(100, 12);
+    let id = app.workspace().tabs()[0];
+    let spec = rustode_workspace::BreakpointSpec {
+        condition: Some("a == 1".to_owned()),
+        hit_condition: None,
+        log_message: None,
+    };
+    let ws = app.workspace_mut();
+    ws.toggle_breakpoint(id, 0).expect("plain");
+    ws.set_breakpoint(id, 1, spec).expect("condition");
+    ws.split_group(rustode_workspace::SplitDirection::Right);
+    // The new group has the focus; the first one is the inactive pane.
+    assert_ne!(ws.active_group(), ws.group_ids()[0]);
+    send(&mut app, &mut terminal, &[]);
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    let shown = screen(&terminal);
+    let rows: Vec<&str> = shown.lines().collect();
+    assert_eq!(
+        rows[1].matches('●').count(),
+        2,
+        "a disc in both panes: {shown}"
+    );
+    assert_eq!(
+        rows[2].matches('◆').count(),
+        2,
+        "a diamond in both panes: {shown}"
+    );
+    assert_eq!(rows[3].matches('●').count(), 0, "{shown}");
+}

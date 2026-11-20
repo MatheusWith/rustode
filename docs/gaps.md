@@ -176,10 +176,23 @@ Editor (rustode, Phase 1):
   - The preview of a file larger than 64 MiB is not built, and such a file is refused when replacing (`crates/workspace/src/search/replace.rs`).
 - **Approach:** the third point is decided (see above); the others need a tab-less document model and a diff view (M6/M7). **1–2 days.**
 
+## G21. Editor groups: how far they are from VS Code
+
+- **Missing:** differences from VS Code's editor groups, found while building ticket 35 ([ADR 0031](adr/0031-editor-groups.md)).
+  - Dividers do not drag and groups share a split equally: the workspace keeps no sizes (`Layout` has none). VS Code resizes by dragging and keeps proportions (`src/vs/base/browser/ui/grid/`, `splitview`). Needs sizes in `Layout`, a resize command and a drag in each frontend.
+  - In the GUI the group without focus has no minimap, hover or suggest overlays and no find highlights; they belong to the active group's editor.
+  - Not registered: `splitEditorLeft`, `splitEditorUp`, `splitEditorOrthogonal`, `moveEditorToLeftGroup` and the other directional moves, the fourth to eighth `focus*EditorGroup`, `lastGroup`, `closeAllGroups`, group locking, maximize, `workbench.editor.closeEmptyGroups` and `workbench.editor.splitInGroupLayout` as settings (empty groups always close), and dragging a tab to another group.
+  - The group layout and each group's tabs are not saved between sessions.
+  - Scroll is kept per group and document by the frontends, as a top line; it does not follow an edit above it made in another view, as VS Code's per-view scroll anchor is not modelled.
+  - In the TUI, Ctrl+1 to Ctrl+3, Ctrl+Alt+arrows and Ctrl+Shift combos reach the program only with an extended keyboard protocol; Ctrl+\ arrives as Ctrl+4 without it. The palette runs every group command in any terminal.
+  - Whether VS Code puts a second view's empty cursor after text typed exactly at it (rustode does) was not measured; the studied source was not read for it (hypothesis).
+- **Approach:** sizes and dragging first (one ticket, both frontends, about 1 day); the rest are small commands and settings. **1–2 days.**
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-19 | minor | G21: editor groups against VS Code's |
 | 2026-11-19 | minor | G20: replace across files against VS Code's; owner decision: save only clean files |
 | 2026-11-17 | minor | G17 and G18: the TUI's provisional layout from 60 to 79 columns and its Dark Modern colors, left for the owner to confirm |
 | 2026-11-17 | minor | Editor questions G13–G19 (integrity, benchmark method, TUI layout, theme, branch protection) |

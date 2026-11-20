@@ -11,6 +11,7 @@ mod debug;
 mod editor;
 mod extensions;
 mod find;
+mod groups;
 mod keyboard;
 mod language;
 mod layout;

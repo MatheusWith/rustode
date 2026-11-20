@@ -488,3 +488,45 @@ fn each_kind_of_breakpoint_has_its_own_mark_and_an_unsupported_one_is_unverified
     let details = harness.state().workspace().breakpoint_details(id);
     assert!(details[1..].iter().all(|b| !b.verified), "{details:?}");
 }
+
+#[test]
+fn breakpoint_marks_draw_in_every_pane_that_shows_the_file() {
+    use eframe::egui::Vec2;
+    use egui_kittest::kittest::Queryable as _;
+    let mut harness = open_with(
+        "panes",
+        "print a\nprint b\nprint c\n",
+        [1000.0, 360.0],
+        &[],
+        &[],
+    );
+    harness.set_size(Vec2::new(1000.0, 360.0));
+    let id = harness.state().workspace().tabs()[0];
+    let ws = harness.state_mut().workspace_mut();
+    ws.toggle_breakpoint(id, 0).expect("breakpoint");
+    ws.split_group(rustode_workspace::SplitDirection::Right);
+    quiet(&mut harness);
+    harness.snapshot("breakpoint_marks_in_split");
+    let panes: Vec<_> = harness
+        .query_all_by_role(Role::TabList)
+        .map(|list| list.rect())
+        .collect();
+    assert_eq!(panes.len(), 2);
+    let image = harness.render().expect("render");
+    let red = |from: f32, to: f32| {
+        image
+            .enumerate_pixels()
+            .filter(|(x, y, p)| {
+                // Pixels at 1 point each; the first text row of the pane.
+                let x = f32::from(u16::try_from(*x).unwrap_or(u16::MAX));
+                x >= from && x < to && *y > 40 && *y < 70 && p[0] > 180 && p[1] < 80 && p[2] < 80
+            })
+            .count()
+    };
+    let (first, second) = (
+        red(panes[0].left(), panes[0].right()),
+        red(panes[1].left(), panes[1].right()),
+    );
+    assert!(first > 10, "a red disc in the inactive pane: {first}");
+    assert!(second > 10, "a red disc in the active pane: {second}");
+}

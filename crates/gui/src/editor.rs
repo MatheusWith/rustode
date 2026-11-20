@@ -49,8 +49,8 @@ use eframe::egui::{
     text::{CCursor, CCursorRange, Galley, LayoutJob, TextFormat},
 };
 use rustode_workspace::{
-    BreakpointInfo, BreakpointKind, CompletionMove, Document, DocumentId, Highlight, Marker,
-    Position, Range, Selection, TokenKind, Workspace,
+    BreakpointInfo, BreakpointKind, CompletionMove, Document, DocumentId, GroupId, Highlight,
+    Marker, Position, Range, Selection, Selections, TokenKind, Workspace,
 };
 use std::sync::Arc;
 
@@ -151,6 +151,8 @@ pub(crate) struct Outcome {
     pub(crate) changed: bool,
     /// Why the last failed command failed, for the status bar.
     pub(crate) error: Option<String>,
+    /// A press on a group that was not active, at this char offset.
+    pub(crate) pressed: Option<usize>,
 }
 
 /// Where things go this frame, and how tabs are drawn.
@@ -337,6 +339,10 @@ struct Screen<'a> {
     stopped: Option<usize>,
     /// Find matches to highlight, sorted (`find.rs`).
     matches: &'a [Range],
+    /// This group's own cursors and selections of the document.
+    selections: Selections,
+    /// Whether the carets show: only the focused editor's do.
+    carets: bool,
 }
 
 impl Screen<'_> {
@@ -376,6 +382,13 @@ pub(crate) struct Shown<'a> {
     pub label: &'a str,
     /// Find matches to highlight, sorted.
     pub matches: &'a [Range],
+    /// The group this editor belongs to.
+    pub group: GroupId,
+    /// Whether the group is the active one. Only the active group's editor
+    /// takes focus, keys, the pointer's cursor and overlays, and has a
+    /// minimap; another group's draws its own cursors and selections and
+    /// reports a press so the app can focus it.
+    pub active: bool,
 }
 
 /// Shows the editor in `ui`, running the commands its input asks for, with
@@ -388,12 +401,15 @@ pub(crate) fn show(
     overlay: &mut suggest::State,
     shown: &Shown<'_>,
 ) -> Outcome {
-    let Shown { label, matches } = *shown;
+    let (label, matches) = (shown.label, shown.matches);
     let mut outcome = Outcome::default();
     let area = ui.available_rect_before_wrap();
     let Some(line_count) = workspace.document(document).map(Document::line_count) else {
         return outcome;
     };
+    if !shown.active {
+        return show_passive(ui, workspace, document, view, shown, area);
+    }
     let (rect, minimap_area) = split_minimap(ui, workspace, area);
     let response = ui.interact(rect, id(), Sense::click_and_drag());
     let tab_size = workspace.tab_size(document).unwrap_or(4);
@@ -445,6 +461,10 @@ pub(crate) fn show(
         breakpoints: workspace.breakpoint_details(document),
         stopped: workspace.stopped_line(document),
         matches,
+        selections: workspace
+            .view_selections(shown.group, document)
+            .unwrap_or_else(|| Selections::single(doc.primary_selection())),
+        carets: true,
     };
     paint(ui, &screen);
     expose(ui, &response, &screen, label);
@@ -459,6 +479,57 @@ pub(crate) fn show(
         outcome.error = workspace.completion_accept().err().map(|e| e.to_string());
         outcome.changed = true;
     }
+    outcome
+}
+
+/// The editor of a group that does not have the focus: the text with the
+/// group's own selections and scroll. Wheel scrolling works; a press asks
+/// the app to focus the group (`Outcome::pressed`, the char under it).
+fn show_passive(
+    ui: &mut Ui,
+    workspace: &Workspace,
+    document: DocumentId,
+    view: &mut View,
+    shown: &Shown<'_>,
+    area: Rect,
+) -> Outcome {
+    let mut outcome = Outcome::default();
+    let line_count = workspace.document(document).map_or(1, Document::line_count);
+    let tab_size = workspace.tab_size(document).unwrap_or(4);
+    let layout = Layout::new(ui, area, line_count, tab_size);
+    let id = Id::new(("rustode-editor", shown.group));
+    let response = ui.interact(area, id, Sense::click());
+    let Some(doc) = workspace.document(document) else {
+        return outcome;
+    };
+    if response.contains_pointer() {
+        wheel(ui, view, doc.line_count(), layout.line_height);
+    }
+    if response.is_pointer_button_down_on()
+        && let Some(pos) = response.interact_pointer_pos()
+        && !layout.gutter.contains(pos)
+    {
+        outcome.pressed = Some(offset_at(ui, doc, &layout, view, pos));
+    } else if response.is_pointer_button_down_on() {
+        outcome.pressed = Some(doc.cursor());
+    }
+    let mut markers = workspace.markers(document);
+    markers.sort_by_key(|m| m.severity);
+    let screen = Screen {
+        doc,
+        layout: &layout,
+        view,
+        rows: rows(ui, doc, &layout, view),
+        markers,
+        breakpoints: workspace.breakpoint_details(document),
+        stopped: workspace.stopped_line(document),
+        matches: &[],
+        selections: workspace
+            .view_selections(shown.group, document)
+            .unwrap_or_else(|| Selections::single(doc.primary_selection())),
+        carets: false,
+    };
+    paint(ui, &screen);
     outcome
 }
 
@@ -859,7 +930,7 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
     squiggles(&text_painter, screen);
     // VS Code hides the cursors of an editor without focus
     // (`src/vs/editor/browser/viewParts/viewCursors/viewCursors.ts:233-235`).
-    if ui.memory(|memory| memory.has_focus(id())) {
+    if screen.carets && ui.memory(|memory| memory.has_focus(id())) {
         for caret in carets {
             text_painter.rect_filled(caret, 0.0, CARET);
         }
@@ -876,7 +947,7 @@ fn paint(ui: &Ui, screen: &Screen<'_>) {
             breakpoint_mark(&gutter_painter, center, radius, bp);
         }
     }
-    let active = doc.position_of(doc.primary_selection().head).line;
+    let active = doc.position_of(screen.selections.primary().head).line;
     for row in rows {
         let color = if row.line == active {
             ACTIVE_LINE_NUMBER
@@ -992,7 +1063,7 @@ fn selections(painter: &egui::Painter, screen: &Screen<'_>) -> Vec<Rect> {
     } = screen;
     let shown = screen.offsets();
     let mut carets = Vec::new();
-    for selection in doc.selections() {
+    for selection in screen.selections.as_slice() {
         let range = selection.range();
         if range.end < shown.start || range.start > shown.end {
             continue;
@@ -1030,7 +1101,7 @@ fn caret(layout: &Layout, view: &View, row: &Row, column: usize) -> Rect {
 /// `.currentFindMatch`).
 fn find_matches(painter: &egui::Painter, screen: &Screen<'_>) {
     let shown = screen.offsets();
-    let current = screen.doc.primary_selection().range();
+    let current = screen.selections.primary().range();
     let first = screen.matches.partition_point(|m| m.end < shown.start);
     let visible = screen.matches[first..]
         .iter()

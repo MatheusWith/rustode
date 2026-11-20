@@ -1,6 +1,5 @@
-//! Editor groups and their tabs.
-//!
-//! Phase 1 has one group; splits (ticket 35) add more. As in VS Code, a file
+//! The tabs of one editor group (`groups.rs` holds the layout of the
+//! groups). As in VS Code, a file
 //! has one tab per group, next/previous tab wrap around
 //! (`workbench.action.nextEditor`, `src/vs/workbench/browser/parts/editor/editorActions.ts:1265-1330`),
 //! a quick Ctrl+Tab opens the second most recently used editor and a quick
@@ -12,6 +11,8 @@
 //! `src/vs/workbench/browser/workbench.contribution.ts:321-325`).
 
 use crate::DocumentId;
+use rustode_core::Selections;
+use std::collections::HashMap;
 
 /// The tabs of one editor group, in display order, with the active one.
 #[derive(Debug, Clone, Default)]
@@ -19,6 +20,10 @@ pub struct EditorGroup {
     tabs: Vec<DocumentId>,
     /// Most recently used first.
     recent: Vec<DocumentId>,
+    /// This group's own cursors and selections for each document it shares
+    /// with another group, as they were when the group last lost focus,
+    /// followed through every edit made since.
+    pub(crate) views: HashMap<DocumentId, Selections>,
 }
 
 impl EditorGroup {
@@ -46,6 +51,15 @@ impl EditorGroup {
             self.tabs.push(id);
         }
         self.activate(id);
+    }
+
+    /// Adds `id` at the end if it has no tab yet, as the least recently
+    /// used one: the active tab stays active.
+    pub(crate) fn append(&mut self, id: DocumentId) {
+        if !self.tabs.contains(&id) {
+            self.tabs.push(id);
+            self.recent.push(id);
+        }
     }
 
     /// Activates `id`; returns whether it has a tab.
@@ -88,6 +102,7 @@ impl EditorGroup {
 
     /// Removes `id`'s tab; the most recently used tab becomes active.
     pub(crate) fn close(&mut self, id: DocumentId) -> bool {
+        self.views.remove(&id);
         let had = self.tabs.contains(&id);
         self.tabs.retain(|&t| t != id);
         self.recent.retain(|&r| r != id);

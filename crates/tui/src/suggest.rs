@@ -57,6 +57,10 @@ impl App {
                 );
                 return true;
             }
+            if let Some(id) = crate::groups::chord_command(key) {
+                self.run_group_command(id);
+                return true;
+            }
         }
         if ctrl && key.code == KeyCode::Char('k') {
             self.workspace.hide_hover();
@@ -176,7 +180,7 @@ pub(crate) fn draw(app: &App, frame: &mut Frame) {
 /// out of view.
 fn place(app: &App, offset: usize) -> Option<(u16, u16)> {
     let hit = app.hits.editor?;
-    let view = app.views.get(&hit.id)?;
+    let view = app.views.get(&(hit.group, hit.id))?;
     let document = app.workspace.document(hit.id)?;
     let position = document.position_of(offset);
     let height = usize::from(hit.area.height);

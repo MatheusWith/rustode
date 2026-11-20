@@ -32,6 +32,7 @@
 //! above the workbench; `app/overlays.rs` opens them and runs what they ask.
 
 use crate::focus::Part;
+use crate::groups;
 use crate::keys::{self, Workbench};
 use crate::latency::PresentLatency;
 use crate::quick_input::QuickInput;
@@ -40,11 +41,12 @@ use crate::{
     status, tabs,
 };
 use eframe::egui::{
-    self, Color32, Context, FontId, Label, Rect, RichText, Sense, UiBuilder, Vec2, ViewportCommand,
+    self, Color32, Context, FontId, Id, Label, Rect, RichText, Sense, UiBuilder, Vec2,
+    ViewportCommand,
 };
 use rustode_workspace::{
-    Document, DocumentId, Error, Event, ExtensionEvent, NOT_LOADED, Problem, SearchEvent,
-    ServerState, Workspace,
+    Document, DocumentId, Error, Event, ExtensionEvent, GroupId, NOT_LOADED, Problem, Range,
+    SearchEvent, ServerState, Workspace,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -62,18 +64,24 @@ const QUIT_PROMPT: &str = "Unsaved changes: Ctrl+Q again quits without saving, C
 /// drawing.
 const REPLACE_SLICE: Duration = Duration::from_millis(8);
 const EDITOR_BACKGROUND: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
+/// `editorGroup.border`, #FFFFFF17 over the editor background
+/// (`dark_modern.json:36`).
+const DIVIDER: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
 const HINT: Color32 = Color32::from_rgb(0x9d, 0x9d, 0x9d);
 
 /// The editor window: open documents in tabs and an optional folder in the
 /// explorer.
 pub struct EditorApp {
     workspace: Workspace,
-    /// Where each document is scrolled to, kept when switching tabs.
-    views: HashMap<DocumentId, editor::View>,
+    /// Where each document is scrolled to in each group, kept when
+    /// switching tabs: every view of a document scrolls on its own.
+    views: HashMap<(GroupId, DocumentId), editor::View>,
     /// The hover and suggest overlays' state.
     overlay: crate::suggest::State,
     explorer: explorer::View,
-    strip: tabs::Strip,
+    strips: HashMap<GroupId, tabs::Strip>,
+    /// The Ctrl+K chords of the group commands.
+    group_chord: groups::Chord,
     /// Whether the sidebar is shown (Ctrl+B), and how wide.
     sidebar: layout::Sidebar,
     /// Where the sidebar was drawn last frame, to tell which part has focus.
@@ -187,7 +195,8 @@ impl EditorApp {
             views: HashMap::new(),
             overlay: crate::suggest::State::default(),
             explorer: explorer::View::default(),
-            strip: tabs::Strip::default(),
+            strips: HashMap::new(),
+            group_chord: groups::Chord::default(),
             sidebar: layout::Sidebar::default(),
             sidebar_area: None,
             problems_area: None,
@@ -288,7 +297,7 @@ impl EditorApp {
                 Event::Restored { .. } | Event::Reloaded { .. } => None,
                 Event::Notice(text) => Some(text),
                 Event::Navigated { id } => {
-                    self.views.entry(id).or_default().reveal();
+                    self.view_of(id).reveal();
                     continue;
                 }
                 Event::Search(SearchEvent::Replaced) => {
@@ -354,7 +363,7 @@ impl EditorApp {
     fn go_to_problem(&mut self, ctx: &Context, problem: &Problem) {
         match self.workspace.go_to_problem(problem) {
             Ok(id) => {
-                self.views.entry(id).or_default().reveal();
+                self.view_of(id).reveal();
                 self.focus_editor_next = true;
                 ctx.request_repaint();
             }
@@ -461,11 +470,8 @@ impl EditorApp {
             Workbench::PreviousTab => self.switch(ctx, Workspace::previous_tab),
             Workbench::RecentTab => self.switch(ctx, Workspace::recently_used_tab),
             Workbench::LeastRecentTab => self.switch(ctx, Workspace::least_recently_used_tab),
-            Workbench::CloseTab => {
-                if let Some(id) = self.workspace.active_document() {
-                    self.close(ctx, id);
-                }
-            }
+            Workbench::CloseTab => self.close_active(ctx),
+            Workbench::Group(id) => self.run_group_command(ctx, id),
             Workbench::ToggleSidebar => self.toggle_sidebar(ctx),
             Workbench::FocusExplorer => self.focus_explorer(ctx),
             Workbench::FocusNextPart
@@ -532,6 +538,18 @@ impl EditorApp {
             | Workbench::Replace
             | Workbench::FindNext
             | Workbench::FindPrevious => self.run_find(ctx, command),
+        }
+    }
+
+    /// Ctrl+W: closes the active editor, or an empty group.
+    fn close_active(&mut self, ctx: &Context) {
+        if let Some(id) = self.workspace.active_document() {
+            self.close(ctx, id);
+        } else if self
+            .workspace
+            .command_applies("workbench.action.closeGroup")
+        {
+            self.run_group_command(ctx, "workbench.action.closeGroup");
         }
     }
 
@@ -625,11 +643,12 @@ impl EditorApp {
     /// Closes `id`'s tab; with unsaved changes, only when asked twice.
     fn close(&mut self, ctx: &Context, id: DocumentId) {
         let discard = self.confirm_close == Some(id);
-        match self.workspace.close(id, discard) {
+        let group = self.workspace.active_group();
+        match self.workspace.close_editor(group, id, discard) {
             Ok(()) => {
                 self.confirm_close = None;
                 self.message = None;
-                self.views.remove(&id);
+                self.views.remove(&(group, id));
                 if self.workspace.active_document().is_some() {
                     self.focus_editor(ctx);
                 } else if self.sidebar.visible() && self.workspace.explorer().is_some() {
@@ -784,51 +803,123 @@ impl EditorApp {
         outcome.changed
     }
 
-    fn show_tabs(&mut self, ui: &mut egui::Ui, rect: Rect) -> bool {
-        let action = ui
-            .scope_builder(
-                UiBuilder::new().max_rect(rect).id_salt("rustode-tabs"),
-                |ui| tabs::show(ui, &self.workspace, &mut self.strip),
-            )
-            .inner;
+    /// One tab strip per group.
+    fn show_tabs(&mut self, ui: &mut egui::Ui, placed: &groups::Arranged) -> bool {
+        let mut changed = false;
+        for group in &placed.groups {
+            let strip = self.strips.entry(group.group).or_default();
+            let action = ui
+                .scope_builder(
+                    UiBuilder::new()
+                        .max_rect(group.tabs)
+                        .id_salt(("rustode-tabs", group.group)),
+                    |ui| tabs::show(ui, &self.workspace, group.group, strip),
+                )
+                .inner;
+            changed |= self.tab_action(ui.ctx(), group.group, action);
+        }
+        changed
+    }
+
+    /// What a click or key on a group's strip asked. A click on a group
+    /// that does not have the focus gives it the focus first.
+    fn tab_action(&mut self, ctx: &Context, group: GroupId, action: Option<tabs::Action>) -> bool {
+        let Some(action) = action else { return false };
+        if group != self.workspace.active_group() {
+            let _ = self.workspace.focus_group(group);
+        }
         match action {
-            Some(tabs::Action::Activate(id)) => {
+            tabs::Action::Activate(id) => {
                 let _ = self.workspace.activate(id);
-                self.focus_editor(ui.ctx());
-                true
+                self.focus_editor(ctx);
             }
-            Some(tabs::Action::Select(id)) => {
+            tabs::Action::Select(id) => {
                 let _ = self.workspace.activate(id);
-                focus(ui.ctx(), tabs::tab_id(id));
-                true
+                focus(ctx, tabs::tab_id(id));
             }
-            Some(tabs::Action::Close(id)) => {
-                self.close(ui.ctx(), id);
-                true
+            tabs::Action::Close(id) => self.close(ctx, id),
+        }
+        true
+    }
+
+    /// The scroll state of the active group's view of `id`.
+    pub(super) fn view_of(&mut self, id: DocumentId) -> &mut editor::View {
+        let group = self.workspace.active_group();
+        self.views.entry((group, id)).or_default()
+    }
+
+    /// Runs a group command by id; the focus follows into the editor.
+    pub(super) fn run_group_command(&mut self, ctx: &Context, id: &str) {
+        match self.workspace.execute(id) {
+            Ok(_) => {
+                self.message = None;
+                self.focus_editor(ctx);
             }
-            None => false,
+            Err(Error::Dirty(_)) => {
+                self.message = Some(CLOSE_PROMPT.to_owned());
+            }
+            Err(err) => self.message = Some(err.to_string()),
         }
     }
 
-    fn show_editor(&mut self, ui: &mut egui::Ui, rect: Rect) -> bool {
-        let Some(id) = self.workspace.active_document() else {
+    /// The editors of every group, and the dividers between them.
+    fn show_editors(&mut self, ui: &mut egui::Ui, placed: &groups::Arranged, bottom: f32) -> bool {
+        let mut changed = false;
+        for divider in &placed.dividers {
+            let rect = Rect::from_min_max(
+                divider.min,
+                egui::pos2(divider.max.x, divider.max.y.min(bottom)),
+            );
+            ui.painter().rect_filled(rect, 0.0, DIVIDER);
+        }
+        for group in &placed.groups {
+            let mut rect = group.editor;
+            rect.max.y = rect.max.y.min(bottom).max(rect.min.y);
+            changed |= self.show_group_editor(ui, group.group, rect);
+        }
+        changed
+    }
+
+    fn show_group_editor(&mut self, ui: &mut egui::Ui, group: GroupId, rect: Rect) -> bool {
+        let active = group == self.workspace.active_group();
+        let shown = self
+            .workspace
+            .group_by_id(group)
+            .and_then(rustode_workspace::EditorGroup::active);
+        let Some(id) = shown else {
             empty_group(ui, rect);
-            focus::empty_group(ui, rect);
+            if active {
+                focus::empty_group(ui, rect);
+            } else if ui
+                .interact(
+                    rect,
+                    Id::new(("rustode-empty-group", group)),
+                    Sense::click(),
+                )
+                .clicked()
+            {
+                let _ = self.workspace.focus_group(group);
+                self.focus_editor(ui.ctx());
+            }
             return false;
         };
         let name = self
             .workspace
             .document(id)
             .map_or_else(Default::default, file_name);
-        let view = self.views.entry(id).or_default();
-        let matches = self.find.highlights(&self.workspace);
+        let view = self.views.entry((group, id)).or_default();
+        let matches: &[Range] = if active {
+            self.find.highlights(&self.workspace)
+        } else {
+            &[]
+        };
         let workspace = &mut self.workspace;
         let overlay = &mut self.overlay;
         let outcome = ui
             .scope_builder(
                 UiBuilder::new()
                     .max_rect(rect)
-                    .id_salt("rustode-editor-area"),
+                    .id_salt(("rustode-editor-area", group)),
                 |ui| {
                     editor::show(
                         ui,
@@ -839,6 +930,8 @@ impl EditorApp {
                         &editor::Shown {
                             label: &name,
                             matches,
+                            group,
+                            active,
                         },
                     )
                 },
@@ -846,6 +939,13 @@ impl EditorApp {
             .inner;
         if let Some(error) = outcome.error {
             self.error = Some(error);
+        }
+        if let Some(offset) = outcome.pressed {
+            // A press on another group focuses it and puts its caret there.
+            let _ = self.workspace.focus_group(group);
+            let _ = self.workspace.set_cursor(id, offset);
+            self.focus_editor(ui.ctx());
+            return true;
         }
         outcome.changed
     }
@@ -888,6 +988,10 @@ impl eframe::App for EditorApp {
         // Before the editor, which also reads Ctrl+K for Ctrl+K Ctrl+I.
         let chord = !self.language.is_open() && self.language.chord(&ctx);
         let mut changed = self.workbench_keys(&ctx);
+        for id in self.group_chord.take(&ctx) {
+            self.run_group_command(&ctx, id);
+            changed = true;
+        }
         self.default_focus(&ctx);
         let rect = ui.max_rect();
         let areas = layout::areas(rect, self.sidebar.fit(rect.width()));
@@ -896,10 +1000,15 @@ impl eframe::App for EditorApp {
         if let Some(sidebar) = areas.sidebar {
             changed |= self.show_sidebar(ui, sidebar);
         }
-        changed |= self.show_tabs(ui, areas.tabs);
+        let placed = groups::arrange(
+            self.workspace.layout(),
+            areas.tabs.union(areas.editor),
+            self.workspace.active_group(),
+        );
+        changed |= self.show_tabs(ui, &placed);
         let above = self.show_debug(ui, areas.editor);
         let editor = self.show_problems(ui, above);
-        changed |= self.show_editor(ui, editor);
+        changed |= self.show_editors(ui, &placed, editor.bottom());
         if self.find.is_stale(&self.workspace) {
             // The editor changed the text after the matches were found.
             ctx.request_repaint();

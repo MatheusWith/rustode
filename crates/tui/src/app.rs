@@ -12,8 +12,8 @@ use ratatui::{DefaultTerminal, Frame, Terminal};
 use rustode_workspace::trace::{LatencyRecorder, LatencyReport};
 use rustode_workspace::{
     CommandMatch, ContextValue, Document, DocumentId, Error, Event as WorkspaceEvent, ExplorerRow,
-    FileMatch, Movement, Position, QuickQuery, Resolution, Selection, ServerState, Workspace,
-    parse_quick_query,
+    FileMatch, GroupId, Movement, Position, QuickQuery, Resolution, Selection, ServerState,
+    Workspace, parse_quick_query,
 };
 use std::collections::HashMap;
 use std::io;
@@ -57,18 +57,32 @@ pub(crate) struct Viewport {
 /// The editor's text area on the last frame, for mouse clicks.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct EditorHit {
+    pub group: GroupId,
     pub area: Rect,
     pub gutter: u16,
     pub id: DocumentId,
     pub tab_size: usize,
 }
 
+/// One editor group as drawn on the last frame.
+#[derive(Debug, Clone)]
+pub(crate) struct GroupHit {
+    pub group: GroupId,
+    /// The whole group: tab bar and text.
+    pub area: Rect,
+    pub tabs: Vec<(u16, u16, u16, DocumentId)>,
+    pub editor: Option<EditorHit>,
+}
+
 /// What was drawn where on the last frame.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Hits {
+    /// The active group's text area.
     pub editor: Option<EditorHit>,
-    /// Each tab's row, first and one-past-last column.
+    /// Each of the active group's tabs: row, first and one-past-last column.
     pub tabs: Vec<(u16, u16, u16, DocumentId)>,
+    /// Every group drawn, with what is in it.
+    pub groups: Vec<GroupHit>,
     /// The explorer's rows.
     pub explorer: Option<Rect>,
     /// The problems panel's rows, and the problem each one shows.
@@ -125,8 +139,9 @@ pub(crate) const QUICK_ROWS: usize = 10;
 pub struct App {
     pub(crate) workspace: Workspace,
     pub(crate) focus: Focus,
-    /// Scroll position per document, kept when switching tabs.
-    pub(crate) views: HashMap<DocumentId, Viewport>,
+    /// Scroll position per document and group, kept when switching tabs:
+    /// each view of a document scrolls on its own.
+    pub(crate) views: HashMap<(GroupId, DocumentId), Viewport>,
     /// Lines Page Up/Down move: the editor's height minus 2, as in VS Code
     /// (`src/vs/editor/common/cursorCommon.ts:129`).
     pub(crate) page: usize,
@@ -162,7 +177,7 @@ pub struct App {
     /// The hover and suggest popups' keys.
     pub(crate) suggest: crate::suggest::State,
     confirm_quit: bool,
-    confirm_close: Option<DocumentId>,
+    pub(crate) confirm_close: Option<DocumentId>,
     quit: bool,
     latency: LatencyRecorder,
 }
@@ -396,6 +411,9 @@ impl App {
         if self.focus == Focus::Editor && self.navigate_key(key) {
             return;
         }
+        if matches!(self.focus, Focus::Editor | Focus::Explorer) && self.group_key(key) {
+            return;
+        }
         match self.focus {
             Focus::Editor => {
                 if let Some(command) = keys::command(key).filter(|c| !self.removed(c, key)) {
@@ -497,6 +515,10 @@ impl App {
             self.run_command(command);
             return;
         }
+        if Self::is_group_command(id) {
+            self.run_group_command(id);
+            return;
+        }
         if self.run_debug_view(id) || self.run_language(id) || self.run_breakpoint_command(id) {
             return;
         }
@@ -507,6 +529,11 @@ impl App {
             }
             Err(err) => self.message = Some(err.to_string()),
         }
+    }
+
+    /// Whether `id` is one of the editor group commands.
+    fn is_group_command(id: &str) -> bool {
+        id.contains("Group") || id.starts_with("workbench.action.splitEditor")
     }
 
     /// Reads `settings.json` and `keybindings.json` from `dir` (VS Code's
@@ -656,11 +683,13 @@ impl App {
     }
 
     fn quit_or_confirm(&mut self) {
-        let dirty = self
-            .workspace
-            .tabs()
-            .iter()
-            .any(|&id| self.workspace.document(id).is_some_and(Document::is_dirty));
+        let dirty = self.workspace.group_ids().into_iter().any(|group| {
+            self.workspace.group_by_id(group).is_some_and(|g| {
+                g.tabs()
+                    .iter()
+                    .any(|&id| self.workspace.document(id).is_some_and(Document::is_dirty))
+            })
+        });
         if !dirty || self.confirm_quit {
             self.quit = true;
         } else {
@@ -672,12 +701,16 @@ impl App {
 
     /// Ctrl+W. A dirty document asks first: a second Ctrl+W discards.
     fn close_or_confirm(&mut self) {
-        let Some(id) = self.document() else { return };
+        let group = self.workspace.active_group();
+        let Some(id) = self.document() else {
+            self.close_empty_group();
+            return;
+        };
         let discard = self.confirm_close == Some(id);
-        match self.workspace.close(id, discard) {
+        match self.workspace.close_editor(group, id, discard) {
             Ok(()) => {
                 self.confirm_close = None;
-                self.views.remove(&id);
+                self.views.remove(&(group, id));
                 if self.document().is_none() && self.workspace.explorer().is_some() {
                     self.focus = Focus::Explorer;
                 }
@@ -689,6 +722,19 @@ impl App {
                 );
             }
             Err(err) => self.message = Some(err.to_string()),
+        }
+    }
+
+    /// Ctrl+W on an empty group closes the group
+    /// (`workbench.action.closeGroup`, only while it has no editor and
+    /// there are several groups); with one group it does nothing.
+    fn close_empty_group(&mut self) {
+        if self
+            .workspace
+            .command_applies("workbench.action.closeGroup")
+            && let Err(err) = self.workspace.execute("workbench.action.closeGroup")
+        {
+            self.message = Some(err.to_string());
         }
     }
 
@@ -993,6 +1039,7 @@ impl App {
     /// cursor, as with VS Code's default `editor.multiCursorModifier`).
     fn click(&mut self, column: u16, row: u16, modifiers: KeyModifiers) {
         let inside = |area: Rect| area.contains(ratatui::layout::Position::new(column, row));
+        self.focus_group_at(column, row);
         if let Some(&(_, _, _, id)) = self
             .hits
             .tabs
@@ -1070,6 +1117,28 @@ impl App {
         }
     }
 
+    /// A click in a group other than the active one gives it the focus, and
+    /// the click then acts on that group.
+    fn focus_group_at(&mut self, column: u16, row: u16) {
+        let point = ratatui::layout::Position::new(column, row);
+        let Some(hit) = self
+            .hits
+            .groups
+            .iter()
+            .find(|g| g.area.contains(point))
+            .cloned()
+        else {
+            return;
+        };
+        if hit.group != self.workspace.active_group()
+            && self.workspace.focus_group(hit.group).is_ok()
+        {
+            self.focus = Focus::Editor;
+            self.hits.tabs = hit.tabs;
+            self.hits.editor = hit.editor;
+        }
+    }
+
     /// A click on the editor's gutter sets or clears a breakpoint on that
     /// line, as a click on VS Code's glyph margin does; returns whether the
     /// click was there.
@@ -1082,7 +1151,11 @@ impl App {
         {
             return false;
         }
-        let view = self.views.get(&hit.id).copied().unwrap_or_default();
+        let view = self
+            .views
+            .get(&(hit.group, hit.id))
+            .copied()
+            .unwrap_or_default();
         let line = view.top + usize::from(row - area.y);
         let in_text = self
             .workspace
@@ -1101,7 +1174,11 @@ impl App {
         if row < area.y || row >= area.bottom() || column < area.x || column >= area.right() {
             return None;
         }
-        let view = self.views.get(&hit.id).copied().unwrap_or_default();
+        let view = self
+            .views
+            .get(&(hit.group, hit.id))
+            .copied()
+            .unwrap_or_default();
         let document = self.workspace.document(hit.id)?;
         let line = view.top + usize::from(row - area.y);
         if line >= document.line_count() {
@@ -1120,12 +1197,17 @@ impl App {
             self.explorer_top = step(self.explorer_top, down, rows);
             return;
         }
-        if let Some(hit) = self.hits.editor.filter(|h| h.area.contains(point)) {
+        let hit = self
+            .hits
+            .groups
+            .iter()
+            .find_map(|g| g.editor.filter(|h| h.area.contains(point)));
+        if let Some(hit) = hit {
             let lines = self
                 .workspace
                 .document(hit.id)
                 .map_or(1, Document::line_count);
-            let view = self.views.entry(hit.id).or_default();
+            let view = self.views.entry((hit.group, hit.id)).or_default();
             view.top = step(view.top, down, lines.saturating_sub(1));
         }
     }
