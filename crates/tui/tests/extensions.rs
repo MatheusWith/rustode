@@ -145,11 +145,6 @@ fn enter_installs_and_the_installed_list_says_not_loaded() {
         &mut terminal,
         &[key(KeyCode::Down), key(KeyCode::Enter)],
     );
-    assert!(
-        screen(&terminal).contains("Installing"),
-        "{}",
-        screen(&terminal)
-    );
     settle(&mut app, &mut terminal);
     assert!(
         extensions
@@ -163,11 +158,6 @@ fn enter_installs_and_the_installed_list_says_not_loaded() {
         &mut app,
         &mut terminal,
         &[key(KeyCode::End), key(KeyCode::Delete)],
-    );
-    assert!(
-        screen(&terminal).contains("Uninstalling"),
-        "{}",
-        screen(&terminal)
     );
     settle(&mut app, &mut terminal);
     let shown = screen(&terminal);
@@ -268,11 +258,6 @@ fn enter_disables_and_enables_an_installed_extension() {
         &mut terminal,
         &[key(KeyCode::End), key(KeyCode::Enter)],
     );
-    assert!(
-        screen(&terminal).contains("Disabling"),
-        "{}",
-        screen(&terminal)
-    );
     settle(&mut app, &mut terminal);
     assert_snapshot("extensions-disabled-100x14", &screen(&terminal));
     assert!(
@@ -331,4 +316,43 @@ fn an_invalid_extension_says_why_on_enter() {
         "{shown}"
     );
     assert!(!app.workspace().extensions_busy(), "nothing was started");
+}
+
+/// `App::handle` polls the workers after every key, so a fast job can
+/// finish inside the key's own step and no key-driven test may expect to see
+/// its in-flight label. The workspace polls only when asked, and a draw
+/// never polls, so starting the job through the workspace shows the label
+/// deterministically.
+#[test]
+fn a_running_operation_is_labelled_until_it_is_polled() {
+    let stand_in = StandIn::start();
+    publish(&stand_in);
+    let (mut app, _) = app("running", &stand_in);
+    let mut terminal = Terminal::new(TestBackend::new(100, 14)).expect("terminal");
+    send(&mut app, &mut terminal, &[ctrl_shift_x()]);
+    type_text(&mut app, &mut terminal, "hello");
+    send(&mut app, &mut terminal, &[key(KeyCode::Enter)]);
+    settle(&mut app, &mut terminal);
+    let drawn = |app: &mut App, terminal: &mut Terminal<TestBackend>| {
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        screen(terminal)
+    };
+    app.workspace_mut()
+        .install_extension("acme.hello")
+        .expect("install");
+    let shown = drawn(&mut app, &mut terminal);
+    assert!(shown.contains("Installing"), "{shown}");
+    settle(&mut app, &mut terminal);
+    app.workspace_mut()
+        .disable_extension("acme.hello")
+        .expect("disable");
+    let shown = drawn(&mut app, &mut terminal);
+    assert!(shown.contains("Disabling"), "{shown}");
+    settle(&mut app, &mut terminal);
+    app.workspace_mut()
+        .uninstall_extension("acme.hello")
+        .expect("uninstall");
+    let shown = drawn(&mut app, &mut terminal);
+    assert!(shown.contains("Uninstalling"), "{shown}");
+    settle(&mut app, &mut terminal);
 }
