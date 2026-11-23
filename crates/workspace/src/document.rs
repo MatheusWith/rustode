@@ -135,6 +135,15 @@ impl Document {
         }
     }
 
+    /// The file's name, as errors and prompts call the document.
+    #[must_use]
+    pub fn name(&self) -> String {
+        self.path.file_name().map_or_else(
+            || self.path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+    }
+
     /// The file this document belongs to.
     #[must_use]
     pub fn path(&self) -> &Path {

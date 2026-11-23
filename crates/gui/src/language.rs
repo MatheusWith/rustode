@@ -109,9 +109,12 @@ impl Picker {
         let Some(document) = self.document else {
             return Outcome::None;
         };
-        let Ok(picks) = workspace.language_picks(document, &self.query) else {
-            self.document = None;
-            return Outcome::Closed;
+        let picks = match workspace.language_picks(document, &self.query) {
+            Ok(picks) => picks,
+            Err(err) => {
+                self.document = None;
+                return Outcome::Failed(err.to_string());
+            }
         };
         self.selected = self.selected.min(picks.len().saturating_sub(1));
         let (down, up, enter, escape) = ctx.input_mut(|input| {

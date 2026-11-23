@@ -103,12 +103,27 @@ pub enum Error {
     /// An edit was refused.
     Edit(EditError),
     /// The document has unsaved changes; closing it needs an explicit discard.
-    Dirty(DocumentId),
+    Dirty {
+        /// The document.
+        id: DocumentId,
+        /// Its file name, for messages.
+        name: String,
+    },
     /// The file changed on disk under unsaved edits; resolve the conflict
     /// with [`Workspace::resolve_conflict`] before saving.
-    Conflict(DocumentId),
+    Conflict {
+        /// The document.
+        id: DocumentId,
+        /// Its file name, for messages.
+        name: String,
+    },
     /// [`Workspace::resolve_conflict`] was called with no conflict pending.
-    NoConflict(DocumentId),
+    NoConflict {
+        /// The document.
+        id: DocumentId,
+        /// Its file name, for messages.
+        name: String,
+    },
     /// [`Workspace::set_language`] was given an id that is no language.
     UnknownLanguage(String),
     /// A debug command was refused.
@@ -212,17 +227,17 @@ impl fmt::Display for Error {
         match self {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Encode(err) => err.fmt(f),
-            Self::UnknownDocument(id) => write!(f, "no open document {id:?}"),
+            Self::UnknownDocument(_) => write!(f, "that document is no longer open"),
             Self::Edit(err) => err.fmt(f),
-            Self::Dirty(id) => write!(f, "{id:?} has unsaved changes"),
-            Self::Conflict(id) => write!(
+            Self::Dirty { name, .. } => write!(f, "{name} has unsaved changes"),
+            Self::Conflict { name, .. } => write!(
                 f,
-                "{id:?} changed on disk under unsaved edits; reload or keep the edits first"
+                "{name} changed on disk under unsaved edits; compare, overwrite or revert first"
             ),
-            Self::NoConflict(id) => write!(f, "{id:?} has no conflict to resolve"),
+            Self::NoConflict { name, .. } => write!(f, "{name} has no conflict to resolve"),
             Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
             Self::Debug(err) => err.fmt(f),
-            Self::UnknownGroup(id) => write!(f, "no editor group {id:?}"),
+            Self::UnknownGroup(_) => write!(f, "that editor group no longer exists"),
         }
     }
 }
@@ -365,7 +380,10 @@ impl Workspace {
     pub fn close(&mut self, id: DocumentId, discard: bool) -> Result<(), Error> {
         let document = self.document(id).ok_or(Error::UnknownDocument(id))?;
         if document.is_dirty() && !discard {
-            return Err(Error::Dirty(id));
+            return Err(Error::Dirty {
+                id,
+                name: document.name(),
+            });
         }
         let path = document.path().to_owned();
         if let Some(watcher) = self.watcher.as_mut()
@@ -466,7 +484,10 @@ impl Workspace {
     pub fn save(&mut self, id: DocumentId) -> Result<(), Error> {
         let document = self.document_mut(id)?;
         if document.has_conflict() {
-            return Err(Error::Conflict(id));
+            return Err(Error::Conflict {
+                id,
+                name: document.name(),
+            });
         }
         let bytes = document.encoded().map_err(Error::Encode)?;
         let path = document.path().to_owned();

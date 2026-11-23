@@ -113,3 +113,18 @@ fn escape_closes_the_picker_and_down_moves_the_selection() {
         "{shown:?}"
     );
 }
+
+#[test]
+fn a_picker_that_outlived_its_document_says_why_it_closed() {
+    let mut harness = window("lang-gone");
+    harness.get_by_value("Plain Text").click();
+    quiet(&mut harness);
+    assert!(picker_is_open(&harness));
+    let workspace = harness.state_mut().workspace_mut();
+    let id = workspace.active_document().expect("document");
+    workspace.close(id, true).expect("close");
+    harness.step();
+    quiet(&mut harness);
+    assert!(!picker_is_open(&harness), "the picker closes");
+    assert_status(&harness, "that document is no longer open");
+}

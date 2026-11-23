@@ -161,17 +161,25 @@ impl When {
 }
 
 /// Why a `when` clause did not parse.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WhenError {
     /// Byte offset in the clause where the problem is.
     pub offset: usize,
+    /// Line of the problem in the clause, counting from 1.
+    pub line: usize,
+    /// Column of the problem in its line, counting chars from 1.
+    pub column: usize,
     /// What is wrong, with a hint when VS Code gives one.
     pub message: String,
 }
 
 impl fmt::Display for WhenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} (at offset {})", self.message, self.offset)
+        write!(
+            f,
+            "{} (line {}, column {})",
+            self.message, self.line, self.column
+        )
     }
 }
 
@@ -182,12 +190,27 @@ impl std::error::Error for WhenError {}
 /// # Errors
 /// When the clause is empty or is not a valid expression; the error points at the first problem.
 pub fn parse_when(input: &str) -> Result<When, WhenError> {
+    parse(input).map_err(|mut error| {
+        let mut end = error.offset.min(input.len());
+        while !input.is_char_boundary(end) {
+            end -= 1;
+        }
+        let before = &input[..end];
+        error.line = before.matches('\n').count() + 1;
+        let start = before.rfind('\n').map_or(0, |i| i + 1);
+        error.column = before[start..].chars().count() + 1;
+        error
+    })
+}
+
+fn parse(input: &str) -> Result<When, WhenError> {
     if input.is_empty() {
         return Err(WhenError {
             offset: 0,
             message: "Empty context key expression. Did you forget to write an expression? You \
                       can also put 'false' or 'true' to always evaluate to false or true."
                 .to_owned(),
+            ..WhenError::default()
         });
     }
     let tokens = scan(input)?;
@@ -203,6 +226,7 @@ pub fn parse_when(input: &str) -> Result<When, WhenError> {
         return Err(WhenError {
             offset: next.offset,
             message: format!("Unexpected token '{}'.{hint}", next.kind),
+            ..WhenError::default()
         });
     }
     Ok(expr)
@@ -322,6 +346,7 @@ fn lex_error(offset: usize, lexeme: &str, hint: &str) -> WhenError {
     WhenError {
         offset,
         message: format!("Unexpected token '{lexeme}'. {hint}"),
+        ..WhenError::default()
     }
 }
 
@@ -474,6 +499,7 @@ impl Parser {
         WhenError {
             offset: got.offset,
             message: format!("Expected: {what}. Received: '{}'.", got.kind),
+            ..WhenError::default()
         }
     }
 
@@ -570,6 +596,7 @@ impl Parser {
                 offset: self.peek().offset,
                 message: "Unexpected end of expression. Did you forget to put a context key?"
                     .to_owned(),
+                ..WhenError::default()
             }),
             _ => Err(self.expected(
                 "true | false | KEY | KEY '=~' REGEX | KEY ('==' | '!=' | '<' | '<=' | '>' | \
@@ -686,6 +713,15 @@ mod tests {
             Ok(w) => panic!("{input} parsed as {w:?}"),
             Err(e) => e.offset,
         }
+    }
+
+    #[test]
+    fn errors_name_a_line_and_column_not_a_byte_offset() {
+        let error = parse_when("é && )").expect_err("an error");
+        assert_eq!((error.line, error.column), (1, 6));
+        assert!(error.to_string().ends_with("(line 1, column 6)"), "{error}");
+        let error = parse_when("a &&\n&& b").expect_err("an error");
+        assert_eq!((error.line, error.column), (2, 1));
     }
 
     #[test]

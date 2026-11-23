@@ -124,7 +124,7 @@ fn closing_unsaved_changes_needs_an_explicit_discard() {
     let mut ws = Workspace::new();
     let id = ws.open(&path).expect("open");
     ws.type_text(id, "y").expect("type");
-    assert!(matches!(ws.close(id, false), Err(Error::Dirty(d)) if d == id));
+    assert!(matches!(ws.close(id, false), Err(Error::Dirty { id: d, .. }) if d == id));
     assert_eq!(ws.tabs(), [id]);
     ws.close(id, true).expect("discard");
     assert_eq!(ws.tabs(), &[] as &[rustode_workspace::DocumentId]);
@@ -195,4 +195,28 @@ fn opening_a_folder_that_does_not_exist_is_an_error() {
             .is_err()
     );
     assert!(ws.explorer().is_none());
+}
+
+#[test]
+fn errors_name_the_file_and_never_an_internal_id() {
+    let root = dir("messages");
+    let path = root.join("notes.txt");
+    write(&path, "x");
+    let mut ws = Workspace::new();
+    let id = ws.open(&path).expect("open");
+    ws.type_text(id, "y").expect("type");
+    let dirty = ws.close(id, false).expect_err("an error").to_string();
+    assert!(dirty.contains("notes.txt"), "{dirty}");
+    ws.close(id, true).expect("discard");
+    let unknown = ws.activate(id).expect_err("an error").to_string();
+    assert!(!unknown.contains("DocumentId"), "{unknown}");
+    assert!(!dirty.contains("DocumentId"), "{dirty}");
+}
+
+#[test]
+fn an_unknown_group_error_has_no_internal_id() {
+    let ws = Workspace::new();
+    let group = ws.active_group();
+    let message = Error::UnknownGroup(group).to_string();
+    assert!(!message.contains("GroupId"), "{message}");
 }

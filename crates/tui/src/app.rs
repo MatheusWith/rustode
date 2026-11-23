@@ -647,7 +647,7 @@ impl App {
     fn save(&mut self) {
         let Some(id) = self.document() else { return };
         let result = match self.workspace.save(id) {
-            Err(Error::Conflict(_)) => self
+            Err(Error::Conflict { .. }) => self
                 .workspace
                 .resolve_conflict(id, Resolution::KeepMine)
                 .and_then(|()| self.workspace.save(id)),
@@ -715,7 +715,7 @@ impl App {
                     self.focus = Focus::Explorer;
                 }
             }
-            Err(Error::Dirty(_)) => {
+            Err(Error::Dirty { .. }) => {
                 self.confirm_close = Some(id);
                 self.message = Some(
                     "Unsaved changes: Ctrl+W again closes without saving, Ctrl+S saves".to_owned(),
@@ -1046,7 +1046,9 @@ impl App {
             .iter()
             .find(|(y, x0, x1, _)| *y == row && (*x0..*x1).contains(&column))
         {
-            let _ = self.workspace.activate(id);
+            if let Err(err) = self.workspace.activate(id) {
+                self.message = Some(err.to_string());
+            }
             self.focus = Focus::Editor;
             return;
         }

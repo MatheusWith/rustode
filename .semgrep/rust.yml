@@ -39,3 +39,14 @@ rules:
     paths:
       include: ["*.rs", "*.toml", "*.json"]
     pattern-regex: (marketplace\.visualstudio\.com|gallerycdn\.vsassets\.io|dc\.services\.visualstudio\.com|vortex\.data\.microsoft\.com|mobile\.events\.data\.microsoft\.com)
+  - id: rustode.debug-format-of-error-in-frontend
+    languages: [generic]
+    severity: ERROR
+    message: A frontend shows an error with `Display` (`err.to_string()` or `{err}`), never `{:?}`; debug output leaks type names and internal ids (AGENTS.md §11.7.1, errors the user can act on).
+    paths:
+      include:
+        - crates/tui/src/
+        - crates/gui/src/
+        - crates/cli/src/
+        - .semgrep/rust.rs
+    pattern-regex: '\{(?:e|err|error|\w+_err|\w+_error):#?\?\}|\{:#?\?\}[^;]{0,120}?,\s*&?(?:e|err|error|\w+_err|\w+_error)\s*\)'

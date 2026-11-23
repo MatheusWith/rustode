@@ -18,9 +18,8 @@ impl EditorApp {
     pub(super) fn run_find(&mut self, ctx: &Context, command: Workbench) {
         let result = match command {
             Workbench::Find | Workbench::Replace => {
-                Ok(self
-                    .find
-                    .open(ctx, &mut self.workspace, command == Workbench::Replace))
+                self.find
+                    .open(ctx, &mut self.workspace, command == Workbench::Replace)
             }
             _ => self
                 .find

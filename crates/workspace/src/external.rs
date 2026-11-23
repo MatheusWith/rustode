@@ -110,7 +110,10 @@ impl Workspace {
     ) -> Result<(), Error> {
         let document = self.document_mut(id)?;
         let Some(theirs) = document.conflict.take() else {
-            return Err(Error::NoConflict(id));
+            return Err(Error::NoConflict {
+                id,
+                name: document.name(),
+            });
         };
         match resolution {
             Resolution::KeepMine => {
