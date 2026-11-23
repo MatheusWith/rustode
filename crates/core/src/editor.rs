@@ -146,12 +146,13 @@ impl CharEdit {
     /// Where char `offset` of the old text sits in the new text. A point
     /// before the change, or at its start, stays; one after it moves by the
     /// change's size; one inside the replaced text lands at the start.
+    /// Sizes near `usize::MAX` saturate instead of overflowing.
     #[must_use]
     pub fn map(self, offset: usize) -> usize {
         if offset <= self.start {
             offset
-        } else if offset >= self.start + self.removed {
-            offset - self.removed + self.inserted
+        } else if offset >= self.start.saturating_add(self.removed) {
+            (offset - self.removed).saturating_add(self.inserted)
         } else {
             self.start
         }
