@@ -42,16 +42,11 @@ fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
-        // A commit hook runs with git's own variables set. In a linked
-        // worktree GIT_INDEX_FILE is absolute, and these fixture
-        // repositories would stage into the worktree's index.
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        // A commit hook runs with the committing repository's GIT_* variables;
-        // left in, they send these fixture commands to that repository.
+        // A commit hook runs with the committing repository's GIT_* variables
+        // (in a linked worktree GIT_INDEX_FILE is absolute); left in, they
+        // send these fixture commands, staging and config to that repository.
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
