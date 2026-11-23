@@ -39,15 +39,58 @@ The local hooks and CI enforce the rules in this section. When a hook rejects a 
 
 ### Setup
 
+Install the hooks once, after the tools below:
+
 ```sh
 pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
 
-Required tools: `cargo-nextest`, `committed`, `cargo-deny`, `cargo-audit`, `cargo-llvm-cov`, `gitleaks`, `semgrep`, `pre-commit`.
-
-Coverage gates: `cargo xtask coverage`. Without rustup (for example Arch's `rust` package), point it at the system LLVM: `LLVM_COV=/usr/bin/llvm-cov LLVM_PROFDATA=/usr/bin/llvm-profdata cargo xtask coverage`.
-
 Hooks are not copied by `git clone`. In a clone without them, run the commands of "What runs when" by hand ([`AGENTS.md`](AGENTS.md) §8).
+
+Every tool the project asks for, with the reason, grouped by when you need it. The groups are checked against `.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `xtask/src/` and the `Command::new` calls of `crates/` at `8c3c9ab` (2026-11-23).
+
+**Building**
+
+| Tool | Why |
+|---|---|
+| `rustup` and the pinned toolchain | `rust-toolchain.toml` pins 1.99.1 with `rustfmt` and `clippy`; rustup installs it on the first build, so every machine formats and lints the same way ([ADR 0011](docs/adr/0011-english-and-pinned-toolchain.md)). Without rustup, install exactly 1.99.1 with both components yourself |
+| A C compiler (`cc`) | tree-sitter's runtime and grammars are C, built by the `cc` crate |
+
+**Testing and committing** (what the hooks run)
+
+| Tool | Why |
+|---|---|
+| `cargo-nextest` | runs the test suite in the commit hook (`--profile fast`), the push hook and CI |
+| `git` | the hooks, `cargo xtask pre-push` (reads commit ranges) and `cargo xtask bench-gate` (checks the base out in a worktree); tests build fixture repositories with it |
+| `sh` | the push hook's entries are shell one-liners |
+| a Vulkan driver (for example Mesa's lavapipe) | the GUI's image snapshot tests (`egui_kittest` on wgpu) render on a graphics adapter, a software one included; CI installs Mesa's lavapipe for this (`.github/workflows/ci.yml:32-33`) |
+| `pre-commit` | runs the hooks of `.pre-commit-config.yaml` |
+| `committed` | checks Conventional Commits messages |
+| `gitleaks` | scans the staged changes for secrets |
+| `semgrep` | runs the rules in `.semgrep/`, offline |
+| `cargo-deny` | licenses, advisories, bans and sources, on push (`deny.toml`) |
+| `llvm-tools-preview` and `cargo-llvm-cov` | `cargo xtask coverage` runs `cargo llvm-cov nextest`. With rustup add the component once: `rustup component add llvm-tools-preview`. Without rustup (for example Arch's `rust` package), point it at the system LLVM: `LLVM_COV=/usr/bin/llvm-cov LLVM_PROFDATA=/usr/bin/llvm-profdata cargo xtask coverage` |
+
+**CI only** (you can run them locally, nothing asks you to)
+
+| Tool | Why |
+|---|---|
+| `cargo-audit` | `cargo audit --deny warnings` against the RustSec database |
+| `pipx` | CI installs `semgrep` with it; locally any way of installing `semgrep` works |
+| Mesa lavapipe (`mesa-vulkan-drivers`, `libvulkan1`) | CI's software Vulkan for the GUI snapshots, installed with `apt` |
+
+**Benchmarks only** (`rustode bench` against the App, [`AGENTS.md`](AGENTS.md) §11.5; no hook or CI job runs them)
+
+| Tool | Why |
+|---|---|
+| `systemd-run` and `systemctl` (a systemd user session) | start and stop the reaper that kills a stray App if the run dies |
+| `bwrap` (bubblewrap) | runs the App's driver without network (`--unshare-net`) |
+| coreutils (`cp`, `stat`, `sha256sum`) and `pkill` | copy the App, check where the run folder lives, verify the App against the manifest, clean up |
+| the QA harness (`RUSTODE_QA_ROOT`, default `~/Projects/vscode/qa`) | `suite/tools/run_virtual.sh` starts the virtual display (it needs `kwin_wayland` and `dbus-run-session`), and the harness brings the sampler and `playwright-core` |
+| Node 24.22.1 (`RUSTODE_NODE`) | runs the CDP driver for the App |
+| a verified App copy | `01-app/` and its manifest, copied to a temporary folder and checked before each run (§11.5.3); never run in place |
+
+`cargo xtask bench-gate` (the micro-benchmark gate) needs none of the benchmark tools: only `git` and the Rust toolchain.
 
 ### Commit messages
 

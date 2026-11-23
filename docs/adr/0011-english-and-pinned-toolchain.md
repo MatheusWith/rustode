@@ -34,3 +34,21 @@ Every machine with rustup builds with 1.99.1, and a lint or formatting differenc
 ## Addendum (2026-11-18): the study's names are in English too
 
 At the owner's request, containment rule 2 changed: every folder and file name the project writes is now English, including the study's (`09-findings/`, `docs/templates/`, `docs/gaps.md`, `assemble.sh`, the ADR and finding slugs). The evidence folders and the files `assemble.sh` generates in them were renamed too (`02-package-analysis/`, `03-documents/`, `04-screenshots/`, `07-vscodium-source/`, `08-build-tests/`; `manifest-sha256.txt`, `source/tree/`, `out-formatted/`, …), by the owner's explicit decision; the copies were moved in place and checked against the manifest, not edited. Only names copied verbatim from the live sources stay in Portuguese (AGENTS.md, "Language").
+
+## Addendum (2026-11-19): rustup is now installed, and the pin is enforced
+
+The 2026-11-17 measurement above is superseded. Measured today: `pacman -Qo /usr/bin/cargo /usr/bin/rustc` shows both owned by `rustup 1.29.3-1` (symlinks to `/usr/bin/rustup`), and `rustup show` reports the active toolchain as `1.99.1-x86_64-unknown-linux-gnu`, "active because: overridden by `/home/with/Projects/rustode/rust-toolchain.toml`". The guarantee in this ADR — every rustup machine builds with 1.99.1 — now holds on the development machine too, not only as a hypothesis about CI.
+
+While adding the `llvm-tools-preview` component needed for `cargo xtask coverage` (`rustup component add llvm-tools-preview`; CONTRIBUTING.md:72, "Setup"), a stale partial download left in `~/.rustup/downloads/*.partial` by an earlier interrupted attempt made `rustup` report `cargo` and `clippy` as already installed while their binaries were missing from `~/.rustup/toolchains/1.99.1-x86_64-unknown-linux-gnu/bin/`, breaking `cargo` entirely (`error: the 'cargo' binary, normally provided by the 'cargo' component, is not applicable to the '1.99.1-x86_64-unknown-linux-gnu' toolchain`). Fixed by removing the partial download and the stale update-hash, then reinstalling the toolchain with every component the project needs locally:
+
+```sh
+rm -f ~/.rustup/downloads/*.partial ~/.rustup/update-hashes/1.99.1-x86_64-unknown-linux-gnu
+rustup toolchain uninstall 1.99.1-x86_64-unknown-linux-gnu
+rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
+```
+
+Confirmed restored: `cargo 1.99.1 (5f94df478 2026-08-27)` and `clippy 0.1.99 (58cf8f9c35 2026-10-13)`.
+
+`rust-toolchain.toml`'s component list (`rustfmt`, `clippy`) is left unchanged: `llvm-tools-preview` is added once, locally, the same way CI adds it only to the `coverage` job (`.github/workflows/ci.yml:44-46`) rather than to every job.
+
+**Coverage, measured.** `cargo xtask coverage`, run from the project root (worktree `rustode-wt/docs`, branch `docs/design-rules`) on 2026-11-23 at `709a424` (the working tree differed from the commit only in Markdown files), debug build, with `CARGO_TARGET_DIR` pointing at the shared target folder. It exited 0 after 1 min 56 s and printed `core: 94.3% of 16486 lines (minimum 85%)` and `frontends: 91.0% of 14345 lines (minimum 60%)`: both gates pass. This is one run, so no variation is known. The earlier failure ("failed to find llvm-tools-preview") is gone.
