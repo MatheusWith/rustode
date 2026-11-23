@@ -97,8 +97,11 @@ jobs:
       - name: pull request title (becomes the squash commit)
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          printf '%s\n' "$TITLE" > "$RUNNER_TEMP/title"
+          # GitHub appends " (#<number>)" to the squash commit's title, so
+          # check the title as it will land on main.
+          printf '%s (#%s)\n' "$TITLE" "$PR_NUMBER" > "$RUNNER_TEMP/title"
           cargo xtask commit-msg "$RUNNER_TEMP/title"
           committed --commit-file "$RUNNER_TEMP/title"
       - name: branch name and every commit message
