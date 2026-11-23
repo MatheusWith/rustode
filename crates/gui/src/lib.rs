@@ -51,6 +51,18 @@
 //! The GUI holds no editing logic: it maps input to workspace commands and
 //! draws workspace state.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 mod a11y;
 mod app;
 mod debug;

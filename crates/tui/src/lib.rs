@@ -7,6 +7,18 @@
 //! below 40×10. Editor groups split the editor area (see `groups`); a split
 //! that does not fit shows only the group that has the focus.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 mod app;
 mod breakpoint;
 mod debug;

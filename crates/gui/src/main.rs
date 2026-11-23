@@ -2,6 +2,18 @@
 //! the explorer, as `rustode-tui` does, with the user's settings
 //! (`RUSTODE_USER_DIR`, else `$XDG_CONFIG_HOME/rustode/User`).
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 use rustode_workspace::bench::{SCRIPT_ENV, Script};
 use std::path::PathBuf;
 use std::process::ExitCode;

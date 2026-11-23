@@ -9,6 +9,18 @@
 //! `rustode/extensions` under the XDG data folder), and which are disabled
 //! in `globalStorage/state.json` in the user folder.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 use ratatui::crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };

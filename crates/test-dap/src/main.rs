@@ -62,6 +62,18 @@
 //! each breakpoint and answers with an `id` per breakpoint (`1000` + its
 //! line), `verified` and, when not verified, a `message`.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 mod program;
 
 use program::{Breakpoints, Local, Mode, Outcome, Program, Spec, Special};

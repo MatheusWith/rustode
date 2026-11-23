@@ -459,12 +459,14 @@ impl fmt::Debug for Extensions {
 }
 
 impl Extensions {
-    fn registry(&mut self) -> Arc<Registry> {
-        Arc::clone(self.registry.get_or_insert_with(|| {
-            Arc::new(
-                Registry::new(OPEN_VSX).unwrap_or_else(|_| unreachable!("Open VSX's URL is valid")),
-            )
-        }))
+    /// The registry in use: the one set, or Open VSX, built on first use.
+    fn registry(&mut self) -> Result<Arc<Registry>, ExtensionError> {
+        if let Some(registry) = &self.registry {
+            return Ok(Arc::clone(registry));
+        }
+        let registry = Arc::new(Registry::new(OPEN_VSX)?);
+        self.registry = Some(Arc::clone(&registry));
+        Ok(registry)
     }
 
     fn sender(&mut self) -> Sender<Outcome> {
@@ -478,7 +480,7 @@ impl Extensions {
             job,
             dir,
             storage: self.storage.clone(),
-            registry: self.registry(),
+            registry: self.registry()?,
             waker: self.waker.clone(),
         };
         let outcomes = self.sender();
@@ -776,7 +778,16 @@ impl Workspace {
             query: query.clone(),
         };
         let seq = self.extensions.search_seq;
-        let registry = self.extensions.registry();
+        let registry = match self.extensions.registry() {
+            Ok(registry) => registry,
+            Err(err) => {
+                self.extensions.search = ExtensionSearch::Failed {
+                    query: text.trim().to_owned(),
+                    message: err.to_string(),
+                };
+                return;
+            }
+        };
         let outcomes = self.extensions.sender();
         let waker = self.extensions.waker.clone();
         let spawned = std::thread::Builder::new()

@@ -7,6 +7,18 @@
 //! measures input-to-frame latency for frontends. [`FirstFrame`] reports
 //! the time from `main` to the first presented frame.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 mod config;
 mod first_frame;
 mod latency;
