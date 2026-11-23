@@ -431,6 +431,116 @@ fn malformed_scenario_list_is_reported_with_its_path() {
     assert!(stderr(&out).contains("scenarios.toml"), "{}", stderr(&out));
 }
 
+/// A scenario list whose fixture and run numbers are `fields`.
+fn list_with(fields: &str) -> String {
+    format!(
+        "version = 7\n[[scenario]]\nid = \"open-file-tiny\"\ntitle = \"t\"\nkind = \"open-file\"\n\
+         {fields}"
+    )
+}
+
+/// Scenario lists a careless or hostile hand could write, by name.
+fn hostile_lists() -> Vec<(&'static str, Vec<u8>)> {
+    let huge = "9".repeat(5_000);
+    let deep = "[".repeat(100_000);
+    vec![
+        ("empty", Vec::new()),
+        ("binary", vec![0xff, 0xfe, 0, 1, 2, 0x80]),
+        ("nul", b"version = 1\0\n".to_vec()),
+        ("deep arrays", format!("a = {deep}").into_bytes()),
+        ("deep tables", format!("{}x = 1", "[a]\n".repeat(10_000)).into_bytes()),
+        ("huge number", format!("version = {huge}\n").into_bytes()),
+        ("negative version", b"version = -1\n".to_vec()),
+        (
+            "fixture bytes past u64",
+            list_with("[scenario.fixture]\nbytes = 18446744073709551616\nline_bytes = 64\n").into_bytes(),
+        ),
+        (
+            "fixture bytes u64::MAX",
+            list_with("[scenario.fixture]\nbytes = 9223372036854775807\nline_bytes = 64\n").into_bytes(),
+        ),
+        (
+            "line bytes zero",
+            list_with("[scenario.fixture]\nbytes = 4096\nline_bytes = 0\n").into_bytes(),
+        ),
+        (
+            "line bytes negative",
+            list_with("[scenario.fixture]\nbytes = 4096\nline_bytes = -5\n").into_bytes(),
+        ),
+        (
+            "repetitions huge",
+            list_with(
+                "[scenario.fixture]\nbytes = 4100\nline_bytes = 64\n[scenario.rustode]\nwarmup = 4294967295\nrepetitions = 4294967295\n",
+            )
+            .into_bytes(),
+        ),
+        (
+            "repetitions zero",
+            list_with(
+                "[scenario.fixture]\nbytes = 4100\nline_bytes = 64\n[scenario.rustode]\nwarmup = 0\nrepetitions = 0\n",
+            )
+            .into_bytes(),
+        ),
+        (
+            "timeouts zero and negative",
+            list_with(
+                "[scenario.fixture]\nbytes = 4100\nline_bytes = 64\n[scenario.app]\nwarmup = 0\nrepetitions = 1\ntimeout_s = 0\npoll_ms = -1\ndriver = \"launch.cjs\"\nsettings = \"app/settings.json\"\n",
+            )
+            .into_bytes(),
+        ),
+        (
+            "driver escapes the folder",
+            list_with(
+                "[scenario.fixture]\nbytes = 4100\nline_bytes = 64\n[scenario.app]\nwarmup = 0\nrepetitions = 1\ntimeout_s = 5\npoll_ms = 10\ndriver = \"../../../../etc/passwd\"\nsettings = \"/etc/shadow\"\n",
+            )
+            .into_bytes(),
+        ),
+        (
+            "long and odd ids",
+            format!("version = 7\n[[scenario]]\nid = \"{}\"\nkind = \"open-file\"\n", "a-".repeat(50_000)).into_bytes(),
+        ),
+        (
+            "unicode id",
+            "version = 7\n[[scenario]]\nid = \"日本-💥\"\ntitle = \"\u{202e}\"\nkind = \"open-file\"\n"
+                .as_bytes()
+                .to_vec(),
+        ),
+        (
+            "duplicate ids",
+            format!("{0}\n{0}", list_with("")).replace("version = 7\n[[scenario]]", "[[scenario]]").into_bytes(),
+        ),
+        ("unknown kind", b"version = 7\n[[scenario]]\nid = \"x\"\nkind = \"explode\"\n".to_vec()),
+    ]
+}
+
+#[test]
+fn hostile_scenario_lists_are_usage_errors_never_crashes() {
+    for (name, bytes) in hostile_lists() {
+        let sandbox = Sandbox::new("hostile-list");
+        let path = sandbox.path("bench/scenarios.toml");
+        fs::write(&path, &bytes).expect("write list");
+        for args in [
+            &["bench", "--list"][..],
+            &["bench", "open-file-tiny", "--dry-run"],
+            &["bench", "x", "--dry-run"],
+        ] {
+            let out = sandbox.run(args);
+            let code = out.status.code();
+            assert!(
+                matches!(code, Some(0..=2)),
+                "{name} with {args:?}: {:?}\n{}",
+                out.status,
+                stderr(&out)
+            );
+            assert!(
+                !stderr(&out).contains("panicked"),
+                "{name}: {}",
+                stderr(&out)
+            );
+        }
+    }
+}
+
 /// The generated fixture: exact size, numbered lines, LF.
 fn assert_fixture(folder: &Path) {
     let bytes = fs::read(folder.join("fixtures/open-file-tiny.txt")).expect("fixture");
