@@ -15,3 +15,4 @@ Every analysis is written in English.
 | [0002](0002-virtual-wayland-input.md) | Can keystrokes be injected into rustode and the App on the virtual display? | measured |
 | [0003](0003-first-app-comparison.md) | How do rustode and the App compare on startup, idle memory and 1 MB, 100 MB and 1 GB files? (first comparison, M3) | measured; "first frame" approximate |
 | [0004](0004-full-app-suite.md) | How do rustode and the App compare on the whole versioned list: startup, idle memory, large files, 10k edits and undo, regex search over a monorepo? (M9 suite; typing latency not measured) | measured; equivalence of the work checked |
+| [0005](0005-phase-1-report.md) | Where does rustode stand against VS Code at the end of Phase 1? (Gap Analysis in four parts, quality numbers, owner decisions, Phase 2 backlog) | measured counts; rows read from code and the source tree |
