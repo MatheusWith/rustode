@@ -10,6 +10,9 @@ fn xtask(dir: &Path, args: &[&str], stdin: &str) -> Output {
         .args(args)
         .current_dir(dir)
         .env_remove("RUSTODE_ALLOW_MAIN_PUSH")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -36,6 +39,12 @@ fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
+        // A commit hook runs with git's own variables set. In a linked
+        // worktree GIT_INDEX_FILE is absolute, and these fixture
+        // repositories would stage into the worktree's index.
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()

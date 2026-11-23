@@ -6,7 +6,7 @@ This is the index of the reference documents. The project rules are in [`AGENTS.
 |---|---|
 | [`architecture.md`](architecture.md) | processes, bundles, layers and data directories of the analyzed app |
 | [`source-vs-package.md`](source-vs-package.md) | where each part of the package comes from: bundle → entry file, extensions, `product.json`, asar |
-| [`build.md`](build.md) | how the app was built: script order, variables, pitfalls and how to reproduce |
+| [`build.md`](build.md) | how the analyzed App (VSCodium) was built: script order, variables, pitfalls and how to reproduce. It is not the editor's build: for that, see the README's "Get started" and CONTRIBUTING's "Setup" |
 | [`patches.md`](patches.md) | every patch: area and status (unchanged, adapted, port-only, skipped) |
 | [`qa.md`](qa.md) | build test results, criteria and where each piece of evidence is |
 | [`gaps.md`](gaps.md) | open questions and known limitations (G1…), in priority order |

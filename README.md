@@ -103,7 +103,7 @@ rustode bench …         a versioned benchmark scenario, on rustode and on a ve
 ```
 
 - **The same features in both.**
-  - Tabs, the explorer, search, problems and extensions. Quick open, the palette and find are in the TUI, and in review for the GUI ([#16](../../pull/16)).
+  - Tabs, the explorer, search, problems and extensions. Quick open, the palette and find are in both ([#16](../../pull/16)).
   - Mouse support, and focus that moves between parts with `F6`.
   - Width bands for narrow windows or terminals.
 - **The TUI degrades gracefully.**
@@ -169,16 +169,42 @@ Every file in 01 to 08 is a real copy, with no symbolic or hard links. What each
 
 ## Get started
 
-You need Rust (the toolchain is pinned in `rust-toolchain.toml`) and a C compiler for tree-sitter. Then:
+### Build
+
+You need Rust through [rustup](https://rustup.rs): the toolchain is pinned in `rust-toolchain.toml` (1.99.1) and rustup installs it on the first build. You also need a C compiler (`cc`), because tree-sitter's runtime and grammars are C and are built with it. Nothing else is needed to build: the GUI loads its system libraries at run time, and its fonts are bundled.
+
+```sh
+cargo build --release -p rustode-tui -p rustode-gui -p rustode-cli
+# target/release/rustode-tui, target/release/rustode-gui and target/release/rustode
+```
+
+### Run
 
 ```sh
 cargo run --release -p rustode-tui -- .       # the terminal editor, on this folder
-cargo run --release -p rustode-gui -- .       # the GUI
+cargo run --release -p rustode-gui -- .       # the GUI, on this folder
 cargo run --release -p rustode-cli -- --help  # the `rustode` CLI and `rustode bench`
-cargo nextest run --workspace                 # the test suite
 ```
 
-Settings live in `$XDG_CONFIG_HOME/rustode/User/` (override with `RUSTODE_USER_DIR`), never in a VS Code profile. Before your first commit, install the hooks once: `pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push`. The conventions they check are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Settings live in `$XDG_CONFIG_HOME/rustode/User/` (override with `RUSTODE_USER_DIR`), never in a VS Code profile.
+
+### What a machine needs to run it
+
+| | Needs |
+|---|---|
+| Terminal editor (`rustode-tui`) | a terminal; colors fall back from 24-bit to 256, 16 and none (`NO_COLOR`) |
+| GUI (`rustode-gui`) | a graphics driver that offers Vulkan or EGL; a Wayland or an X11 session; `libxkbcommon`. These are loaded when the program starts (`dlopen`), so they are not build requirements. A machine with no usable graphics adapter gets an error that says so, not a blank window. The fonts (Go Mono and Go Regular) are bundled |
+| Language servers and debug adapters (optional) | the programs themselves, named in `settings.json` under `rustode.languageServers` and `rustode.debugAdapters`; none ships with rustode, and the editor works without them |
+| Extensions (optional) | HTTPS to Open VSX (`open-vsx.org`); nothing else touches the network |
+
+### Develop
+
+Install the hooks once, and read [`CONTRIBUTING.md`](CONTRIBUTING.md), "Setup", for every tool the checks need and why:
+
+```sh
+pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+cargo nextest run --workspace                 # the test suite
+```
 
 ## Documentation
 
@@ -189,7 +215,7 @@ Settings live in `$XDG_CONFIG_HOME/rustode/User/` (override with `RUSTODE_USER_D
 | [`ROADMAP.md`](ROADMAP.md) | milestones M0–M9, key numbers, the Gap Analysis against VS Code, the progress log |
 | [`docs/adr/`](docs/adr/) | decisions: the study's (0001–0006) and the editor's (0007 on) |
 | [`docs/architecture.md`](docs/architecture.md) · [`docs/source-vs-package.md`](docs/source-vs-package.md) | the app's processes and layers · the origin of each packaged file |
-| [`docs/build.md`](docs/build.md) · [`docs/patches.md`](docs/patches.md) · [`docs/qa.md`](docs/qa.md) | how the app was built · every patch · test results |
+| [`docs/build.md`](docs/build.md) · [`docs/patches.md`](docs/patches.md) · [`docs/qa.md`](docs/qa.md) | how the analyzed App was built (not the editor: that is "Get started" above) · every patch · test results |
 | [`docs/gaps.md`](docs/gaps.md) · [`docs/glossary.md`](docs/glossary.md) | open questions (G1…) · project terms |
 | [`docs/templates/`](docs/templates/) · [`docs/learnings/`](docs/learnings/) | document templates · reusable lessons |
 | [`ATTRIBUTION.md`](ATTRIBUTION.md) · [`NOTICE`](NOTICE) | provenance, the behavior studied and reimplemented, the editor's dependencies |
@@ -202,7 +228,7 @@ rustode is young. It edits, searches and shows diagnostics today, and it is not 
 
 - **M1, core and CLI:** done except the CLI's `open` command. The micro-benchmark gate runs on every pull request ([#11](../../pull/11)).
 - **M2, workspace and TUI:** its listed scope is complete.
-- **M3, GUI:** tabs, the explorer, the status bar, width bands, HiDPI and keyboard focus are merged ([#3](../../pull/3), [#8](../../pull/8), [#14](../../pull/14)). The palette, quick open and find are in review ([#16](../../pull/16)). The first like-for-like benchmark against the App comes with M3.
+- **M3, GUI:** tabs, the explorer, the status bar, width bands, HiDPI and keyboard focus are merged ([#3](../../pull/3), [#8](../../pull/8), [#14](../../pull/14)). The palette, quick open and find are merged too ([#16](../../pull/16)). The first like-for-like benchmark against the App comes with M3.
 - **M4–M8:**
   - started: Rust highlighting ([#12](../../pull/12)), language-server diagnostics ([#10](../../pull/10)), workspace search ([#15](../../pull/15)), extension management ([#9](../../pull/9), [#13](../../pull/13));
   - not started: debugging (M7).
