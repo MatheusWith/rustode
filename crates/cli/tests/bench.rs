@@ -1445,3 +1445,35 @@ fn the_traced_scenarios_hand_the_trace_flag_to_the_app_driver_only() {
     .expect("json");
     assert_eq!(gui["config"]["trace"], false);
 }
+
+#[test]
+fn a_machine_too_short_of_memory_for_the_in_process_open_skips_that_step_not_the_run() {
+    let sandbox = Sandbox::new("in-process-skip");
+    // The tiny fixture needs 700 MB (the watchdog's floor); give 600.
+    sandbox.fake_proc(600, &[]);
+    let out = sandbox.bench(&["--side", "rustode"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = sandbox.report();
+    assert_eq!(report["status"], "ok", "a skipped step is not a failed run");
+    assert!(
+        report["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .all(|r| r["metric"] != "workspace_open"),
+        "nothing was measured: {report:#}"
+    );
+    let note = sandbox.note("was not measured");
+    assert!(
+        note.contains("MemAvailable 600 MB is below 700 MB"),
+        "{note}"
+    );
+    assert!(note.contains("skipped"), "{note}");
+    // With enough memory the same run measures it.
+    let sandbox = Sandbox::new("in-process-ok");
+    assert!(sandbox.bench(&["--side", "rustode"]).status.success());
+    assert_eq!(
+        result(&sandbox.report(), "rustode", "workspace_open")["n"],
+        5
+    );
+}

@@ -172,6 +172,8 @@ pub(crate) struct Report<'a> {
     pub tree: Option<TreeSummary>,
     /// The recorded rustode opens, if that side ran and succeeded.
     pub rustode: Option<Vec<Duration>>,
+    /// Why the in-process opens were skipped (too little free memory), if they were.
+    pub rustode_skipped: Option<String>,
     /// The rustode GUI side, if it ran.
     pub gui: Option<gui_side::Outcome>,
     /// The App side, if it ran.
@@ -555,6 +557,14 @@ impl Report<'_> {
                 None,
                 "rustode ran as a debug build; build with --release for numbers worth comparing."
                     .to_owned(),
+            ));
+        }
+        if let Some(why) = &self.rustode_skipped {
+            notes.push((
+                Some("measured"),
+                format!(
+                    "rustode's in-process `Workspace::open` was not measured: {why}. The GUI and App results do not depend on it."
+                ),
             ));
         }
         notes.extend(self.outcome_notes());
