@@ -12,6 +12,7 @@
     )
 )]
 
+mod atomic;
 mod encoding;
 mod eol;
 mod files;
