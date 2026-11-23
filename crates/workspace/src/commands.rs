@@ -90,9 +90,9 @@
 //! (`workbench.files.action.revertLocalChanges`, `fileActions.contribution.ts:200`)
 //! settle a disk conflict ([`Workspace::conflict_prompt`]). VS Code offers
 //! them as notification and editor-title actions, so its labels have no
-//! category; rustode lists them in the palette under "File". "Compare"
-//! (`workbench.files.action.resolveConflict`) opens a diff editor and is not
-//! registered.
+//! category; rustode lists them in the palette under "File". "File: Compare"
+//! (`workbench.files.action.resolveConflict`, `textFileSaveErrorHandler.ts:247`)
+//! shows the disk file against the unsaved text ([`Workspace::conflict_compare`]).
 //! The palette lists matching commands alphabetically; VS Code also puts
 //! recently used ones first and matches word starts
 //! (`AbstractCommandsQuickAccessProvider`), which is not done yet.
@@ -158,6 +158,7 @@ pub const COMMANDS: &[CommandInfo] = &[
         Workbench,
         Some("Ctrl+S"),
     ),
+    command(crate::external::COMPARE, "File: Compare", Editor, None),
     command(crate::external::OVERWRITE, "File: Overwrite", Editor, None),
     command(
         crate::external::REVERT,
@@ -791,6 +792,7 @@ impl Workspace {
         match command {
             "undo" => drop(self.undo(id)?),
             "redo" => drop(self.redo(id)?),
+            crate::external::COMPARE => self.compare_conflict(id)?,
             crate::external::OVERWRITE => self.overwrite_conflict(id)?,
             crate::external::REVERT => {
                 self.resolve_conflict(id, crate::Resolution::ReloadTheirs)?;

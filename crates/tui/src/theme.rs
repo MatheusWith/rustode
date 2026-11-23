@@ -95,6 +95,9 @@ pub(crate) struct Theme {
     pub quick_selected: Style,
     pub highlight: Style,
     pub description: Style,
+    /// Marks of the comparison of a disk conflict: lines only in the unsaved
+    /// text, then lines only in the file; the `+` and `-` carry the meaning too.
+    pub diff: [Style; 2],
     /// Underlines for diagnostics, by severity: error, warning, info, hint.
     pub markers: [Style; 4],
     /// The severity letters (E, W, I) of the gutter and the problems panel.
@@ -112,6 +115,22 @@ fn color(mode: ColorMode, rgb: u32, basic: Color) -> Color {
         ColorMode::Ansi16 => basic,
         ColorMode::None => Color::Reset,
     }
+}
+
+/// The marks of a comparison: green for added lines, red for removed ones;
+/// plain under `NO_COLOR`, where the `+` and `-` carry the meaning.
+fn diff_marks(mode: ColorMode) -> [Style; 2] {
+    let tint = |rgb: u32, basic: Color| {
+        if mode == ColorMode::None {
+            Style::new()
+        } else {
+            Style::new().fg(color(mode, rgb, basic))
+        }
+    };
+    [
+        tint(0x73_C9_91, Color::Green),
+        tint(0xF1_4C_4C, Color::LightRed),
+    ]
 }
 
 impl Theme {
@@ -179,6 +198,7 @@ impl Theme {
                 Style::new().fg(c(0x9D_9D_9D, Color::DarkGray)),
                 Style::new().add_modifier(Modifier::DIM),
             ),
+            diff: diff_marks(mode),
             markers: severity_colors(mode).map(|color| {
                 let underline = Style::new().add_modifier(Modifier::UNDERLINED);
                 if none {

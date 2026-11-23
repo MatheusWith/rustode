@@ -145,6 +145,7 @@ Editor (Phase 2 starts from [finding 0005](09-findings/0005-phase-1-report.md), 
 
 ## Progress log
 
+- **2026-11-23 (editor, compare):** "Compare" for disk conflicts (owner decision: build it now), on branch `feat/conflict-compare`, based on `main` at `3daf3a5`. `workbench.files.action.resolveConflict` ("File: Compare") is the first choice of the conflict prompt and a palette command; it asks the frontend to show a read-only line diff computed by the workspace (`Workspace::conflict_compare`, `crates/workspace/src/compare.rs`, Myers' algorithm written for rustode, no new dependency; tests in `crates/workspace/tests/conflict_compare.rs`), side by side in the GUI and unified in the terminal, from which Overwrite, Revert or Close run. This closes the "no compare view" gap of finding 0005 (feature row 5). Still different from VS Code: the comparison is by lines only, with no changed words marked inside a line (`src/vs/workbench/contrib/files/browser/editors/textFileSaveErrorHandler.ts:254-256` opens VS Code's diff editor); it is a snapshot, stale if the file changes again while it is open; sides over 50,000 lines or 8 MiB, or texts that differ in over 2,000 lines, are not compared and say so; line endings and the final newline are not compared; VS Code's "learn more" notification is not reimplemented (`textFileSaveErrorHandler.ts:259-268`). See [ADR 0034](docs/adr/0034-compare-for-disk-conflicts.md).
 - **2026-11-23 (editor, design rules):** the plan to adopt filmcraft's design rules and to separate responsibilities between the workspace and the frontends started (39 tickets, from the owner's grilling session of 2026-11-19; the plan and its spec live in the local, unversioned `.scratch/design-rules-adoption/`). Branch `docs/design-rules`, rebased onto `a501bb8`, delivers tickets 01 to 03, docs and checks only, no production code:
   - **03, dependency kinds:** `ATTRIBUTION.md` "Editor dependencies" has a Kind column, the missing `regex` row, and `tracing` lists `rustode-gui`; `xtask/tests/attribution.rs` checks it against `cargo metadata`. The hook fixtures in `xtask/tests/hooks.rs` no longer stage into a linked worktree's index.
   - **02, coverage and setup docs:** `cargo xtask coverage` run on 2026-11-23 (branch tip before rebase onto `a501bb8`), exit 0: core 94.3% of 16486 lines (gate 85%), frontends 91.0% of 14345 lines (gate 60%); README "Get started" and CONTRIBUTING "Setup" rewritten, with the audit corrections.
@@ -179,6 +180,7 @@ Editor (Phase 2 starts from [finding 0005](09-findings/0005-phase-1-report.md), 
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-23 | minor | Progress-log entry for "Compare" on disk conflicts (ADR 0034); the other sections were not re-reviewed |
 | 2026-11-23 | minor | Progress-log entry for the design-rules adoption plan (tickets 01 to 03); the other sections were not re-reviewed |
 | 2026-11-23 | major | Editor: Phase 1 complete. Status lines, key numbers, milestones M0–M9, Gap Analysis summary, Next steps for Phase 2, and the Phase 1 report (finding 0005) |
 | 2026-11-18 | minor | Folder and file names renamed to English, evidence folders included |

@@ -65,6 +65,7 @@
 
 mod a11y;
 mod app;
+mod compare;
 mod conflict;
 mod debug;
 mod editor;

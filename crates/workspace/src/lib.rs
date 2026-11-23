@@ -16,6 +16,7 @@ pub mod bench;
 mod bulk_edit;
 mod child;
 mod commands;
+mod compare;
 mod config;
 mod dap;
 mod document;
@@ -39,6 +40,10 @@ pub use config::{
 };
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
+pub use compare::{
+    COMPARE_LINE_CHARS, COMPARE_MAX_BYTES, COMPARE_MAX_CHANGES, COMPARE_MAX_LINES, ConflictCompare,
+    DiffKind, DiffLine, SideBySide, SideCell, SideRow,
+};
 pub use dap::{
     BreakpointDraft, BreakpointInfo, BreakpointInput, BreakpointKind, BreakpointSpec,
     CONTINUE_COMMAND, ConsoleKind, ConsoleLine, DebugError, DebugState, DebugStatus, DebugTree,
@@ -152,6 +157,13 @@ pub enum Event {
     /// [`Resolution::KeepMine`].
     Conflict {
         /// The document.
+        id: DocumentId,
+    },
+    /// `workbench.files.action.resolveConflict` ran: show the comparison of
+    /// the document's file with its unsaved text
+    /// ([`Workspace::conflict_compare`]).
+    CompareConflict {
+        /// The document in conflict.
         id: DocumentId,
     },
     /// A document's language changed: the user picked one, or

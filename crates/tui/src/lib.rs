@@ -21,6 +21,7 @@
 
 mod app;
 mod breakpoint;
+mod compare;
 mod conflict;
 mod debug;
 mod extensions;
