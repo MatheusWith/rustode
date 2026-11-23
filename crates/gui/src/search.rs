@@ -226,6 +226,23 @@ impl Panel {
         self.focus_query = true;
     }
 
+    /// The benchmark hook's search: shows the panel, fills its boxes with the
+    /// script's and runs it, as pressing Enter in the search box would.
+    pub(crate) fn run_script(
+        &mut self,
+        workspace: &mut Workspace,
+        script: &rustode_workspace::bench::SearchScript,
+    ) {
+        self.shown = true;
+        // As Ctrl+Shift+F does: focus leaves the explorer for the search box.
+        self.focus_query = true;
+        self.query.clone_from(&script.pattern);
+        self.include.clone_from(&script.include);
+        self.exclude.clone_from(&script.exclude);
+        self.options.regex = script.regex;
+        self.run(workspace);
+    }
+
     /// Starts a search for the boxes' text; a running one stops first.
     fn run(&mut self, workspace: &mut Workspace) {
         let find = match FindQuery::new(&self.query, self.options) {

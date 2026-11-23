@@ -23,6 +23,8 @@ Options:
   --project <DIR>       the folder with 01-app/ and 02-package-analysis/ [default: .]
   --app-copy-dir <DIR>  where the App copy and profiles go, on disk [default: the run folder]
   --gui-bin <FILE>      the rustode GUI for launch scenarios [default: rustode-gui next to this binary]
+  --no-app-trace        do not record the Chromium trace of the App's first presented frame
+                        (the control run that bounds the trace's overhead)
   -h, --help            print this help
 
 Environment:
@@ -83,6 +85,8 @@ pub(crate) struct Options {
     pub gui_bin: Option<PathBuf>,
     /// The scenario id.
     pub scenario: Option<String>,
+    /// Leave out the App's Chromium trace even if the scenario asks for it.
+    pub no_app_trace: bool,
 }
 
 /// Parses the arguments after `bench`. A repeated option keeps its last value.
@@ -96,6 +100,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, Failure> {
         app_copy_dir: None,
         gui_bin: None,
         scenario: None,
+        no_app_trace: false,
     };
     let (mut help, mut list, mut dry_run) = (false, false, false);
     let mut rest = args.iter();
@@ -108,6 +113,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, Failure> {
             "-h" | "--help" => help = true,
             "--list" => list = true,
             "--dry-run" => dry_run = true,
+            "--no-app-trace" => options.no_app_trace = true,
             "--side" | "--scenarios" | "--out" | "--project" | "--app-copy-dir" | "--gui-bin" => {
                 let value = inline
                     .or_else(|| rest.next().cloned())

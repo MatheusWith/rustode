@@ -54,7 +54,7 @@ pub(crate) struct DriverResults {
 }
 
 /// One launch of the App, times in ms from its spawn.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Launch {
     /// `warmup-N` or `rep-N`.
     pub label: String,
@@ -67,6 +67,9 @@ pub(crate) struct Launch {
     pub spawn_to_workbench_ms: Option<f64>,
     /// The fixture's first line rendered.
     pub spawn_to_first_line_ms: Option<f64>,
+    /// App, `search`: the opened folder's rows in the explorer.
+    #[serde(default)]
+    pub spawn_to_folder_ms: Option<f64>,
     /// SIGTERM until no App process is left.
     pub shutdown_ms: Option<f64>,
     /// The App did not exit within 10 s of SIGTERM.
@@ -106,6 +109,94 @@ pub(crate) struct Launch {
     /// App: what the workbench said when it could not show the file.
     #[serde(default)]
     pub complaint: Option<String>,
+    /// `edits`: the document's chars before the script.
+    #[serde(default)]
+    pub edit_start_chars: Option<u64>,
+    /// `edits`: the inserts alone, in ms.
+    #[serde(default)]
+    pub edit_apply_ms: Option<f64>,
+    /// `edits`: from before the first insert to the end of the next frame, in ms.
+    #[serde(default)]
+    pub edit_apply_frame_ms: Option<f64>,
+    /// `edits`: the document's chars after the inserts.
+    #[serde(default)]
+    pub edit_applied_chars: Option<u64>,
+    /// `edits`: FNV-1a 32 of the text after the inserts.
+    #[serde(default)]
+    pub edit_applied_hash: Option<String>,
+    /// `edits`: all the undo steps alone, in ms.
+    #[serde(default)]
+    pub edit_undo_ms: Option<f64>,
+    /// `edits`: from before the first undo to the end of the next frame, in ms.
+    #[serde(default)]
+    pub edit_undo_frame_ms: Option<f64>,
+    /// `edits`: how many undo steps there were.
+    #[serde(default)]
+    pub edit_undo_steps: Option<u64>,
+    /// `edits`: the document's chars after the undo.
+    #[serde(default)]
+    pub edit_undone_chars: Option<u64>,
+    /// `edits`: FNV-1a 32 of the text after the undo.
+    #[serde(default)]
+    pub edit_undone_hash: Option<String>,
+    /// `search`: from the command to the first result shown, in ms.
+    #[serde(default)]
+    pub search_first_ms: Option<f64>,
+    /// `search`: from the command to the final results shown, in ms.
+    #[serde(default)]
+    pub search_complete_ms: Option<f64>,
+    /// App, `search`: from the command to the result message, in ms.
+    #[serde(default)]
+    pub search_message_ms: Option<f64>,
+    /// `search`: files with matches.
+    #[serde(default)]
+    pub search_files: Option<u64>,
+    /// `search`: matches.
+    #[serde(default)]
+    pub search_matches: Option<u64>,
+    /// GUI, `search`: whether the result limit was hit.
+    #[serde(default)]
+    pub search_limit_hit: Option<bool>,
+    /// App, `search`: the search view's message.
+    #[serde(default)]
+    pub search_message: Option<String>,
+    /// GUI, `search`: the search state at the end.
+    #[serde(default)]
+    pub search_state: Option<String>,
+    /// `edits` and `search`: sum over the editor's processes of their
+    /// `VmHWM` before the script.
+    #[serde(default)]
+    pub start_hwm_sum_mb: Option<f64>,
+    /// The largest single process's `VmHWM` before the script.
+    #[serde(default)]
+    pub start_hwm_max_mb: Option<f64>,
+    /// Sum of the processes' `VmHWM` after the script.
+    #[serde(default)]
+    pub peak_hwm_sum_mb: Option<f64>,
+    /// The largest single process's `VmHWM` after the script.
+    #[serde(default)]
+    pub peak_hwm_max_mb: Option<f64>,
+    /// App, traced: the first line entered the DOM (a `performance.mark` in the trace).
+    #[serde(default)]
+    pub spawn_to_dom_mark_ms: Option<f64>,
+    /// App, traced: the first frame the display compositor began drawing after the mark.
+    #[serde(default)]
+    pub spawn_to_first_swap_start_ms: Option<f64>,
+    /// App, traced: the end of that frame's `Display::DrawAndSwap` (the swap returned).
+    #[serde(default)]
+    pub spawn_to_first_swap_ms: Option<f64>,
+    /// App, traced: the same, counted from the mark.
+    #[serde(default)]
+    pub first_swap_after_dom_ms: Option<f64>,
+    /// App, traced: the end of the second frame drawn after the mark.
+    #[serde(default)]
+    pub spawn_to_second_swap_ms: Option<f64>,
+    /// App, traced: how many frames the display compositor drew in the trace.
+    #[serde(default)]
+    pub trace_frames_drawn: Option<u32>,
+    /// App, traced: why the trace gave no frame.
+    #[serde(default)]
+    pub trace_error: Option<String>,
     /// Cold launches: how many eviction attempts it took.
     #[serde(default)]
     pub evict_attempts: Option<u32>,
@@ -312,8 +403,12 @@ pub(super) fn driver_config(
 ) -> serde_json::Value {
     let s = |path: &Path| path.to_string_lossy().into_owned();
     let launch = plan.scenario.launch;
-    let measure = launch.map_or("open", |l| l.measure.as_str());
-    json!({
+    let measure = match plan.scenario.kind {
+        Kind::EditUndo => "edits",
+        Kind::Search => "search",
+        Kind::OpenFile | Kind::Launch => launch.map_or("open", |l| l.measure.as_str()),
+    };
+    let mut config = json!({
         "schema": "rustode-bench-app-driver/2",
         "target": target,
         "measure": measure,
@@ -327,9 +422,17 @@ pub(super) fn driver_config(
         "fixture": s(&plan.fixture()),
         "first_line": plan.first_line(),
         "cdp_port": CDP_PORT,
+        "trace": target == "app" && plan.app_trace,
         "min_available_mb": MIN_AVAILABLE_MB,
         "evict_script": s(&plan.evict_script()),
-    })
+    });
+    if let Some(mut script) = plan.script() {
+        if plan.scenario.kind == Kind::EditUndo {
+            script["start_chars"] = json!(plan.scenario.fixture.bytes);
+        }
+        config["script"] = script;
+    }
+    config
 }
 
 fn launch(plan: &Plan, profiles: &Path) -> Result<(ExitStatus, Option<DriverResults>), String> {

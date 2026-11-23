@@ -2,6 +2,7 @@
 //! the explorer, as `rustode-tui` does, with the user's settings
 //! (`RUSTODE_USER_DIR`, else `$XDG_CONFIG_HOME/rustode/User`).
 
+use rustode_workspace::bench::{SCRIPT_ENV, Script};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -69,6 +70,15 @@ fn open(paths: &[PathBuf]) -> ExitCode {
         }
     };
     app.load_user_config(&user_dir());
+    // `rustode bench`'s hook: a script the window runs on itself, no keys.
+    match Script::from_env_value(std::env::var_os(SCRIPT_ENV).as_deref()) {
+        Ok(Some(script)) => app.run_bench_script(script),
+        Ok(None) => {}
+        Err(err) => {
+            eprintln!("error: {err}");
+            return ExitCode::from(2);
+        }
+    }
     // The user's own settings are loaded, so a built-in server starts only
     // for a language they leave alone.
     app.workspace_mut()

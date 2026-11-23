@@ -24,7 +24,15 @@
 #   of 3 and a GUI side. New: `open-file-100mb`, `open-file-1gb`,
 #   `startup-cold`, `startup-warm`, `idle-rss`. Typing latency is not in the
 #   list: it waits for ADR 0028 (AGENTS.md section 11.5.5).
-version = 2
+# - 3 (ticket 42, M9): the rest of ADR 0024's list. New kinds and scenarios:
+#   `edit-undo-10k` (10k seeded random inserts on a 1 MiB file, then undo of
+#   all of them) and `search-monorepo` (one regex over a generated tree of
+#   5,000 source files), both run by each editor through its own API with no
+#   key sent. The meaning of the existing scenarios is unchanged; the App's
+#   launch driver now also records the App's first presented frame from a
+#   Chromium trace (gaps.md G22), as extra fields, so list 2 reports and list 3
+#   reports are comparable for them.
+version = 3
 
 [[scenario]]
 id = "open-file-1mb"
@@ -67,6 +75,8 @@ timeout_s = 60
 poll_ms = 10
 driver = "launch.cjs"
 settings = "app/settings.json"
+# Chromium trace of the first presented frame (gaps.md G22).
+trace = true
 
 [[scenario]]
 id = "open-file-100mb"
@@ -93,6 +103,8 @@ timeout_s = 120
 poll_ms = 10
 driver = "launch.cjs"
 settings = "app/settings.json"
+# Chromium trace of the first presented frame (gaps.md G22).
+trace = true
 
 # A launch that never reaches its end point (the editor refuses, runs out of
 # memory or times out) is a result for the open-file scenarios, not a harness
@@ -122,6 +134,8 @@ timeout_s = 180
 poll_ms = 50
 driver = "launch.cjs"
 settings = "app/settings.json"
+# Chromium trace of the first presented frame (gaps.md G22).
+trace = true
 
 # Launch scenarios have no in-process side. The fixture is small (4 KiB) and
 # is the same file on both command lines, so each editor shows a file in its
@@ -153,6 +167,8 @@ timeout_s = 60
 poll_ms = 10
 driver = "launch.cjs"
 settings = "app/settings.json"
+# Chromium trace of the first presented frame (gaps.md G22).
+trace = true
 
 [[scenario]]
 id = "startup-warm"
@@ -179,6 +195,8 @@ timeout_s = 60
 poll_ms = 10
 driver = "launch.cjs"
 settings = "app/settings.json"
+# Chromium trace of the first presented frame (gaps.md G22).
+trace = true
 
 # Idle memory: Rss and Pss of every process of the editor, `settle_s` seconds
 # after it is ready, with nothing typed or clicked.
@@ -205,6 +223,81 @@ timeout_s = 60
 warmup = 1
 repetitions = 5
 timeout_s = 60
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+# Chromium trace of the first presented frame (gaps.md G22).
+trace = true
+
+# 10k random inserts, then undo of all of them (ADR 0024). Both editors open
+# the 1 MiB file; once the editor is ready (rustode: its first frame; the App:
+# the first line shown) the script runs on the editor's own text model, with
+# no key sent: the GUI runs it on itself (`RUSTODE_BENCH_SCRIPT`,
+# `rustode_workspace::bench`), the App is driven over CDP
+# (`bench/app_internals.cjs`). The inserts are one letter each, at offsets from
+# a seeded generator both sides implement, each its own undo step. Reported:
+# the inserts, and from before them to the end of the next frame; the same for
+# the undo of all; peak memory; and a hash of the text after each step, which
+# must be equal on both sides.
+[[scenario]]
+id = "edit-undo-10k"
+title = "10,000 random inserts into a 1 MiB file, then undo of all of them"
+kind = "edit-undo"
+
+[scenario.fixture]
+bytes = 1_048_576
+line_bytes = 80
+
+[scenario.edits]
+seed = 1
+count = 10_000
+
+[scenario.gui]
+warmup = 1
+repetitions = 5
+timeout_s = 300
+
+[scenario.app]
+warmup = 1
+repetitions = 5
+timeout_s = 300
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+# A regex search over a generated monorepo (ADR 0024). `fixture.bytes` and
+# `line_bytes` are those of each source file: 5,000 files of 16 KiB (80 MB),
+# plus node_modules, generated and log files that the default excludes and the
+# tree's .gitignore must hide, and a `legacy` folder that the exclude must hide.
+# The query is the one the generator's oracle counts for (fixture.rs,
+# CANONICAL_*): written to mean the same in the Rust `regex` crate and in
+# ripgrep (ASCII classes). Both editors search through their own search service.
+[[scenario]]
+id = "search-monorepo"
+title = "Regex search over a generated monorepo of 5,000 source files"
+kind = "search"
+
+[scenario.fixture]
+bytes = 16_384
+line_bytes = 80
+
+[scenario.search]
+files = 5000
+seed = 1
+pattern = '\bhandle_[a-z]+_[0-9]{3}\b'
+regex = true
+include = "**/*.ts,**/*.rs"
+exclude = "**/legacy/**"
+
+[scenario.gui]
+warmup = 1
+repetitions = 5
+timeout_s = 300
+
+[scenario.app]
+warmup = 1
+repetitions = 5
+timeout_s = 300
 poll_ms = 10
 driver = "launch.cjs"
 settings = "app/settings.json"

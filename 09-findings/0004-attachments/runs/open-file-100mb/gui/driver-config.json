@@ -1,0 +1,59 @@
+{
+  "schema": "rustode-bench-app-driver/2",
+  "target": "gui",
+  "measure": "open",
+  "cache": "warm",
+  "settle_s": 0,
+  "timeout_is_result": true,
+  "qa_root": "<qa>",
+  "playwright_core": "<qa>/../node_modules/playwright-core",
+  "out_dir": "<runs>/2026-11-23-122321-open-file-100mb/gui",
+  "profiles_root": "<runs>/2026-11-23-122321-open-file-100mb/gui/profiles",
+  "fixture": "<runs>/2026-11-23-122321-open-file-100mb/fixtures/open-file-100mb.txt",
+  "first_line": "00000001 the quick brown fox jumps over the lazy dog the quick brown fox jumps.",
+  "cdp_port": 9333,
+  "trace": false,
+  "min_available_mb": 2000,
+  "evict_script": "<clone>/bench/evict.py",
+  "warmup": 1,
+  "repetitions": 5,
+  "timeout_ms": 120000,
+  "poll_ms": 5,
+  "app_command": [
+    "<target>/release/rustode-gui",
+    "<runs>/2026-11-23-122321-open-file-100mb/fixtures/open-file-100mb.txt"
+  ],
+  "sampler_command": [
+    "python3",
+    "-I",
+    "<qa>/suite/collectors/sampler.py",
+    "--pid",
+    "{pid}",
+    "--interval",
+    "1",
+    "--out",
+    "{rep_dir}/sampler.jsonl",
+    "--abort-below-mb",
+    "700",
+    "--abort-psi",
+    "40"
+  ],
+  "env": {
+    "GALLIUM_DRIVER": "llvmpipe",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "RUSTODE_REPORT_FIRST_FRAME": "1",
+    "RUSTODE_USER_DIR": "{profile}/user",
+    "VK_ICD_FILENAMES": "/nonexistent",
+    "WGPU_BACKEND": "gl",
+    "XDG_CACHE_HOME": "{profile}/cache",
+    "XDG_CONFIG_HOME": "{profile}/config",
+    "XDG_DATA_HOME": "{profile}/data",
+    "XDG_STATE_HOME": "{profile}/state",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+    "__GLX_VENDOR_LIBRARY_NAME": "mesa"
+  },
+  "evict_paths": [
+    "<target>/release/rustode-gui"
+  ],
+  "cache_reference": "<target>/release/rustode-gui"
+}

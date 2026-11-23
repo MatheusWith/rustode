@@ -1,0 +1,57 @@
+rustode bench report
+
+run         2026-11-23-123453-startup-warm
+status      ok
+command     <target>/release/rustode bench startup-warm --scenarios bench/scenarios.toml --project <project> --out <runs> --app-copy-dir <copies> --gui-bin <target>/release/rustode-gui --no-app-trace --side app
+folder      <clone>
+run folder  <runs>/2026-11-23-123453-startup-warm
+scenario    startup-warm: Startup to first frame, warm file cache (bench/scenarios.toml, list version 3)
+time        2026-11-23T12:34:53Z to 2026-11-23T12:36:49Z (UTC)
+
+inputs (from the scenario list; not results)
+  fixture     fixtures/startup-warm.txt: 4096 bytes, numbered ASCII lines of 80 bytes with LF; sha256 796f8be2756ba605c4a9cca89f5e1eafe8c89ef5701cb468ef014cd4e54009e5
+  rustode GUI 1 warm-up + 20 recorded launches; timeout 60 s each
+  launch      measures startup; warm cache (editor files left in the page cache by the previous launch)
+  App         1 warm-up + 20 recorded launches; timeout 60 s each; first line checked every 10 ms
+  guards      the App starts only with MemAvailable >= 2000 MB; the QA watchdog aborts it below 700 MB, or with PSI some avg10 > 40 for 5 samples
+
+environment (measured at the start of the run)
+  rustode     0.1.0, git 6d7b04e50f98 (clean), release build
+  App         1.147.0, commit 22d8dccf0f29c4c824501c342e4d3c8a69776214, x64 (02-package-analysis/version.txt)
+  machine     Linux 7.3.4-arch1-2; 11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz; 12 CPUs; MemTotal 7708 MB; MemAvailable 3189 MB
+
+App integrity (<project>/01-app/VSCode-linux-x64 against <project>/02-package-analysis/manifest-sha256.txt; measured)
+  before      ok: 3008 listed files match, 0 files outside the manifest
+  copy        ok: 3008 listed files match, 0 files outside the manifest (<copies>/rustode-bench-app.e4702880025b4a49/VSCode-linux-x64)
+  after       ok: 3008 listed files match, 0 files outside the manifest
+  The App ran from a verified copy outside 01-app/, deleted after the run.
+  The App added 0 files to its copy during the run (measured; app/copy-writes.txt).
+  rendering   gl_renderer=ANGLE (Mesa, llvmpipe (LLVM 23.1.4 256 bits), OpenGL ES 3.2 Mesa 26.2.7-arch1.1); gl_implementation=(gl=egl-angle,angle=opengl); gpu_compositing=unavailable_off; opengl=unavailable_off; vulkan=disabled_off
+  driver      Node v24.22.1, playwright-core 1.61.0-alpha-2026-06-04; status ok
+
+results (nearest-rank percentiles)
+  side     metric                     unit   n        min        p50        p95        max  label
+  App      launch to CDP endpoint     ms    20        210        215        298        302  measured
+  App      launch to first paint      ms    20       1767       1798       1878       1888  measured
+  App      launch to workbench        ms    20       1753       1788       1868       1879  measured
+  App      launch to first line shown ms    20       1856       1891       1972       1984  measured
+  App      workbench to first line    ms    20         96        103        112        112  measured
+  App      shutdown after SIGTERM     ms    20        210        271        351       2172  measured
+  App      peak RSS, all processes    MB    20       1295       1329       1368       1474  measured
+  App      RSS at first line          MB    20       1233       1272       1298       1312  measured
+  App      PSS at first line          MB    20        586        605        616        623  measured
+
+what the results measure
+  - App launch to CDP endpoint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to its CDP endpoint answering `/json/version`, checked every 25 ms
+  - App launch to first paint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to Chromium's first contentful paint in the workbench page (`performance` paint timing, a wall-clock time read over CDP, minus the wall-clock time of the spawn): the first frame with content that Chromium painted, which can be before the editor is usable
+  - App launch to workbench: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's "workbench ready"
+  - App launch to first line shown: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the fixture's first line rendered in an editor `.view-line`, checked every 10 ms over CDP; includes Electron and workbench startup, reading the file and rendering it on the virtual display
+  - App workbench to first line: the two previous times subtracted, per launch: what the App spends after its editor part exists until the first line shows
+  - App shutdown after SIGTERM: SIGTERM to the App's main process until no process of its profile is left (SIGKILL after 10 s), as the QA startup benchmark does
+  - App peak RSS, all processes: the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py); the App is stopped about a second after its first line, so this is one to three samples: prefer the RSS at the first line
+  - App RSS at first line: summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup right after the first line was seen (the App is still starting some processes then); shared pages are counted once per process
+  - App PSS at first line: summed `Pss` of the same processes at the same moment
+
+notes
+  - (estimated) Each App time is late by up to one polling interval plus one CDP round trip: about 10 ms for the first line and 25 ms for the CDP endpoint and the workbench (estimated from the polling intervals, not measured).
+  - The two editors have no common 'first frame' event: rustode's is the return from its first wgpu present, the App's closest events are Chromium's first contentful paint and the first fixture line seen in the DOM (polled over CDP). The comparison is therefore approximate: read the rustode number against the interval between the App's two, and do not divide one by the other. When the App launches were traced (rows 'launch to first swap' and 'launch to second swap'), the first swap is the closest counterpart of rustode's first frame: the display compositor's first drawn-and-swapped frame after the first line entered the DOM (gaps.md G22); say which event a ratio uses, and that the swap may be one frame early (the second swap bounds it). Both editors ran on the same virtual display with software rendering, with the same fixture on their command line.

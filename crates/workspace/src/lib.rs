@@ -1,5 +1,6 @@
 //! The single in-process API that every frontend uses.
 
+pub mod bench;
 mod bulk_edit;
 mod child;
 mod commands;

@@ -160,9 +160,7 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
     };
     let environment = Environment::read(plan);
     create_run_folder(plan)?;
-    fixture::write(&plan.fixture(), plan.scenario.fixture)
-        .map_err(|err| Failure::Run(format!("cannot write the fixture: {err}")))?;
-    let fixture_sha256 = sha256(&plan.fixture());
+    let (fixture_sha256, tree) = write_fixture(plan)?;
     let mut status = Status::Ok;
     let mut reasons = Vec::new();
     let gui = if plan.runs_gui() && status == Status::Ok {
@@ -193,7 +191,7 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
     }
     // Last, because the 1 GiB open leaves this process's heap large (the
     // allocator keeps freed memory), which would starve the launches after it.
-    let rustode = measure_in_process(plan, &mut status, &mut reasons);
+    let (rustode, rustode_skipped) = measure_in_process(plan, &mut status, &mut reasons);
     let (run_id, run_folder) = finish_folder(plan, status, &mut reasons);
     let report = Report {
         plan,
@@ -204,7 +202,9 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
         reasons,
         environment,
         fixture_sha256,
+        tree,
         rustode,
+        rustode_skipped,
         gui,
         app,
     };
@@ -212,26 +212,44 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
     Ok(status.code())
 }
 
+/// Writes the scenario's fixture: a file (with its SHA-256) or, for a
+/// `search` scenario, the monorepo (with its summary).
+fn write_fixture(plan: &Plan) -> Result<(Option<String>, Option<fixture::TreeSummary>), Failure> {
+    let cannot = |err: std::io::Error| Failure::Run(format!("cannot write the fixture: {err}"));
+    match &plan.scenario.search {
+        Some(search) if plan.scenario.kind == scenario::Kind::Search => {
+            let tree = fixture::write_tree(&plan.fixture(), search, plan.scenario.fixture)
+                .map_err(cannot)?;
+            Ok((None, Some(tree)))
+        }
+        _ => {
+            fixture::write(&plan.fixture(), plan.scenario.fixture).map_err(cannot)?;
+            Ok((sha256(&plan.fixture()), None))
+        }
+    }
+}
+
 /// The in-process side of an `open-file` scenario: the recorded opens, or
-/// `None` with `status` and `reasons` set when it did not run or failed.
+/// `None` with `status` and `reasons` set when it failed. When the machine
+/// has too little free memory for it the step is skipped, not the run: the
+/// second value says why, the GUI and App results stay valid, and the report
+/// says the in-process figure was not measured.
 fn measure_in_process(
     plan: &Plan,
     status: &mut Status,
     reasons: &mut Vec<String>,
-) -> Option<Vec<Duration>> {
+) -> (Option<Vec<Duration>>, Option<String>) {
     if !plan.runs_in_process() || *status != Status::Ok {
-        return None;
+        return (None, None);
     }
     if let Err(reason) = enough_for_in_process(plan) {
-        *status = Status::Refused;
-        reasons.push(reason);
-        return None;
+        return (None, Some(reason));
     }
     eprintln!(
         "bench: rustode: {} + {} opens of the fixture",
         plan.scenario.rustode.warmup, plan.scenario.rustode.repetitions
     );
-    rustode_side::open_file(
+    let opens = rustode_side::open_file(
         &plan.fixture(),
         plan.scenario.fixture.bytes,
         plan.scenario.rustode,
@@ -240,7 +258,8 @@ fn measure_in_process(
         *status = Status::Failed;
         reasons.push(err);
     })
-    .ok()
+    .ok();
+    (opens, None)
 }
 
 /// The in-process open holds the file, its buffer and the hashing's copy at
@@ -251,7 +270,7 @@ fn enough_for_in_process(plan: &Plan) -> Result<(), String> {
     let available = guard::mem_available_mb(&plan.proc_dir)?;
     if available < need_mb {
         return Err(format!(
-            "MemAvailable {available} MB is below {need_mb} MB (3 x the {} byte fixture + {} MB), the in-process open does not start",
+            "MemAvailable {available} MB is below {need_mb} MB (3 x the {} byte fixture + {} MB), the in-process open is skipped",
             plan.scenario.fixture.bytes,
             guard::ABORT_BELOW_MB
         ));

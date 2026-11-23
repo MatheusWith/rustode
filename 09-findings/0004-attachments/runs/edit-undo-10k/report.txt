@@ -1,0 +1,110 @@
+rustode bench report
+
+run         2026-11-23-122615-edit-undo-10k
+status      ok
+command     <target>/release/rustode bench edit-undo-10k --scenarios bench/scenarios.toml --project <project> --out <runs> --app-copy-dir <copies> --gui-bin <target>/release/rustode-gui
+folder      <clone>
+run folder  <runs>/2026-11-23-122615-edit-undo-10k
+scenario    edit-undo-10k: 10,000 random inserts into a 1 MiB file, then undo of all of them (bench/scenarios.toml, list version 3)
+time        2026-11-23T12:26:15Z to 2026-11-23T12:29:32Z (UTC)
+
+inputs (from the scenario list; not results)
+  fixture     fixtures/edit-undo-10k.txt: 1048576 bytes, numbered ASCII lines of 80 bytes with LF; sha256 54a80bcaaef88ce7a953f7e80fa88b70d61a67936038e8fe64eabff7707ada26
+  edits       10000 single-letter inserts at seeded random offsets (mulberry32 seed 1), each its own undo step, then every step undone
+  rustode GUI 1 warm-up + 5 recorded launches; timeout 300 s each
+  App         1 warm-up + 5 recorded launches; timeout 300 s each; first line checked every 10 ms
+  guards      the App starts only with MemAvailable >= 2000 MB; the QA watchdog aborts it below 700 MB, or with PSI some avg10 > 40 for 5 samples
+
+environment (measured at the start of the run)
+  rustode     0.1.0, git 6d7b04e50f98 (clean), release build
+  App         1.147.0, commit 22d8dccf0f29c4c824501c342e4d3c8a69776214, x64 (02-package-analysis/version.txt)
+  machine     Linux 7.3.4-arch1-2; 11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz; 12 CPUs; MemTotal 7708 MB; MemAvailable 3519 MB
+
+rustode GUI (measured)
+  binary      <target>/release/rustode-gui (release build, from its path); rustode-gui 0.1.0; sha256 3f3a3e96b70e13fd2c534090af7f7f2c345035a5570d9a4904680b5a7715ea95
+  rendering   WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe VK_ICD_FILENAMES=/nonexistent
+  driver      Node v24.22.1; status ok
+
+App integrity (<project>/01-app/VSCode-linux-x64 against <project>/02-package-analysis/manifest-sha256.txt; measured)
+  before      ok: 3008 listed files match, 0 files outside the manifest
+  copy        ok: 3008 listed files match, 0 files outside the manifest (<copies>/rustode-bench-app.d416e1ccc93a3ae9/VSCode-linux-x64)
+  after       ok: 3008 listed files match, 0 files outside the manifest
+  The App ran from a verified copy outside 01-app/, deleted after the run.
+  The App added 0 files to its copy during the run (measured; app/copy-writes.txt).
+  rendering   gl_renderer=ANGLE (Mesa, llvmpipe (LLVM 23.1.4 256 bits), OpenGL ES 3.2 Mesa 26.2.7-arch1.1); gl_implementation=(gl=egl-angle,angle=opengl); gpu_compositing=disabled_software; opengl=unavailable_off; vulkan=disabled_off
+  driver      Node v24.22.1, playwright-core 1.61.0-alpha-2026-06-04; status ok
+
+results (nearest-rank percentiles)
+  side     metric                     unit   n        min        p50        p95        max  label
+  rustode  launch to first frame      ms     5        150        152        153        153  measured
+  rustode  main to first frame        ms     5        147        150        151        151  measured
+  rustode  shutdown after SIGTERM     ms     5         60         61         62         62  measured
+  rustode  peak RSS, all processes    MB     5         81         81         83         83  measured
+  rustode  RSS at first frame         MB     5        135        136        136        136  measured
+  rustode  PSS at first frame         MB     5        110        110        111        111  measured
+  rustode  10k inserts, applying      ms     5       13.5       13.8       13.8       13.8  measured
+  rustode  10k inserts, to next frame ms     5       23.2       23.5       23.6       23.6  measured
+  rustode  undo of all, applying      ms     5       10.7       10.8       11.1       11.1  measured
+  rustode  undo of all, to next frame ms     5       17.4       17.9       18.2       18.2  measured
+  rustode  undo steps                 n      5      10000      10000      10000      10000  measured
+  rustode  peak RSS before the script MB     5      135.4      135.6      136.1      136.1  measured
+  rustode  peak RSS after the script  MB     5      144.0      144.2      144.5      144.5  measured
+  rustode  peak RSS, largest process  MB     5      144.0      144.2      144.5      144.5  measured
+  App      launch to CDP endpoint     ms     5        213        218        286        286  measured
+  App      launch to first paint      ms     5       1791       1799       1801       1801  measured
+  App      launch to workbench        ms     5       1781       1788       1792       1792  measured
+  App      launch to first line shown ms     5       1909       1911       1927       1927  measured
+  App      workbench to first line    ms     5        118        128        137        137  measured
+  App      shutdown after SIGTERM     ms     5        211        275        279        279  measured
+  App      peak RSS, all processes    MB     5       2000       2022       2122       2122  measured
+  App      RSS at first line          MB     5       1137       1158       1171       1171  measured
+  App      PSS at first line          MB     5        588        601        608        608  measured
+  App      10k inserts, applying      ms     5     8710.5     9338.5     9470.6     9470.6  measured
+  App      10k inserts, to next frame ms     5     8870.7     9489.8     9625.0     9625.0  measured
+  App      undo of all, applying      ms     5     8963.6     9773.5     9989.9     9989.9  measured
+  App      undo of all, to next frame ms     5     9287.0    10074.9    10286.0    10286.0  measured
+  App      undo steps                 n      5      10000      10000      10000      10000  measured
+  App      peak RSS before the script MB     5     1178.5     1194.1     1203.8     1203.8  measured
+  App      peak RSS after the script  MB     5     2198.8     2245.5     2313.2     2313.2  measured
+  App      peak RSS, largest process  MB     5     1116.6     1155.8     1168.0     1168.0  measured
+
+what the results measure
+  - rustode launch to first frame: from spawning `rustode-gui` (release build, the fixture on its command line, a fresh profile folder, software rendering) to the arrival of the line the GUI prints after returning from its first `RedrawRequested` (eframe has painted and called `wgpu::Queue::present`); the driver's clock, the same one the App's times use. The file is already open in that frame, because the GUI opens its arguments before it creates the window
+  - rustode main to first frame: the GUI's own `Instant`: from `rustode_trace::init_from_env` (the first thing `main` does) to the same first present; it leaves out exec, dynamic linking and the driver's pipe
+  - rustode shutdown after SIGTERM: SIGTERM to the GUI process until no process of its tree is left (SIGKILL after 10 s)
+  - rustode peak RSS, all processes: the largest total RSS of the GUI's process tree in the QA watchdog's 1 s samples (collectors/sampler.py); the GUI is stopped as soon as its first frame arrives, so this is usually one sample taken at the start: prefer the RSS at the first frame
+  - rustode RSS at first frame: summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup right after the first-frame line arrived: the memory of the open file and the first frame
+  - rustode PSS at first frame: summed `Pss` of the same processes at the same moment
+  - rustode 10k inserts, applying: applying every seeded insert through `Workspace::replace` for each insert (a char offset, its own undo step), run by the GUI on itself after its first frame (`RUSTODE_BENCH_SCRIPT`, no key sent); the inserts alone
+  - rustode 10k inserts, to next frame: from before the first insert to the end of the next frame (the return from the `RedrawRequested` of the frame that follows the step, on `std::time::Instant`); includes the inserts
+  - rustode undo of all, applying: undoing every step until none is left (`Workspace::undo` / `TextModel.undo` in a loop); the undo alone
+  - rustode undo of all, to next frame: from before the first undo to the end of the next frame (the return from the `RedrawRequested` of the frame that follows the step, on `std::time::Instant`); includes the undo
+  - rustode undo steps: how many undo steps there were (one per insert)
+  - rustode peak RSS before the script: sum over the editor's processes of `VmHWM` (the kernel's peak resident size) read from /proc/<pid>/status right before the script: the startup and file-open peak; the sum over several processes is an upper bound of their simultaneous peak
+  - rustode peak RSS after the script: the same sum of `VmHWM` read right after the script: the peak of the whole launch including the script; same caveat
+  - rustode peak RSS, largest process: the largest single process's `VmHWM` after the script (for the App, the renderer that holds the model)
+  - App launch to CDP endpoint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to its CDP endpoint answering `/json/version`, checked every 25 ms
+  - App launch to first paint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to Chromium's first contentful paint in the workbench page (`performance` paint timing, a wall-clock time read over CDP, minus the wall-clock time of the spawn): the first frame with content that Chromium painted, which can be before the editor is usable
+  - App launch to workbench: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's "workbench ready"
+  - App launch to first line shown: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the fixture's first line rendered in an editor `.view-line`, checked every 10 ms over CDP; includes Electron and workbench startup, reading the file and rendering it on the virtual display
+  - App workbench to first line: the two previous times subtracted, per launch: what the App spends after its editor part exists until the first line shows
+  - App shutdown after SIGTERM: SIGTERM to the App's main process until no process of its profile is left (SIGKILL after 10 s), as the QA startup benchmark does
+  - App peak RSS, all processes: the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py); the App is stopped about a second after its first line, so this is one to three samples: prefer the RSS at the first line
+  - App RSS at first line: summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup right after the first line was seen (the App is still starting some processes then); shared pages are counted once per process
+  - App PSS at first line: summed `Pss` of the same processes at the same moment
+  - App 10k inserts, applying: applying every seeded insert through the App's `TextModel` (`pushStackElement` and `pushEditOperations` for each insert, `getPositionAt` for its line and column, all in the timed loop; reached over CDP, no key sent); the inserts alone
+  - App 10k inserts, to next frame: from before the first insert to the end of the next frame (the second `requestAnimationFrame` callback after the step, on the page's `performance.now()` clock); includes the inserts
+  - App undo of all, applying: undoing every step until none is left (`Workspace::undo` / `TextModel.undo` in a loop); the undo alone
+  - App undo of all, to next frame: from before the first undo to the end of the next frame (the second `requestAnimationFrame` callback after the step, on the page's `performance.now()` clock); includes the undo
+  - App undo steps: how many undo steps there were (one per insert)
+  - App peak RSS before the script: sum over the editor's processes of `VmHWM` (the kernel's peak resident size) read from /proc/<pid>/status right before the script: the startup and file-open peak; the sum over several processes is an upper bound of their simultaneous peak
+  - App peak RSS after the script: the same sum of `VmHWM` read right after the script: the peak of the whole launch including the script; same caveat
+  - App peak RSS, largest process: the largest single process's `VmHWM` after the script (for the App, the renderer that holds the model)
+
+notes
+  - (estimated) Each App time is late by up to one polling interval plus one CDP round trip: about 10 ms for the first line and 25 ms for the CDP endpoint and the workbench (estimated from the polling intervals, not measured).
+  - (measured) text hash after the inserts: rustode 35e9dae1; App 35e9dae1: equal
+  - (measured) text hash after the undo: rustode 58a6184b; App 58a6184b: equal
+  - (measured) chars after the inserts: rustode 1058576; App 1058576: equal
+  - (measured) undo steps: rustode 10000; App 10000; oracle 10000: equal
+  - Both editors applied the same seeded edits (checked by the hash of the text after the inserts and after the undo, below), but through different APIs: rustode's `Workspace::replace` takes a char offset and returns a result, the App's `TextModel.pushEditOperations` takes a line and column (so `getPositionAt` is inside its timed loop) and fires its content-change events, which the visible editor, minimap, bracket matching and tokenization listen to on every edit; rustode's GUI redraws once after the whole script. The 'to next frame' times end at the frame presented after the step (rustode: the return from `RedrawRequested`; App: the second `requestAnimationFrame` callback after the step), which are not the same event and the App's is paced by the compositor's frame callbacks. Treat the ratio as 'what a programmatic bulk edit costs through each editor's own model API', not as typing speed.

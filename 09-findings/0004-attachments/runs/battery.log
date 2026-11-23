@@ -1,0 +1,35 @@
+commit 6d7b04e50f98 status: 0 changed files
+start 2026-11-23T12:09:18Z
+integrity before: rc=0
+== startup-cold  12:09:21 avail=3600
+   exit 0 12:13:15 avail=3658
+== startup-warm  12:13:15 avail=3658
+   exit 0 12:17:02 avail=3604
+== idle-rss  12:17:02 avail=3603
+   exit 0 12:22:12 avail=3560
+== open-file-1mb  12:22:12 avail=3560
+   exit 0 12:23:21 avail=3558
+== open-file-100mb  12:23:21 avail=3558
+   exit 0 12:25:07 avail=3451
+== open-file-1gb  12:25:07 avail=3451
+   exit 4 12:26:15 avail=3518
+== edit-undo-10k  12:26:15 avail=3518
+   exit 0 12:29:32 avail=3484
+== search-monorepo  12:29:32 avail=3484
+   exit 0 12:30:58 avail=3470
+== startup-warm --no-app-trace --side app 12:30:58 avail=3469
+   exit 4 12:32:37 avail=2342
+integrity after: rc=0
+files newer than the marker in 01 to 08:
+(end)
+done 2026-11-23T12:32:38Z
+== re-runs start 12:34:53 commit 6d7b04e50f98 changed files: 0
+== startup-warm --no-app-trace --side app 12:34:53 avail=3187
+   exit 0 12:36:49 avail=3371
+== re-run of open-file-1gb (the control run of startup-warm finished above) start 12:39:20 commit 6d7b04e50f98 changed files: 0
+== re-run of open-file-1gb (the control run of startup-warm finished above) start 12:47:06 commit 6d7b04e50f98 changed files: 0
+== open-file-1gb re-run at 8ee6e839b64e (runner change only; rustode-gui binary identical) 12:51:42 avail=3195
+   exit 0 12:52:44
+files newer than the marker in 01 to 08:
+(end)
+integrity after: rc=0
