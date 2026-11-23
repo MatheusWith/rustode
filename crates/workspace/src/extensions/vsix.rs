@@ -12,6 +12,7 @@
 //! regular files, never followed. rustode also caps the entry count and the
 //! extracted size (VS Code sets no cap).
 
+use super::error::Failure;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::PermissionsExt;
@@ -43,24 +44,25 @@ pub(crate) fn safe_path(name: &str) -> Option<PathBuf> {
 
 /// Extracts the `extension/` entries of `vsix` into `target`, which must
 /// not exist yet. Returns the bytes written.
-pub(crate) fn extract(vsix: &Path, target: &Path) -> Result<u64, String> {
-    let file = File::open(vsix).map_err(|err| format!("{}: {err}", vsix.display()))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|err| format!("not a VSIX: {err}"))?;
+pub(crate) fn extract(vsix: &Path, target: &Path) -> Result<u64, Failure> {
+    let file = File::open(vsix).map_err(|err| Failure::io("open", vsix, err))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|err| Failure::NotAVsix(err.to_string()))?;
     if archive.len() > MAX_ENTRIES {
-        return Err(format!(
-            "the VSIX has {} entries; at most {MAX_ENTRIES} are extracted",
-            archive.len()
-        ));
+        return Err(Failure::TooManyEntries {
+            count: archive.len(),
+            max: MAX_ENTRIES,
+        });
     }
-    fs::create_dir(target).map_err(|err| format!("{}: {err}", target.display()))?;
+    fs::create_dir(target).map_err(|err| Failure::io("create", target, err))?;
     let mut written = 0;
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
-            .map_err(|err| format!("not a VSIX: {err}"))?;
+            .map_err(|err| Failure::NotAVsix(err.to_string()))?;
         let name = entry
             .name()
-            .map_err(|err| format!("not a VSIX: {err}"))?
+            .map_err(|err| Failure::NotAVsix(err.to_string()))?
             .into_owned();
         let Some(inner) = name.strip_prefix(SOURCE) else {
             continue;
@@ -68,27 +70,26 @@ pub(crate) fn extract(vsix: &Path, target: &Path) -> Result<u64, String> {
         if inner.is_empty() {
             continue;
         }
-        let relative = safe_path(inner)
-            .ok_or_else(|| format!("{name}: refused, the path leaves the extension folder"))?;
+        let relative = safe_path(inner).ok_or_else(|| Failure::UnsafeEntry(name.clone()))?;
         let path = target.join(relative);
         if name.ends_with('/') {
-            fs::create_dir_all(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+            fs::create_dir_all(&path).map_err(|err| Failure::io("create", &path, err))?;
             continue;
         }
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|err| format!("{}: {err}", parent.display()))?;
+            fs::create_dir_all(parent).map_err(|err| Failure::io("create", parent, err))?;
         }
         let mode = entry.unix_mode().map_or(0o644, |mode| mode & 0o777) | 0o600;
-        let mut out = File::create(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+        let mut out = File::create(&path).map_err(|err| Failure::io("create", &path, err))?;
         let room = MAX_BYTES - written;
         let copied = io::copy(&mut (&mut entry).take(room + 1), &mut out)
-            .map_err(|err| format!("{name}: {err}"))?;
+            .map_err(|err| Failure::io("extract", &path, err))?;
         if copied > room {
-            return Err(format!("the VSIX expands beyond {MAX_BYTES} bytes"));
+            return Err(Failure::TooLarge { max: MAX_BYTES });
         }
         written += copied;
         fs::set_permissions(&path, fs::Permissions::from_mode(mode))
-            .map_err(|err| format!("{}: {err}", path.display()))?;
+            .map_err(|err| Failure::io("set the permissions of", &path, err))?;
     }
     Ok(written)
 }
