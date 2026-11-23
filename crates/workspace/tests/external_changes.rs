@@ -255,3 +255,95 @@ fn checking_one_document_works_without_waiting_for_the_watcher() {
     assert_eq!(text(&ws, id), "two\n");
     assert!(ws.take_events().contains(&Event::Reloaded { id }));
 }
+
+fn conflicted(name: &str) -> (Workspace, DocumentId, PathBuf) {
+    let (mut ws, id, path) = open(name, "one\n");
+    ws.type_text(id, "mine ").expect("type");
+    write_externally(&path, b"theirs\n");
+    wait_for(&mut ws, |e| *e == Event::Conflict { id });
+    (ws, id, path)
+}
+
+#[test]
+fn the_conflict_commands_are_registered_with_vs_codes_ids_and_a_category() {
+    let find = |id: &str| {
+        rustode_workspace::COMMANDS
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap_or_else(|| panic!("{id} is not registered"))
+    };
+    assert_eq!(
+        find("workbench.files.action.saveIgnoreModifiedSince").label,
+        "File: Overwrite"
+    );
+    assert_eq!(
+        find("workbench.files.action.revertLocalChanges").label,
+        "File: Discard Your Changes and Revert to File Contents"
+    );
+}
+
+#[test]
+fn the_overwrite_command_resolves_the_conflict_in_favor_of_my_text_and_saves() {
+    let (mut ws, id, path) = conflicted("cmd-overwrite");
+    assert!(ws.save(id).is_err(), "a plain save is refused");
+    assert_eq!(std::fs::read(&path).expect("read"), b"theirs\n");
+    assert!(
+        ws.execute("workbench.files.action.saveIgnoreModifiedSince")
+            .expect("overwrite")
+    );
+    assert_eq!(std::fs::read(&path).expect("read"), b"mine one\n");
+    let doc = ws.document(id).expect("doc");
+    assert!(!doc.has_conflict() && !doc.is_dirty());
+}
+
+#[test]
+fn the_revert_command_loads_the_file_and_keeps_my_text_in_undo() {
+    let (mut ws, id, path) = conflicted("cmd-revert");
+    assert!(
+        ws.execute("workbench.files.action.revertLocalChanges")
+            .expect("revert")
+    );
+    assert_eq!(text(&ws, id), "theirs\n");
+    assert_eq!(std::fs::read(&path).expect("read"), b"theirs\n");
+    assert!(ws.undo(id).expect("undo"));
+    assert_eq!(text(&ws, id), "mine one\n");
+}
+
+#[test]
+fn a_conflict_command_without_a_conflict_says_which_file_has_none() {
+    let (mut ws, _id, _path) = open("cmd-none", "one\n");
+    for command in [
+        "workbench.files.action.saveIgnoreModifiedSince",
+        "workbench.files.action.revertLocalChanges",
+    ] {
+        let err = ws.execute(command).expect_err("no conflict");
+        assert_eq!(err.to_string(), "f.txt has no conflict to resolve");
+    }
+}
+
+#[test]
+fn the_prompt_for_a_conflict_offers_the_commands_and_nothing_overwrites_before_a_choice() {
+    let (mut ws, id, path) = conflicted("prompt");
+    assert!(ws.conflict_prompt(id).is_some(), "a conflict has a prompt");
+    let err = ws.save(id).expect_err("refused");
+    assert!(matches!(err, rustode_workspace::Error::Conflict { .. }));
+    let prompt = ws.conflict_prompt(id).expect("prompt");
+    assert_eq!(
+        prompt.message,
+        "Failed to save 'f.txt': The content of the file is newer. Please overwrite the content \
+         of the file with your changes or revert to the file contents."
+    );
+    let ids: Vec<_> = prompt.choices.iter().map(|c| c.command).collect();
+    assert_eq!(
+        ids,
+        [
+            "workbench.files.action.saveIgnoreModifiedSince",
+            "workbench.files.action.revertLocalChanges"
+        ]
+    );
+    let names: Vec<_> = prompt.choices.iter().map(|c| c.label).collect();
+    assert_eq!(names, ["Overwrite", "Revert"]);
+    assert_eq!(std::fs::read(&path).expect("read"), b"theirs\n");
+    ws.resolve_conflict(id, Resolution::KeepMine).expect("keep");
+    assert!(ws.conflict_prompt(id).is_none(), "resolved: no prompt");
+}

@@ -84,6 +84,15 @@
 //! why "Close Editor" carries `!activeEditorGroupEmpty`.
 //! "Language Server: Restart" (`rustode.restartLanguageServer`) is rustode's
 //! own: VS Code's language clients bring their own restart commands.
+//! "File: Overwrite" (`workbench.files.action.saveIgnoreModifiedSince`,
+//! `src/vs/workbench/contrib/files/browser/editors/textFileSaveErrorHandler.ts:387`)
+//! and "File: Discard Your Changes and Revert to File Contents"
+//! (`workbench.files.action.revertLocalChanges`, `fileActions.contribution.ts:200`)
+//! settle a disk conflict ([`Workspace::conflict_prompt`]). VS Code offers
+//! them as notification and editor-title actions, so its labels have no
+//! category; rustode lists them in the palette under "File". "Compare"
+//! (`workbench.files.action.resolveConflict`) opens a diff editor and is not
+//! registered.
 //! The palette lists matching commands alphabetically; VS Code also puts
 //! recently used ones first and matches word starts
 //! (`AbstractCommandsQuickAccessProvider`), which is not done yet.
@@ -148,6 +157,13 @@ pub const COMMANDS: &[CommandInfo] = &[
         "File: Save",
         Workbench,
         Some("Ctrl+S"),
+    ),
+    command(crate::external::OVERWRITE, "File: Overwrite", Editor, None),
+    command(
+        crate::external::REVERT,
+        "File: Discard Your Changes and Revert to File Contents",
+        Editor,
+        None,
     ),
     command(
         "workbench.action.quit",
@@ -775,6 +791,10 @@ impl Workspace {
         match command {
             "undo" => drop(self.undo(id)?),
             "redo" => drop(self.redo(id)?),
+            crate::external::OVERWRITE => self.overwrite_conflict(id)?,
+            crate::external::REVERT => {
+                self.resolve_conflict(id, crate::Resolution::ReloadTheirs)?;
+            }
             "editor.action.selectAll" => self.select_all(id)?,
             "editor.action.addSelectionToNextFindMatch" => drop(self.add_next_occurrence(id)?),
             "editor.action.insertCursorAbove" => drop(self.add_cursor_above(id)?),

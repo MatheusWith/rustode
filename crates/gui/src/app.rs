@@ -99,6 +99,8 @@ pub struct EditorApp {
     notice: Option<String>,
     /// The tab whose unsaved changes the next close discards.
     confirm_close: Option<DocumentId>,
+    /// The open disk-conflict prompt (`conflict.rs`).
+    conflict: Option<rustode_workspace::ConflictPrompt>,
     /// The title last sent to the window.
     title: Option<String>,
     /// Set when the window runs under [`crate::run`], to time frames.
@@ -212,6 +214,7 @@ impl EditorApp {
             error: None,
             notice: None,
             confirm_close: None,
+            conflict: None,
             title: None,
             latency: None,
             extensions: extensions::Panel::default(),
@@ -339,9 +342,9 @@ impl EditorApp {
     fn note(&mut self) {
         for event in self.workspace.take_events() {
             self.notice = match event {
-                Event::Conflict { .. } => {
-                    Some("The file changed on disk; the unsaved changes are kept.".to_owned())
-                }
+                Event::Conflict { .. } => Some(
+                    "The file changed on disk; saving will ask whether to overwrite it.".to_owned(),
+                ),
                 Event::Deleted { .. } => Some("The file was deleted from disk.".to_owned()),
                 Event::Renamed { to, .. } => {
                     Some(format!("The file was moved to {}.", to.display()))
@@ -688,6 +691,7 @@ impl EditorApp {
         };
         match self.workspace.save(id) {
             Ok(()) => self.error = None,
+            Err(Error::Conflict { .. }) => self.conflict = self.workspace.conflict_prompt(id),
             Err(err) => self.error = Some(format!("Save failed: {err}")),
         }
     }

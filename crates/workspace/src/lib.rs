@@ -53,7 +53,7 @@ pub use extensions::{
     ExtensionSearch, ExtensionSummary, InstalledExtension, ManifestProblem, NOT_LOADED, OPEN_VSX,
     default_extensions_dir, default_global_storage_dir,
 };
-pub use external::Resolution;
+pub use external::{ConflictChoice, ConflictPrompt, Resolution};
 pub use find::{FindOptions, FindQuery, MATCHES_LIMIT, PatternError};
 pub use fuzzy::ItemScore;
 pub use groups::{Axis, Direction, GroupId, Layout, SplitDirection};
@@ -232,7 +232,7 @@ impl fmt::Display for Error {
             Self::Dirty { name, .. } => write!(f, "{name} has unsaved changes"),
             Self::Conflict { name, .. } => write!(
                 f,
-                "{name} changed on disk under unsaved edits; compare, overwrite or revert first"
+                "{name} changed on disk under unsaved edits; overwrite or revert it first"
             ),
             Self::NoConflict { name, .. } => write!(f, "{name} has no conflict to resolve"),
             Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
