@@ -253,3 +253,20 @@ fn an_invalid_extension_shows_why_and_cannot_be_enabled() {
     );
     assert_eq!(buttons(&harness, "Uninstall"), 1);
 }
+
+#[test]
+fn an_unusable_obsolete_file_is_reported_in_the_status_bar_by_a_listing() {
+    let stand_in = StandIn::start().expect("the stand-in starts");
+    let (mut harness, extensions) = open("obsolete", &stand_in);
+    std::fs::create_dir_all(&extensions).expect("extensions folder");
+    std::fs::write(extensions.join(".obsolete"), "{ not json").expect(".obsolete");
+    ctrl_shift_x(&mut harness);
+    settle(&mut harness);
+    let shown = labels(&harness).join("\n");
+    assert!(shown.contains(".obsolete"), "{shown}");
+    assert!(shown.contains("left unchanged"), "{shown}");
+    assert_eq!(
+        std::fs::read_to_string(extensions.join(".obsolete")).expect("read"),
+        "{ not json"
+    );
+}

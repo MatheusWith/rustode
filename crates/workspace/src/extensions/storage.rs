@@ -97,6 +97,13 @@ pub(crate) struct Staged {
     pub size: u64,
 }
 
+/// What a listing found.
+pub(crate) struct Scanned {
+    pub(crate) list: Vec<InstalledExtension>,
+    /// Why the `.obsolete` file could not be used, if it could not.
+    pub(crate) obsolete_problem: Option<Failure>,
+}
+
 /// The extensions folder.
 pub(crate) struct Store<'a> {
     pub dir: &'a Path,
@@ -210,8 +217,9 @@ impl Store<'_> {
     }
 
     /// Removes what interrupted deletions left behind. An unusable
-    /// `.obsolete` file is logged here and reported when a change needs it.
-    fn clean_up(&self, entries: &[Value]) {
+    /// `.obsolete` file is returned, so the listing can tell the user; it is
+    /// never rewritten, and a change that needs it is refused.
+    fn clean_up(&self, entries: &[Value]) -> Option<Failure> {
         self.remove_deleted_folders();
         let used: Vec<PathBuf> = entries.iter().filter_map(|e| self.location(e)).collect();
         let result = self.obsolete().map(|marked| {
@@ -221,9 +229,9 @@ impl Store<'_> {
                 }
             }
         });
-        if let Err(err) = result {
+        result.err().inspect(|err| {
             tracing::warn!(%err, "cannot finish deleting obsolete extensions");
-        }
+        })
     }
 
     /// Deletes the `.vsctmp` folders left by interrupted deletions
@@ -263,9 +271,12 @@ impl Store<'_> {
     /// their enablement given the globally `disabled` ones. An extension
     /// whose manifest cannot be read is listed as invalid, as VS Code lists
     /// it (`extensionsScannerService.ts:677-700`).
-    pub(crate) fn scan(&self, disabled: &[Identifier]) -> Result<Vec<InstalledExtension>, Failure> {
+    ///
+    /// The second value is the problem with the `.obsolete` file, if it is
+    /// unusable: the listing still works, and the file is left unchanged.
+    pub(crate) fn scan(&self, disabled: &[Identifier]) -> Result<Scanned, Failure> {
         let entries = self.read_index()?;
-        self.clean_up(&entries);
+        let obsolete_problem = self.clean_up(&entries);
         let mut list: Vec<InstalledExtension> = entries
             .iter()
             .filter_map(|entry| {
@@ -274,7 +285,10 @@ impl Store<'_> {
             })
             .collect();
         list.sort_by_key(|e| (e.display_name.to_lowercase(), e.id.clone()));
-        Ok(list)
+        Ok(Scanned {
+            list,
+            obsolete_problem,
+        })
     }
 
     /// The installed extension `id` and its identifier, if it is installed.

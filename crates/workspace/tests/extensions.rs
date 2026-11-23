@@ -1219,6 +1219,46 @@ fn an_unreadable_obsolete_file_is_reported_and_never_overwritten() {
 }
 
 #[test]
+fn an_unusable_obsolete_file_is_reported_by_a_listing_and_left_unchanged() {
+    let stand_in = StandIn::start().expect("the stand-in starts");
+    let (mut ws, dir) = with_hello("bad-obsolete-listing", &stand_in);
+    for bad in [
+        "{ not json",
+        "[]",
+        r#"{"acme.hello-1.0.0-universal":"yes"}"#,
+    ] {
+        std::fs::write(dir.join(".obsolete"), bad).expect(".obsolete");
+        ws.refresh_extensions().expect("refresh");
+        let events = settle(&mut ws);
+        let notice = events.iter().find_map(|e| match e {
+            ExtensionEvent::ObsoleteFailed { message } => Some(message.clone()),
+            _ => None,
+        });
+        let message = notice.unwrap_or_else(|| panic!("{bad}: no notice in {events:?}"));
+        assert!(message.contains(".obsolete"), "{bad}: {message}");
+        assert!(message.contains("left unchanged"), "{bad}: {message}");
+        assert!(message.contains("Fix or delete"), "{bad}: {message}");
+        assert!(
+            events.contains(&ExtensionEvent::Listed),
+            "{bad}: {events:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".obsolete")).expect("read"),
+            bad
+        );
+    }
+    std::fs::remove_file(dir.join(".obsolete")).expect("remove");
+    ws.refresh_extensions().expect("refresh");
+    let events = settle(&mut ws);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ExtensionEvent::ObsoleteFailed { .. })),
+        "a good listing has no notice: {events:?}"
+    );
+}
+
+#[test]
 fn an_unreadable_state_file_is_reported_and_never_overwritten() {
     let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("bad-state", &stand_in);

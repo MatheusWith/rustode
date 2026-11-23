@@ -284,6 +284,13 @@ pub enum ExtensionEvent {
         /// Why.
         message: String,
     },
+    /// The list of folders to delete (`.obsolete`) could not be used: the
+    /// listing still works, the file is left unchanged, and a change that
+    /// needs it is refused until it is fixed or deleted.
+    ObsoleteFailed {
+        /// Why, naming the file and what to do.
+        message: String,
+    },
     /// An install, uninstall or enablement change failed; nothing changed.
     Failed {
         /// `publisher.name`, in lower case.
@@ -430,8 +437,9 @@ enum Outcome {
         job: Job,
         result: Result<Done, Failure>,
         list: Result<Vec<InstalledExtension>, Failure>,
-        /// Why the enablement state could not be read, if it could not.
-        state_problem: Option<Failure>,
+        /// What the listing found wrong with the enablement state or the
+        /// `.obsolete` file, if anything.
+        problems: Vec<ExtensionEvent>,
     },
 }
 
@@ -501,7 +509,7 @@ impl Extensions {
                     job: task.job,
                     result: Err(Failure::NoWorker),
                     list: Ok(self.installed.clone()),
-                    state_problem: None,
+                    problems: Vec::new(),
                 });
             }
             self.worker = Some(worker);
@@ -542,7 +550,7 @@ impl Extensions {
                 job,
                 result,
                 list,
-                state_problem,
+                problems,
             } => {
                 self.jobs = self.jobs.saturating_sub(1);
                 let id = job.id();
@@ -557,11 +565,7 @@ impl Extensions {
                         message: err.to_string(),
                     }),
                 }
-                if let Some(err) = state_problem {
-                    events.push(ExtensionEvent::StateFailed {
-                        message: err.to_string(),
-                    });
-                }
+                events.extend(problems);
             }
         }
         events
@@ -625,11 +629,25 @@ fn run(task: &Task) -> Outcome {
         Some(Err(err)) => (Vec::new(), Some(err)),
         None => (Vec::new(), None),
     };
+    let mut problems = Vec::new();
+    if let Some(err) = state_problem {
+        problems.push(ExtensionEvent::StateFailed {
+            message: err.to_string(),
+        });
+    }
+    let list = store.scan(&disabled).map(|scanned| {
+        if let Some(err) = scanned.obsolete_problem {
+            problems.push(ExtensionEvent::ObsoleteFailed {
+                message: err.to_string(),
+            });
+        }
+        scanned.list
+    });
     Outcome::Finished {
         job: task.job.clone(),
         result,
-        list: store.scan(&disabled),
-        state_problem,
+        list,
+        problems,
     }
 }
 
