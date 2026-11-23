@@ -23,3 +23,60 @@ fn a_missing_file_is_an_error_with_its_path() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("/nonexistent/rustode-tui-test.txt"), "{err}");
 }
+
+#[test]
+fn version_flags_print_the_version_and_exit_0() {
+    for flag in ["--version", "-V"] {
+        let out = tui(&[flag]);
+        assert_eq!(out.status.code(), Some(0), "{flag}");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            text.trim(),
+            concat!("rustode-tui ", env!("CARGO_PKG_VERSION")),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
+fn help_flags_print_usage_and_exit_0() {
+    for flag in ["--help", "-h"] {
+        let out = tui(&[flag]);
+        assert_eq!(out.status.code(), Some(0), "{flag}");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("Usage: rustode-tui PATH..."),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
+fn a_flag_with_other_arguments_is_a_usage_error() {
+    for args in [
+        &["--version", "file.txt"][..],
+        &["file.txt", "--help"],
+        &["--bogus"],
+        &["-x", "file.txt"],
+    ] {
+        let out = tui(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("unexpected argument"), "{args:?}: {err}");
+        assert!(
+            err.contains("Usage: rustode-tui PATH..."),
+            "{args:?}: {err}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_path_that_is_not_utf8_is_not_a_crash() {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::OsStr::from_bytes(b"/nonexistent/\xff.txt");
+    let out = Command::new(env!("CARGO_BIN_EXE_rustode-tui"))
+        .arg(path)
+        .output()
+        .expect("the rustode-tui binary runs");
+    assert_eq!(out.status.code(), Some(1));
+}

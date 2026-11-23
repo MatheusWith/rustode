@@ -1,4 +1,4 @@
-//! `rustode-tui PATH...`: the terminal editor. Files open in tabs; the
+//! `rustode-tui PATH...` (or `--version`, `--help`): the terminal editor. Files open in tabs; the
 //! first folder opens in the explorer.
 //!
 //! Logs go to stderr (`RUSTODE_LOG`, `RUSTODE_LOG_FORMAT`); redirect it to a
@@ -14,19 +14,64 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 use rustode_tui::App;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+const USAGE: &str = "Usage: rustode-tui PATH... | --version | --help";
+
+/// What the command line asked for.
+#[derive(Debug, PartialEq, Eq)]
+enum Command {
+    Open(Vec<PathBuf>),
+    Version,
+    Help,
+    Usage(String),
+}
+
+/// `--version`/`-V` and `--help`/`-h` count only as the sole argument; any
+/// other argument starting with `-` is a usage error, as in `rustode-gui`.
+/// Paths stay `OsString`s: a path need not be UTF-8.
+fn parse(args: impl Iterator<Item = OsString>) -> Command {
+    let args: Vec<OsString> = args.collect();
+    match args.first().and_then(|arg| arg.to_str()) {
+        None if args.is_empty() => return Command::Usage("missing PATH".to_owned()),
+        Some("--version" | "-V") if args.len() == 1 => return Command::Version,
+        Some("--help" | "-h") if args.len() == 1 => return Command::Help,
+        _ => {}
+    }
+    if let Some(flag) = args
+        .iter()
+        .find(|arg| arg.to_string_lossy().starts_with('-'))
+    {
+        return Command::Usage(format!("unexpected argument '{}'", flag.to_string_lossy()));
+    }
+    Command::Open(args.into_iter().map(PathBuf::from).collect())
+}
 
 fn main() -> ExitCode {
     if let Err(err) = rustode_workspace::trace::init_from_env() {
         eprintln!("warning: {err}");
     }
-    let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    if paths.is_empty() {
-        eprintln!("Usage: rustode-tui PATH...");
-        return ExitCode::from(2);
+    match parse(std::env::args_os().skip(1)) {
+        Command::Version => {
+            println!("rustode-tui {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Command::Help => {
+            println!("{USAGE}");
+            ExitCode::SUCCESS
+        }
+        Command::Usage(problem) => {
+            eprintln!("error: {problem}\n\n{USAGE}");
+            ExitCode::from(2)
+        }
+        Command::Open(paths) => open(&paths),
     }
-    let mut app = match App::open_paths(&paths) {
+}
+
+fn open(paths: &[PathBuf]) -> ExitCode {
+    let mut app = match App::open_paths(paths) {
         Ok(app) => app,
         Err(err) => {
             eprintln!("error: {err}");
