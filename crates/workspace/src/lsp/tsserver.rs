@@ -26,6 +26,7 @@
 //! VS Code's behavior is reimplemented, not translated; the order of the
 //! candidates is rustode's own.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// The setting: the folder with a TypeScript 6 `tsserver.js`.
@@ -121,9 +122,28 @@ pub(crate) fn discover(program: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// The `tsserver.js` to run for a server rooted at `root`, or the sentence
-/// that says why there is none.
-pub(crate) fn resolve(root: &Path, rule: &TypeScriptRule) -> Result<PathBuf, String> {
+/// There is no usable `tsserver.js` for the TypeScript language server.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct NoTsserver {
+    /// What each place looked at was missing or why it was refused.
+    found: String,
+}
+
+impl fmt::Display for NoTsserver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "TypeScript language server needs TypeScript 6 (tsserver.js): {}; \
+             set {TSDK_KEY} to the lib folder of a TypeScript 6 install, \
+             or install typescript@6 in the workspace",
+            self.found
+        )
+    }
+}
+
+/// The `tsserver.js` to run for a server rooted at `root`, or why there is
+/// none.
+pub(crate) fn resolve(root: &Path, rule: &TypeScriptRule) -> Result<PathBuf, NoTsserver> {
     let mut candidates = vec![root.join("node_modules/typescript/lib")];
     if let Some(tsdk) = rule.tsdk.as_deref().filter(|t| !t.is_empty()) {
         candidates.push(tsdk_folder(tsdk, root));
@@ -147,11 +167,7 @@ pub(crate) fn resolve(root: &Path, rule: &TypeScriptRule) -> Result<PathBuf, Str
     } else {
         present.join("; ")
     };
-    Err(format!(
-        "TypeScript language server needs TypeScript 6 (tsserver.js): {found}; \
-         set {TSDK_KEY} to the lib folder of a TypeScript 6 install, \
-         or install typescript@6 in the workspace"
-    ))
+    Err(NoTsserver { found })
 }
 
 #[cfg(test)]

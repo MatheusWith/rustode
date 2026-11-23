@@ -31,9 +31,75 @@ use super::encoding::PositionEncoding;
 use super::navigate::{RenameTarget, word_at};
 use super::requests::{Kind, Op, Request, lsp_position};
 use super::uri;
+use crate::bulk_edit::EditsError;
 use crate::{DocumentId, Error, Range, Workspace};
 use serde_json::{Value, json};
+use std::fmt;
 use std::path::PathBuf;
+
+/// What is unusable in the edits a language server answered with.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum AnswerProblem {
+    NotAList,
+    TooManyEdits,
+    BadEdit,
+    NotAFile(String),
+    FileOperation(String),
+    NoFile,
+    TooManyFiles,
+}
+
+impl fmt::Display for AnswerProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAList => f.write_str("the server's edits are not a list"),
+            Self::TooManyEdits => {
+                write!(f, "the server sent more than {MAX_EDITS} edits in one file")
+            }
+            Self::BadEdit => f.write_str("an edit of the server has no range or no new text"),
+            Self::NotAFile(uri) => write!(f, "the server's edit names {uri}, which is not a file"),
+            Self::FileOperation(kind) => write!(
+                f,
+                "the server asked to {kind} a file; creating, renaming and deleting files \
+                 are not supported yet"
+            ),
+            Self::NoFile => f.write_str("an edit of the server names no file"),
+            Self::TooManyFiles => {
+                write!(f, "the server's edit changes more than {MAX_FILES} files")
+            }
+        }
+    }
+}
+
+/// Why the edits of a language server were not applied.
+#[derive(Debug)]
+pub(crate) enum EditFailure {
+    /// The server's answer is unusable.
+    Answer(AnswerProblem),
+    /// The workspace could not apply the edits.
+    Apply(EditsError),
+}
+
+impl fmt::Display for EditFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Answer(problem) => problem.fmt(f),
+            Self::Apply(err) => err.fmt(f),
+        }
+    }
+}
+
+impl From<AnswerProblem> for EditFailure {
+    fn from(problem: AnswerProblem) -> Self {
+        Self::Answer(problem)
+    }
+}
+
+impl From<EditsError> for EditFailure {
+    fn from(err: EditsError) -> Self {
+        Self::Apply(err)
+    }
+}
 
 /// The most files one `WorkspaceEdit` may change.
 pub const MAX_FILES: usize = 1_000;
@@ -65,10 +131,10 @@ fn pair(position: &Value) -> (u64, u64) {
 }
 
 /// The edits of a `TextEdit[]`; a malformed one refuses the lot.
-fn text_edits(list: &Value) -> Result<Vec<TextEdit>, String> {
-    let list = list.as_array().ok_or("the edits are not a list")?;
+fn text_edits(list: &Value) -> Result<Vec<TextEdit>, AnswerProblem> {
+    let list = list.as_array().ok_or(AnswerProblem::NotAList)?;
     if list.len() > MAX_EDITS {
-        return Err(format!("more than {MAX_EDITS} edits in one file"));
+        return Err(AnswerProblem::TooManyEdits);
     }
     list.iter()
         .map(|edit| {
@@ -80,17 +146,18 @@ fn text_edits(list: &Value) -> Result<Vec<TextEdit>, String> {
                     end: pair(&range["end"]),
                     text: text.to_owned(),
                 }),
-                _ => Err("an edit has no range or no new text".to_owned()),
+                _ => Err(AnswerProblem::BadEdit),
             }
         })
         .collect()
 }
 
 /// The files a `WorkspaceEdit` changes, one entry per file.
-fn workspace_edit(edit: &Value) -> Result<Vec<FileEdits>, String> {
+fn workspace_edit(edit: &Value) -> Result<Vec<FileEdits>, AnswerProblem> {
     let mut files: Vec<FileEdits> = Vec::new();
     let mut add = |uri_text: &str, version: Option<i64>, edits: Vec<TextEdit>| {
-        let path = uri::to_path(uri_text).ok_or_else(|| format!("{uri_text} is not a file"))?;
+        let path =
+            uri::to_path(uri_text).ok_or_else(|| AnswerProblem::NotAFile(uri_text.to_owned()))?;
         if let Some(file) = files.iter_mut().find(|f| f.path == path) {
             file.edits.extend(edits);
         } else {
@@ -100,17 +167,17 @@ fn workspace_edit(edit: &Value) -> Result<Vec<FileEdits>, String> {
                 edits,
             });
         }
-        Ok::<(), String>(())
+        Ok::<(), AnswerProblem>(())
     };
     if let Some(changes) = edit["documentChanges"].as_array() {
         for change in changes {
-            if change.get("kind").is_some() {
-                return Err(
-                    "creating, renaming and deleting files are not supported yet".to_owned(),
-                );
+            if let Some(kind) = change.get("kind") {
+                return Err(AnswerProblem::FileOperation(
+                    kind.as_str().unwrap_or("change").to_owned(),
+                ));
             }
             let document = &change["textDocument"];
-            let uri_text = document["uri"].as_str().ok_or("an edit names no file")?;
+            let uri_text = document["uri"].as_str().ok_or(AnswerProblem::NoFile)?;
             add(
                 uri_text,
                 document["version"].as_i64(),
@@ -123,7 +190,7 @@ fn workspace_edit(edit: &Value) -> Result<Vec<FileEdits>, String> {
         }
     }
     if files.len() > MAX_FILES {
-        return Err(format!("more than {MAX_FILES} files to change"));
+        return Err(AnswerProblem::TooManyFiles);
     }
     Ok(files)
 }
@@ -282,7 +349,9 @@ impl Workspace {
                 }]
             })
         };
-        let applied = files.and_then(|files| self.apply_edits(&files, encoding));
+        let applied = files
+            .map_err(EditFailure::from)
+            .and_then(|files| Ok(self.apply_edits(&files, encoding)?));
         match (applied, kind) {
             (Err(why), _) => self.notice(format!("The {what} was not applied: {why}")),
             (Ok((_, 0)), Kind::Format) => self.notice("Nothing to format".to_owned()),
@@ -301,7 +370,7 @@ impl Workspace {
         &mut self,
         files: &[FileEdits],
         encoding: PositionEncoding,
-    ) -> Result<(usize, usize), String> {
+    ) -> Result<(usize, usize), EditsError> {
         for file in files {
             let expected = file.version;
             let open = self.find_open(&file.path);
@@ -309,10 +378,7 @@ impl Workspace {
                 && let Some(tracked) = self.lsp.tracked.get(&id)
                 && tracked.version != expected
             {
-                return Err(format!(
-                    "{} changed since the edit was computed",
-                    file.path.display()
-                ));
+                return Err(EditsError::Changed(file.path.clone()));
             }
         }
         let active = self.active_document();
@@ -327,13 +393,13 @@ impl Workspace {
         &mut self,
         files: &[FileEdits],
         encoding: PositionEncoding,
-    ) -> Result<(usize, usize), String> {
+    ) -> Result<(usize, usize), EditsError> {
         let mut planned = Vec::with_capacity(files.len());
         for file in files {
-            let id = self.open(&file.path).map_err(|err| err.to_string())?;
+            let id = self.open(&file.path).map_err(EditsError::Open)?;
             let doc = self
                 .document(id)
-                .ok_or_else(|| Error::UnknownDocument(id).to_string())?;
+                .ok_or(EditsError::Closed(Error::UnknownDocument(id)))?;
             let edits: Vec<(Range, String)> = file
                 .edits
                 .iter()
