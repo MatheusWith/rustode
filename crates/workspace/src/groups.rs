@@ -826,11 +826,37 @@ fn follow(set: &Selections, edits: &[CharEdit]) -> Selections {
         for selection in &mut list {
             *selection =
                 if selection.is_empty() && edit.removed == 0 && selection.head == edit.start {
-                    Selection::cursor(edit.start + edit.inserted)
+                    Selection::cursor(edit.start.saturating_add(edit.inserted))
                 } else {
                     Selection::new(edit.map(selection.anchor), edit.map(selection.head))
                 };
         }
     }
     Selections::from_list(list, set.primary_index())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn following_an_edit_near_usize_max_saturates_instead_of_overflowing() {
+        let edit = CharEdit {
+            start: usize::MAX - 1,
+            removed: 0,
+            inserted: 10,
+        };
+        let set = Selections::single(Selection::cursor(usize::MAX - 1));
+        let followed = follow(&set, &[edit]);
+        assert_eq!(followed.as_slice(), &[Selection::cursor(usize::MAX)]);
+
+        let wide = CharEdit {
+            start: 5,
+            removed: usize::MAX,
+            inserted: usize::MAX,
+        };
+        assert_eq!(wide.map(usize::MAX), usize::MAX);
+        assert_eq!(wide.map(3), 3);
+        assert_eq!(wide.map(6), 5);
+    }
 }
