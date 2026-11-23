@@ -32,6 +32,7 @@
 //! in `state.rs`, the manifest model and its checks in `manifest.rs`,
 //! extraction in `vsix.rs` and the registry client in `registry.rs`.
 
+mod error;
 mod manifest;
 mod registry;
 #[cfg(feature = "stand-in")]
@@ -40,10 +41,13 @@ mod state;
 mod storage;
 mod vsix;
 
-pub use manifest::{ExtensionManifest, ManifestProblem, VSCODE_API_DATE, VSCODE_API_VERSION};
+pub use manifest::{
+    ExtensionManifest, ManifestError, ManifestProblem, VSCODE_API_DATE, VSCODE_API_VERSION,
+};
 pub use state::{DISABLED_KEY, STATE_FILE};
 
 use crate::{Event, Workspace};
+use error::Failure;
 use registry::Registry;
 use state::{Identifier, State};
 use std::ffi::OsString;
@@ -310,7 +314,7 @@ pub enum ExtensionError {
 impl fmt::Display for ExtensionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidId(id) => write!(f, "{id:?} is not an extension id (publisher.name)"),
+            Self::InvalidId(id) => write!(f, "\"{id}\" is not an extension id (publisher.name)"),
             Self::InvalidRegistry(url) => {
                 write!(
                     f,
@@ -323,10 +327,13 @@ impl fmt::Display for ExtensionError {
                     "{host} is the Microsoft Marketplace; rustode never contacts it"
                 )
             }
-            Self::NoLocation => f.write_str("no extensions folder is set"),
-            Self::NoStorageLocation => {
-                f.write_str("no global storage folder is set for the enablement state")
-            }
+            Self::NoLocation => f.write_str(
+                "no extensions folder is set; set RUSTODE_EXTENSIONS_DIR to the folder to use",
+            ),
+            Self::NoStorageLocation => f.write_str(
+                "no global storage folder is set for the enablement state; \
+                     start rustode with a user data folder",
+            ),
             Self::Busy(id) => write!(f, "{id} is already being changed"),
         }
     }
@@ -417,14 +424,14 @@ enum Outcome {
     Searched {
         seq: u64,
         query: String,
-        result: Result<(Vec<ExtensionSummary>, u64), String>,
+        result: Result<(Vec<ExtensionSummary>, u64), Failure>,
     },
     Finished {
         job: Job,
-        result: Result<Done, String>,
-        list: Result<Vec<InstalledExtension>, String>,
+        result: Result<Done, Failure>,
+        list: Result<Vec<InstalledExtension>, Failure>,
         /// Why the enablement state could not be read, if it could not.
-        state_problem: Option<String>,
+        state_problem: Option<Failure>,
     },
 }
 
@@ -492,7 +499,7 @@ impl Extensions {
                 // No worker thread could start: report the job as failed.
                 let _ = self.sender().send(Outcome::Finished {
                     job: task.job,
-                    result: Err("cannot start the extensions worker thread".to_owned()),
+                    result: Err(Failure::NoWorker),
                     list: Ok(self.installed.clone()),
                     state_problem: None,
                 });
@@ -524,9 +531,9 @@ impl Extensions {
                         results,
                         total,
                     },
-                    Err(message) => ExtensionSearch::Failed {
+                    Err(err) => ExtensionSearch::Failed {
                         query: query.clone(),
-                        message,
+                        message: err.to_string(),
                     },
                 };
                 events.push(ExtensionEvent::Searched { query });
@@ -546,10 +553,14 @@ impl Extensions {
                         self.installed = list;
                         events.push(ExtensionEvent::Listed);
                     }
-                    Err(message) => events.push(ExtensionEvent::ListFailed { message }),
+                    Err(err) => events.push(ExtensionEvent::ListFailed {
+                        message: err.to_string(),
+                    }),
                 }
-                if let Some(message) = state_problem {
-                    events.push(ExtensionEvent::StateFailed { message });
+                if let Some(err) = state_problem {
+                    events.push(ExtensionEvent::StateFailed {
+                        message: err.to_string(),
+                    });
                 }
             }
         }
@@ -558,10 +569,13 @@ impl Extensions {
 }
 
 /// The event a finished job reports, if any.
-fn job_event(job: &Job, id: String, result: Result<Done, String>) -> Option<ExtensionEvent> {
+fn job_event(job: &Job, id: String, result: Result<Done, Failure>) -> Option<ExtensionEvent> {
     Some(match (job, result) {
         (Job::List, _) | (_, Ok(Done::Enablement(false) | Done::Listed)) => return None,
-        (_, Err(message)) => ExtensionEvent::Failed { id, message },
+        (_, Err(err)) => ExtensionEvent::Failed {
+            id,
+            message: err.to_string(),
+        },
         (_, Ok(Done::Installed(version))) => ExtensionEvent::Installed { id, version },
         (_, Ok(Done::Uninstalled)) => ExtensionEvent::Uninstalled { id },
         (Job::Enable(_), Ok(Done::Enablement(true))) => ExtensionEvent::Enabled { id },
@@ -597,18 +611,18 @@ fn run(task: &Task) -> Outcome {
     let result = match &task.job {
         Job::List => std::fs::create_dir_all(&task.dir)
             .map(|()| Done::Listed)
-            .map_err(|err| format!("{}: {err}", task.dir.display())),
+            .map_err(|err| Failure::io("create", &task.dir, err)),
         Job::Install(id) => install(&store, &task.registry, id).map(Done::Installed),
         Job::Uninstall(id) => uninstall(&store, state.as_ref(), &id.to_ascii_lowercase()),
         Job::Enable(id) => set_enablement(&store, state.as_ref(), &id.to_ascii_lowercase(), false),
         Job::Disable(id) => set_enablement(&store, state.as_ref(), &id.to_ascii_lowercase(), true),
     };
-    if let Err(message) = &result {
-        tracing::warn!(job = ?task.job, %message, "extension job failed");
+    if let Err(err) = &result {
+        tracing::warn!(job = ?task.job, %err, "extension job failed");
     }
     let (disabled, state_problem) = match state.as_ref().map(State::disabled) {
         Some(Ok(disabled)) => (disabled, None),
-        Some(Err(message)) => (Vec::new(), Some(message)),
+        Some(Err(err)) => (Vec::new(), Some(err)),
         None => (Vec::new(), None),
     };
     Outcome::Finished {
@@ -621,7 +635,7 @@ fn run(task: &Task) -> Outcome {
 
 /// Uninstalls `id`, then forgets that it was disabled, as VS Code resets
 /// the enablement of an uninstalled extension.
-fn uninstall(store: &Store<'_>, state: Option<&State<'_>>, id: &str) -> Result<Done, String> {
+fn uninstall(store: &Store<'_>, state: Option<&State<'_>>, id: &str) -> Result<Done, Failure> {
     store.remove(id)?;
     let identifier = Identifier {
         id: id.to_owned(),
@@ -640,18 +654,17 @@ fn set_enablement(
     state: Option<&State<'_>>,
     id: &str,
     disable: bool,
-) -> Result<Done, String> {
-    let state = state.ok_or_else(|| ExtensionError::NoStorageLocation.to_string())?;
+) -> Result<Done, Failure> {
+    let state = state.ok_or(ExtensionError::NoStorageLocation)?;
     let disabled = state.disabled()?;
     let Some((extension, identifier)) = store.find(id, &disabled)? else {
-        return Err(format!("{id} is not installed"));
+        return Err(Failure::NotInstalled(id.to_owned()));
     };
     if extension.enablement == EnablementState::Invalid {
-        return Err(format!(
-            "cannot change the enablement of {}: it is invalid ({})",
-            extension.display_name,
-            extension.first_error().unwrap_or_default()
-        ));
+        return Err(Failure::Invalid {
+            name: extension.display_name.clone(),
+            reason: extension.first_error().unwrap_or_default().to_owned(),
+        });
     }
     state
         .set_disabled(&identifier, disable)
@@ -660,8 +673,8 @@ fn set_enablement(
 
 /// Downloads, checks, extracts and indexes the latest release of `id`.
 /// Returns the installed version.
-fn install(store: &Store<'_>, registry: &Registry, id: &str) -> Result<String, String> {
-    std::fs::create_dir_all(store.dir).map_err(|err| format!("{}: {err}", store.dir.display()))?;
+fn install(store: &Store<'_>, registry: &Registry, id: &str) -> Result<String, Failure> {
+    std::fs::create_dir_all(store.dir).map_err(|err| Failure::io("create", store.dir, err))?;
     let (namespace, name) = id.split_once('.').unwrap_or((id, ""));
     let release = registry.release(namespace, name)?;
     if store
@@ -675,7 +688,7 @@ fn install(store: &Store<'_>, registry: &Registry, id: &str) -> Result<String, S
     let folder = store.temp("");
     let result = (|| {
         let mut file =
-            File::create(&download).map_err(|err| format!("{}: {err}", download.display()))?;
+            File::create(&download).map_err(|err| Failure::io("create", &download, err))?;
         registry.download(&release, &mut file)?;
         drop(file);
         let size = vsix::extract(&download, &folder)?;

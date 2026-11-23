@@ -249,16 +249,56 @@ impl Schema {
     }
 }
 
-/// Checks a value against a setting type; the error is a sentence for the user.
+/// Why a value does not fit a setting type. `Display` is the sentence shown
+/// for the user, worded as VS Code words its JSON schema checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingValueError {
+    /// The value has another type.
+    WrongType {
+        /// The type the setting has.
+        expected: &'static str,
+        /// The type the value has.
+        found: &'static str,
+    },
+    /// The number is below the setting's minimum.
+    BelowMinimum(String),
+    /// The number is above the setting's maximum.
+    AboveMaximum(String),
+    /// The value is not one of the allowed strings (each quoted, as JSON).
+    NotAccepted(Vec<String>),
+}
+
+impl std::fmt::Display for SettingValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongType { expected, found } => {
+                write!(f, "Incorrect type. Expected \"{expected}\", found {found}")
+            }
+            Self::BelowMinimum(min) => write!(f, "Value is below the minimum of {min}"),
+            Self::AboveMaximum(max) => write!(f, "Value is above the maximum of {max}"),
+            Self::NotAccepted(values) => {
+                write!(
+                    f,
+                    "Value is not accepted. Valid values: {}",
+                    values.join(", ")
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SettingValueError {}
+
+/// Checks a value against a setting type.
 ///
 /// # Errors
 /// When the value has the wrong type, is out of bounds or is not one of the allowed strings.
-pub fn validate(kind: &SettingType, value: &Value) -> Result<(), String> {
-    let wrong = |expected: &str| {
-        Err(format!(
-            "Incorrect type. Expected \"{expected}\", found {}",
-            value.type_name()
-        ))
+pub fn validate(kind: &SettingType, value: &Value) -> Result<(), SettingValueError> {
+    let wrong = |expected: &'static str| {
+        Err(SettingValueError::WrongType {
+            expected,
+            found: value.type_name(),
+        })
     };
     match (kind, value) {
         (SettingType::Any, _)
@@ -276,21 +316,21 @@ pub fn validate(kind: &SettingType, value: &Value) -> Result<(), String> {
             if let Some(min) = minimum
                 && n < min
             {
-                return Err(format!("Value is below the minimum of {min}"));
+                return Err(SettingValueError::BelowMinimum(min.to_string()));
             }
             if let Some(max) = maximum
                 && n > max
             {
-                return Err(format!("Value is above the maximum of {max}"));
+                return Err(SettingValueError::AboveMaximum(max.to_string()));
             }
             Ok(())
         }
         (SettingType::Enum(values), Value::String(s)) if values.contains(s) => Ok(()),
         (SettingType::Enum(values), _) => {
-            let accepted: Vec<String> = values.iter().map(|v| format!("{v:?}")).collect();
-            Err(format!(
-                "Value is not accepted. Valid values: {}",
-                accepted.join(", ")
+            let quoted =
+                |v: &String| format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""));
+            Err(SettingValueError::NotAccepted(
+                values.iter().map(quoted).collect(),
             ))
         }
         (SettingType::Boolean, _) => wrong("boolean"),
@@ -443,8 +483,8 @@ impl Reader<'_> {
                 ));
             }
             Some(setting) => {
-                if let Err(message) = validate(&setting.kind, &value) {
-                    self.invalid(node, message);
+                if let Err(err) = validate(&setting.kind, &value) {
+                    self.invalid(node, err.to_string());
                     into.remove(&property.key);
                     return;
                 }
@@ -499,7 +539,7 @@ mod tests {
         let message = validate(&SettingType::Boolean, &Value::Number(1.0))
             .expect_err("a number is not a boolean");
         assert_eq!(
-            message,
+            message.to_string(),
             "Incorrect type. Expected \"boolean\", found number"
         );
     }

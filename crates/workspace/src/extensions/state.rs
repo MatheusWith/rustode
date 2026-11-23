@@ -18,6 +18,7 @@
 //! store, so a migration is one row per key. Other keys are kept as they
 //! are. A file that cannot be read is reported and never overwritten.
 
+use super::error::Failure;
 use super::storage::write_atomic;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -59,17 +60,20 @@ impl State<'_> {
         self.dir.join(STATE_FILE)
     }
 
-    fn invalid(&self, what: &str) -> String {
-        format!("{}: {what}; it was left unchanged", self.path().display())
+    fn invalid(&self, what: &str) -> Failure {
+        Failure::InvalidState {
+            path: self.path(),
+            what: what.to_owned(),
+        }
     }
 
     /// Every row; none when there is no file yet.
-    fn rows(&self) -> Result<Map<String, Value>, String> {
+    fn rows(&self) -> Result<Map<String, Value>, Failure> {
         let path = self.path();
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Map::new()),
-            Err(err) => return Err(format!("{}: {err}", path.display())),
+            Err(err) => return Err(Failure::io("read", &path, err)),
         };
         if text.trim().is_empty() {
             return Ok(Map::new());
@@ -81,11 +85,11 @@ impl State<'_> {
     }
 
     /// The globally disabled extensions.
-    pub(crate) fn disabled(&self) -> Result<Vec<Identifier>, String> {
+    pub(crate) fn disabled(&self) -> Result<Vec<Identifier>, Failure> {
         self.disabled_in(&self.rows()?)
     }
 
-    fn disabled_in(&self, rows: &Map<String, Value>) -> Result<Vec<Identifier>, String> {
+    fn disabled_in(&self, rows: &Map<String, Value>) -> Result<Vec<Identifier>, Failure> {
         let Some(text) = rows.get(DISABLED_KEY).and_then(Value::as_str) else {
             return Ok(Vec::new());
         };
@@ -107,7 +111,7 @@ impl State<'_> {
         &self,
         identifier: &Identifier,
         disabled: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, Failure> {
         let mut rows = self.rows()?;
         let mut list = self.disabled_in(&rows)?;
         let present = list.iter().any(|e| e.same(identifier));
@@ -122,11 +126,11 @@ impl State<'_> {
         if list.is_empty() {
             rows.remove(DISABLED_KEY);
         } else {
-            let text = serde_json::to_string(&list).map_err(|err| err.to_string())?;
+            let text = serde_json::to_string(&list)?;
             rows.insert(DISABLED_KEY.to_owned(), Value::String(text));
         }
-        fs::create_dir_all(self.dir).map_err(|err| format!("{}: {err}", self.dir.display()))?;
-        let bytes = serde_json::to_vec(&rows).map_err(|err| err.to_string())?;
+        fs::create_dir_all(self.dir).map_err(|err| Failure::io("create", self.dir, err))?;
+        let bytes = serde_json::to_vec(&rows)?;
         write_atomic(&self.path(), &bytes)?;
         Ok(true)
     }
