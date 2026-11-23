@@ -151,6 +151,46 @@ fn pre_push_rejects_main_bad_branch_names_and_bad_messages() {
 }
 
 #[test]
+fn pre_push_after_a_rebase_skips_commits_already_on_a_remote() {
+    // A force push after rebasing onto main: the old branch tip is not an
+    // ancestor, so `old..new` also lists main's commits. Those are on a
+    // remote already (a squash title such as "… (#40)" may pass 72
+    // characters) and are not this push's to check.
+    let (dir, base) = repo_with_commits("push-rebased", &["feat(core): add x"]);
+    let commit = |msg: &str| {
+        std::fs::write(dir.join("f"), msg).expect("write");
+        git(&dir, &["add", "f"]);
+        git(&dir, &["commit", "-q", "-m", msg]);
+        git(&dir, &["rev-parse", "HEAD"])
+    };
+    git(&dir, &["checkout", "-q", "-b", "old"]);
+    let old = commit("feat(core): old tip");
+    git(&dir, &["checkout", "-q", "main"]);
+    let squash = commit(&format!("docs: {} (#40)", "a".repeat(64)));
+    git(&dir, &["update-ref", "refs/remotes/origin/main", &squash]);
+    let new = commit("fix(core): rebased tip");
+    assert_ne!(base, new);
+    let line = format!("refs/heads/feat/x {new} refs/heads/feat/x {old}\n");
+    let out = xtask(&dir, &["pre-push"], &line);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let line = format!(
+        "refs/heads/feat/x {} refs/heads/feat/x {old}\n",
+        commit("wip")
+    );
+    let out = xtask(&dir, &["pre-push"], &line);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "the new commit is still checked"
+    );
+}
+
+#[test]
 fn pre_push_ignores_branch_deletion() {
     let (dir, _) = repo_with_commits("push-delete", &["feat(core): add x"]);
     let line = format!("(delete) {ZERO} refs/heads/feat/old {ZERO}\n");
