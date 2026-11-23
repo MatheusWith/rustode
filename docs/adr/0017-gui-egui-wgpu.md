@@ -65,3 +65,8 @@ A frame costs the GUI only the visible lines, whatever the file size, and an idl
   - there is no vertical scrollbar, so none of the width is kept for one, and VS Code's rule against the start line flickering between frames is not done;
   - it is not in the AccessKit tree: it repeats what the editor already exposes;
   - the blocks are a mesh cached per document version, language, lines drawn and size, so a frame without a change only moves and paints it, and the slider's 500 ms is one scheduled frame, not a timer loop (`crates/gui/tests/frame/minimap.rs`).
+
+## Addendum (2026-11-23): the activity bar
+
+[ADR 0033](0033-activity-bar-and-side-bar-location.md) replaces one choice recorded above: the words "with no activity bar" in the first bullet of the breakpoints, scaling and keyboard consequence. Both frontends get an Activity Bar (Explorer, Search, Run and Debug, Extensions), configurable by `workbench.activityBar.location` and `workbench.sideBar.location`. The side bar collapse below 390 points and every other rule here still hold; the 390 points are measured again when the Activity Bar is drawn.
+
