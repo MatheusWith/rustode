@@ -46,6 +46,12 @@ pub(crate) struct Scenario {
     /// What a `launch` scenario measures. Required by `launch`.
     #[serde(default)]
     pub launch: Option<LaunchSpec>,
+    /// The seeded edit script of an `edit-undo` scenario.
+    #[serde(default)]
+    pub edits: Option<EditsSpec>,
+    /// The monorepo and the query of a `search` scenario.
+    #[serde(default)]
+    pub search: Option<SearchSpec>,
 }
 
 /// The scenario kinds the runner implements.
@@ -57,6 +63,12 @@ pub(crate) enum Kind {
     /// Launch each editor with the generated file and measure the launch
     /// (startup to first frame, or idle memory), with no in-process side.
     Launch,
+    /// Open the fixture, apply seeded random inserts to its text model, then
+    /// undo all of them (ADR 0024), through each editor's own API, no keys.
+    EditUndo,
+    /// Search a generated monorepo with one regex through each editor's own
+    /// search (ADR 0024), no keys.
+    Search,
 }
 
 impl Kind {
@@ -65,8 +77,44 @@ impl Kind {
         match self {
             Self::OpenFile => "open-file",
             Self::Launch => "launch",
+            Self::EditUndo => "edit-undo",
+            Self::Search => "search",
         }
     }
+}
+
+/// The seeded inserts of an `edit-undo` scenario: `count` single-letter
+/// inserts at offsets from `rustode_workspace::bench::edit_offsets(seed, …)`,
+/// each its own undo step, then every step undone.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EditsSpec {
+    /// The generator's seed.
+    pub seed: u32,
+    /// How many inserts.
+    pub count: u32,
+}
+
+/// The monorepo of a `search` scenario and the search run over it. The tree
+/// is generated (`fixture::write_tree`): `files` searched source files of
+/// `[scenario.fixture].bytes` bytes and `line_bytes`-byte lines, plus files
+/// that a default exclude, an ignore file, the include globs or the exclude
+/// globs must keep out of the results.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SearchSpec {
+    /// Source files under `src/`.
+    pub files: u32,
+    /// The generator's seed.
+    pub seed: u32,
+    /// The pattern, as typed in each editor's search box.
+    pub pattern: String,
+    /// Use Regular Expression.
+    pub regex: bool,
+    /// "files to include", comma-separated globs.
+    pub include: String,
+    /// "files to exclude", comma-separated globs.
+    pub exclude: String,
 }
 
 /// A generated fixture: numbered ASCII lines with LF.
@@ -105,6 +153,11 @@ pub(crate) struct AppSide {
     pub driver: PathBuf,
     /// The `settings.json` for each fresh profile, relative to the list file.
     pub settings: PathBuf,
+    /// Record a Chromium trace of each launch (categories `viz` and
+    /// `blink.user_timing`) to find the App's first presented frame after the
+    /// first line is in the DOM (gaps.md G22). Off unless asked for.
+    #[serde(default)]
+    pub trace: bool,
 }
 
 /// Launches of the rustode GUI (`rustode-gui`).
@@ -270,8 +323,35 @@ impl Scenario {
                 "a launch scenario needs [scenario.launch] and [scenario.gui]",
             ),
             (
-                self.kind != Kind::OpenFile || self.launch.is_none(),
+                self.kind == Kind::Launch || self.launch.is_none(),
                 "[scenario.launch] belongs to launch scenarios",
+            ),
+            (
+                self.kind != Kind::EditUndo
+                    || self
+                        .edits
+                        .is_some_and(|e| (1..=1_000_000).contains(&e.count)),
+                "an edit-undo scenario needs [scenario.edits] with count 1 to 1000000",
+            ),
+            (
+                self.kind == Kind::EditUndo || self.edits.is_none(),
+                "[scenario.edits] belongs to edit-undo scenarios",
+            ),
+            (
+                self.kind != Kind::Search
+                    || self
+                        .search
+                        .as_ref()
+                        .is_some_and(|s| (1..=100_000).contains(&s.files) && !s.pattern.is_empty()),
+                "a search scenario needs [scenario.search] with files 1 to 100000 and a pattern",
+            ),
+            (
+                self.kind == Kind::Search || self.search.is_none(),
+                "[scenario.search] belongs to search scenarios",
+            ),
+            (
+                !matches!(self.kind, Kind::EditUndo | Kind::Search) || self.gui.is_some(),
+                "edit-undo and search scenarios need [scenario.gui]",
             ),
             (
                 self.gui

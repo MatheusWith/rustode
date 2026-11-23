@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime};
 use serde_json::{Value, json};
 
 use super::app_side::{DriverResults, Launch, Outcome};
+use super::fixture::TreeSummary;
 use super::guard::{ABORT_BELOW_MB, ABORT_PSI, MIN_AVAILABLE_MB};
 use super::gui_side;
 use super::plan::{CDP_PORT, Plan};
@@ -27,7 +28,13 @@ display. Do not divide one by the other.";
 const NOT_LIKE_FOR_LIKE_IN_PROCESS: &str = "rustode's in-process `Workspace::open` has no process start, window or rendering and is not comparable with any App number.";
 
 /// The frame events differ between the two editors (ADR 0024; gaps.md G15).
-const BRACKET: &str = "The two editors have no common 'first frame' event: rustode's is the return from its first wgpu present, the App's closest events are Chromium's first contentful paint and the first fixture line seen in the DOM (polled over CDP). The comparison is therefore approximate: read the rustode number against the interval between the App's two, and do not divide one by the other.";
+const BRACKET: &str = "The two editors have no common 'first frame' event: rustode's is the return from its first wgpu present, the App's closest events are Chromium's first contentful paint and the first fixture line seen in the DOM (polled over CDP). The comparison is therefore approximate: read the rustode number against the interval between the App's two, and do not divide one by the other. When the App launches were traced (rows 'launch to first swap' and 'launch to second swap'), the first swap is the closest counterpart of rustode's first frame: the display compositor's first drawn-and-swapped frame after the first line entered the DOM (gaps.md G22); say which event a ratio uses, and that the swap may be one frame early (the second swap bounds it).";
+
+/// What may be concluded from an `edit-undo` scenario.
+const EDIT_NOTE: &str = "Both editors applied the same seeded edits (checked by the hash of the text after the inserts and after the undo, below), but through different APIs: rustode's `Workspace::replace` takes a char offset and returns a result, the App's `TextModel.pushEditOperations` takes a line and column (so `getPositionAt` is inside its timed loop) and fires its content-change events, which the visible editor, minimap, bracket matching and tokenization listen to on every edit; rustode's GUI redraws once after the whole script. The 'to next frame' times end at the frame presented after the step (rustode: the return from `RedrawRequested`; App: the second `requestAnimationFrame` callback after the step), which are not the same event and the App's is paced by the compositor's frame callbacks. Treat the ratio as 'what a programmatic bulk edit costs through each editor's own model API', not as typing speed.";
+
+/// What may be concluded from a `search` scenario.
+const SEARCH_NOTE: &str = "Both editors searched the same generated tree with the same pattern, include and exclude globs, default excludes and ignore files, and each through its own search (rustode's `Workspace::start_search`, streamed into the Search view; the App's `workbench.action.findInFiles` command, which runs ripgrep). The pattern is written to mean the same in the Rust `regex` crate and in ripgrep's engine (ASCII classes and word boundaries). 'First result' is the first result row drawn (rustode: the frame presented after the first file arrived; App: the first `.monaco-list-row` of the search view, seen by a MutationObserver in the page); 'complete' is when the search has ended and its results are shown (rustode: the frame presented after the search state became `Done`; App: the sidebar's progress bar went from `active` to `done`, and the result message had stopped changing). The counts are checked against each other and against the generator's oracle below.";
 
 /// Summary of samples with nearest-rank percentiles, the definition that
 /// `rustode_workspace::trace::LatencyRecorder` uses.
@@ -161,6 +168,8 @@ pub(crate) struct Report<'a> {
     pub environment: Environment,
     /// SHA-256 of the fixture.
     pub fixture_sha256: Option<String>,
+    /// The generated monorepo of a `search` scenario.
+    pub tree: Option<TreeSummary>,
     /// The recorded rustode opens, if that side ran and succeeded.
     pub rustode: Option<Vec<Duration>>,
     /// The rustode GUI side, if it ran.
@@ -186,10 +195,12 @@ impl Report<'_> {
         if let Some(results) = self.gui.as_ref().and_then(|g| g.results.as_ref()) {
             let recorded: Vec<&Launch> = results.launches.iter().filter(|l| !l.warmup).collect();
             rows.extend(gui_rows(&recorded));
+            rows.extend(script_rows("rustode", &recorded));
         }
         if let Some(results) = self.app.as_ref().and_then(|a| a.results.as_ref()) {
             let recorded: Vec<&Launch> = results.launches.iter().filter(|l| !l.warmup).collect();
             rows.extend(app_rows(self.plan, &recorded));
+            rows.extend(script_rows("app", &recorded));
         }
         rows.retain(|row| !row.samples.is_empty());
         rows
@@ -226,17 +237,61 @@ impl Report<'_> {
         out
     }
 
+    /// The fixture's line of the inputs: a file with its hash, or the
+    /// monorepo with its query and oracle.
+    fn text_fixture(&self, out: &mut String) {
+        let s = self.plan.scenario;
+        if let (Some(tree), Some(search)) = (&self.tree, &s.search) {
+            let _ = writeln!(
+                out,
+                "  fixture     fixtures/{}/: a generated monorepo (seed {}): {} files, {} bytes, {} source files of {} bytes in lines of {} bytes; digest fnv1a64 {:016x}",
+                s.id,
+                search.seed,
+                tree.files,
+                tree.bytes,
+                search.files,
+                s.fixture.bytes,
+                s.fixture.line_bytes,
+                tree.digest
+            );
+            let _ = writeln!(
+                out,
+                "  query       {} /{}/ include '{}' exclude '{}' (default excludes and ignore files on)",
+                if search.regex { "regex" } else { "text" },
+                search.pattern,
+                search.include,
+                search.exclude
+            );
+            if TreeSummary::expects(search) {
+                let _ = writeln!(
+                    out,
+                    "  oracle      the generator planted the matches: {} searched files, {} with matches, {} matches (counted from the text it wrote, not by a regex engine)",
+                    tree.searched_files, tree.expected_files, tree.expected_matches
+                );
+            }
+        } else {
+            let _ = writeln!(
+                out,
+                "  fixture     fixtures/{}.txt: {} bytes, numbered ASCII lines of {} bytes with LF; sha256 {}",
+                s.id,
+                s.fixture.bytes,
+                s.fixture.line_bytes,
+                self.fixture_sha256.as_deref().unwrap_or("unknown")
+            );
+        }
+    }
+
     fn text_inputs(&self, out: &mut String) {
         let s = self.plan.scenario;
         let _ = writeln!(out, "\ninputs (from the scenario list; not results)");
-        let _ = writeln!(
-            out,
-            "  fixture     fixtures/{}.txt: {} bytes, numbered ASCII lines of {} bytes with LF; sha256 {}",
-            s.id,
-            s.fixture.bytes,
-            s.fixture.line_bytes,
-            self.fixture_sha256.as_deref().unwrap_or("unknown")
-        );
+        self.text_fixture(out);
+        if let Some(edits) = s.edits {
+            let _ = writeln!(
+                out,
+                "  edits       {} single-letter inserts at seeded random offsets (mulberry32 seed {}), each its own undo step, then every step undone",
+                edits.count, edits.seed
+            );
+        }
         if self.plan.scenario.kind == Kind::OpenFile {
             let _ = writeln!(
                 out,
@@ -503,6 +558,7 @@ impl Report<'_> {
             ));
         }
         notes.extend(self.outcome_notes());
+        notes.extend(self.equivalence_notes());
         notes.push((None, self.comparison_note()));
         for reason in &self.reasons {
             notes.push((Some("problem"), reason.clone()));
@@ -575,6 +631,62 @@ impl Report<'_> {
         notes
     }
 
+    /// Whether both editors did the same work: the same text after the edits
+    /// and after the undo, the same result counts as each other and as the
+    /// generator's oracle.
+    fn equivalence_notes(&self) -> Vec<(Option<&'static str>, String)> {
+        let recorded = |results: Option<&DriverResults>| -> Vec<Launch> {
+            results
+                .map(|r| r.launches.iter().filter(|l| !l.warmup).cloned().collect())
+                .unwrap_or_default()
+        };
+        let gui = recorded(self.gui.as_ref().and_then(|g| g.results.as_ref()));
+        let app = recorded(self.app.as_ref().and_then(|a| a.results.as_ref()));
+        let expected = self.tree.as_ref().filter(|_| {
+            self.plan
+                .scenario
+                .search
+                .as_ref()
+                .is_some_and(TreeSummary::expects)
+        });
+        let checks: [Check; 6] = [
+            (
+                "text hash after the inserts",
+                |l| l.edit_applied_hash.clone(),
+                None,
+            ),
+            (
+                "text hash after the undo",
+                |l| l.edit_undone_hash.clone(),
+                None,
+            ),
+            (
+                "chars after the inserts",
+                |l| l.edit_applied_chars.map(|v| v.to_string()),
+                None,
+            ),
+            (
+                "undo steps",
+                |l| l.edit_undo_steps.map(|v| v.to_string()),
+                self.plan.scenario.edits.map(|e| e.count.to_string()),
+            ),
+            (
+                "files with matches",
+                |l| l.search_files.map(|v| v.to_string()),
+                expected.map(|t| t.expected_files.to_string()),
+            ),
+            (
+                "matches",
+                |l| l.search_matches.map(|v| v.to_string()),
+                expected.map(|t| t.expected_matches.to_string()),
+            ),
+        ];
+        checks
+            .into_iter()
+            .filter_map(|(what, f, oracle)| compare_note(what, &gui, &app, f, oracle))
+            .collect()
+    }
+
     /// What may and may not be concluded from the two sides' numbers.
     fn comparison_note(&self) -> String {
         match self.plan.scenario.kind {
@@ -585,6 +697,8 @@ impl Report<'_> {
             Kind::Launch => format!(
                 "{BRACKET} Both editors ran on the same virtual display with software rendering, with the same fixture on their command line."
             ),
+            Kind::EditUndo => EDIT_NOTE.to_owned(),
+            Kind::Search => SEARCH_NOTE.to_owned(),
         }
     }
 
@@ -652,13 +766,19 @@ impl Report<'_> {
         let s = plan.scenario;
         json!({
             "fixture": {
-                "path": format!("fixtures/{}.txt", s.id),
+                "path": if self.tree.is_some() { format!("fixtures/{}/", s.id) } else { format!("fixtures/{}.txt", s.id) },
+                "tree": self.tree.as_ref().map(|t| json!({
+                    "files": t.files, "bytes": t.bytes, "digest_fnv1a64": format!("{:016x}", t.digest),
+                    "searched_files": t.searched_files, "expected_files": t.expected_files, "expected_matches": t.expected_matches,
+                    "oracle_applies": s.search.as_ref().is_some_and(TreeSummary::expects),
+                })),
                 "bytes": s.fixture.bytes,
                 "line_bytes": s.fixture.line_bytes,
                 "sha256": self.fixture_sha256,
                 "first_line": plan.first_line(),
             },
             "rustode": { "warmup": s.rustode.warmup, "repetitions": s.rustode.repetitions },
+            "script": plan.script(),
             "gui": s.gui.map(|g| json!({ "warmup": g.warmup, "repetitions": g.repetitions, "timeout_s": g.timeout_s })),
             "launch": s.launch.map(|l| json!({ "measure": l.measure.as_str(), "cache": l.cache.as_str(), "settle_s": l.settle_s })),
             "app": {
@@ -736,7 +856,7 @@ fn launches_json(launches: &[Launch]) -> Vec<Value> {
     launches
         .iter()
         .map(|l| {
-            json!({
+            let mut value = json!({
                 "label": l.label,
                 "warmup": l.warmup,
                 "spawn_to_cdp_ms": l.spawn_to_cdp_ms,
@@ -758,9 +878,52 @@ fn launches_json(launches: &[Launch]) -> Vec<Value> {
                 "complaint": l.complaint,
                 "evict_attempts": l.evict_attempts,
                 "cache_reference_resident_pct": l.cache_reference_resident_pct,
-            })
+            });
+            if let Some(map) = value.as_object_mut() {
+                map.extend(match script_fields(l) {
+                    Value::Object(extra) => extra,
+                    _ => serde_json::Map::new(),
+                });
+            }
+            value
         })
         .collect()
+}
+
+/// The fields only the `edit-undo` and `search` scenarios fill in.
+fn script_fields(l: &Launch) -> Value {
+    json!({
+        "spawn_to_dom_mark_ms": l.spawn_to_dom_mark_ms,
+        "spawn_to_first_swap_start_ms": l.spawn_to_first_swap_start_ms,
+        "spawn_to_first_swap_ms": l.spawn_to_first_swap_ms,
+        "first_swap_after_dom_ms": l.first_swap_after_dom_ms,
+        "spawn_to_second_swap_ms": l.spawn_to_second_swap_ms,
+        "trace_frames_drawn": l.trace_frames_drawn,
+        "trace_error": l.trace_error,
+                "spawn_to_folder_ms": l.spawn_to_folder_ms,
+                "edit_start_chars": l.edit_start_chars,
+                "edit_apply_ms": l.edit_apply_ms,
+                "edit_apply_frame_ms": l.edit_apply_frame_ms,
+                "edit_applied_chars": l.edit_applied_chars,
+                "edit_applied_hash": l.edit_applied_hash,
+                "edit_undo_ms": l.edit_undo_ms,
+                "edit_undo_frame_ms": l.edit_undo_frame_ms,
+                "edit_undo_steps": l.edit_undo_steps,
+                "edit_undone_chars": l.edit_undone_chars,
+                "edit_undone_hash": l.edit_undone_hash,
+                "search_first_ms": l.search_first_ms,
+                "search_complete_ms": l.search_complete_ms,
+                "search_message_ms": l.search_message_ms,
+                "search_files": l.search_files,
+                "search_matches": l.search_matches,
+                "search_limit_hit": l.search_limit_hit,
+                "search_message": l.search_message,
+                "search_state": l.search_state,
+                "start_hwm_sum_mb": l.start_hwm_sum_mb,
+                "start_hwm_max_mb": l.start_hwm_max_mb,
+                "peak_hwm_sum_mb": l.peak_hwm_sum_mb,
+                "peak_hwm_max_mb": l.peak_hwm_max_mb,
+    })
 }
 
 /// Which launches did not exit within 10 s of SIGTERM, if any: their
@@ -824,6 +987,12 @@ fn app_rows(plan: &Plan, launches: &[&Launch]) -> Vec<Row> {
             format!("{launch} the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's \"workbench ready\"")),
         row("launch_to_first_line", "launch to first line shown", "ms", pick(|l| l.spawn_to_first_line_ms),
             format!("{launch} the fixture's first line rendered in an editor `.view-line`, checked every {poll} ms over CDP; includes Electron and workbench startup, reading the file and rendering it on the virtual display")),
+        row("launch_to_first_swap", "launch to first swap", "ms", pick(|l| l.spawn_to_first_swap_ms),
+            format!("{launch} the end of the first `Display::DrawAndSwap` that the display compositor began after the fixture's first line entered the DOM (a Chromium trace with categories viz and blink.user_timing, started right after the CDP connection; a MutationObserver in the page marks the moment the line is in the DOM; `process.hrtime` and the trace share CLOCK_MONOTONIC): the App's first presented frame that can show the file, the counterpart of rustode's first present (G22). It may be one frame early, if that frame was drawn from content committed before the line; the second swap bounds it from above")),
+        row("launch_to_second_swap", "launch to second swap", "ms", pick(|l| l.spawn_to_second_swap_ms),
+            "the end of the second `Display::DrawAndSwap` after the mark: the upper bound of 'the first frame that shows the first line'".to_owned()),
+        row("swap_after_dom", "first swap after DOM mark", "ms", pick(|l| l.first_swap_after_dom_ms),
+            "from the first line entering the DOM to the end of the first swap after it: what the page spends rendering and presenting the line".to_owned()),
         row("workbench_to_first_line", "workbench to first line", "ms",
             pick(|l| Some(l.spawn_to_first_line_ms? - l.spawn_to_workbench_ms?)),
             "the two previous times subtracted, per launch: what the App spends after its editor part exists until the first line shows".to_owned()),
@@ -873,6 +1042,124 @@ fn gui_rows(launches: &[&Launch]) -> Vec<Row> {
             "summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup after the settle time".to_owned()),
         row("idle_pss", "idle PSS, all processes", "MB", pick(|l| l.idle_pss_mb),
             "summed `Pss` of the same processes at the same moment".to_owned()),
+    ]
+}
+
+/// What an equivalence check compares: its name, the value a launch reports
+/// and the oracle's value, if there is one.
+type Check<'a> = (&'a str, fn(&Launch) -> Option<String>, Option<String>);
+
+/// One equivalence check: every recorded launch of each side reports the same
+/// value as the other side and as the oracle (when there is one). `None` when
+/// neither side reported the value.
+fn compare_note(
+    what: &str,
+    gui: &[Launch],
+    app: &[Launch],
+    value: fn(&Launch) -> Option<String>,
+    oracle: Option<String>,
+) -> Option<(Option<&'static str>, String)> {
+    let distinct = |launches: &[Launch]| -> Vec<String> {
+        let mut values: Vec<String> = launches.iter().filter_map(value).collect();
+        values.sort();
+        values.dedup();
+        values
+    };
+    let (g, a) = (distinct(gui), distinct(app));
+    if g.is_empty() && a.is_empty() {
+        return None;
+    }
+    let mut all = [g.clone(), a.clone()].concat();
+    all.extend(oracle.clone());
+    all.sort();
+    all.dedup();
+    let same = all.len() == 1 && !g.is_empty() && !a.is_empty();
+    let shown = |v: &[String]| {
+        if v.is_empty() {
+            "not measured".to_owned()
+        } else {
+            v.join(" / ")
+        }
+    };
+    Some((
+        Some("measured"),
+        format!(
+            "{what}: rustode {}; App {}{}: {}",
+            shown(&g),
+            shown(&a),
+            oracle.map_or_else(String::new, |o| format!("; oracle {o}")),
+            if same {
+                "equal"
+            } else {
+                "NOT EQUAL (or one side did not run): the two editors did not do the same work"
+            }
+        ),
+    ))
+}
+
+/// The rows of the `edit-undo` and `search` scenarios, for either side.
+fn script_rows(side: &'static str, launches: &[&Launch]) -> Vec<Row> {
+    let app = side == "app";
+    let pick = |f: fn(&Launch) -> Option<f64>| -> Vec<f64> {
+        launches.iter().filter_map(|l| f(l)).map(round3).collect()
+    };
+    let count = |f: fn(&Launch) -> Option<u64>| -> Vec<f64> {
+        launches
+            .iter()
+            .filter_map(|l| f(l))
+            .map(|v| f64::from(u32::try_from(v).unwrap_or(u32::MAX)))
+            .collect()
+    };
+    let row = |metric, name, unit, decimals, samples, meaning: String| Row {
+        side,
+        metric,
+        name,
+        unit,
+        decimals,
+        samples,
+        meaning,
+    };
+    let (api, frame) = if app {
+        (
+            "the App's `TextModel` (`pushStackElement` and `pushEditOperations` for each insert, `getPositionAt` for its line and column, all in the timed loop; reached over CDP, no key sent)",
+            "the second `requestAnimationFrame` callback after the step, on the page's `performance.now()` clock",
+        )
+    } else {
+        (
+            "`Workspace::replace` for each insert (a char offset, its own undo step), run by the GUI on itself after its first frame (`RUSTODE_BENCH_SCRIPT`, no key sent)",
+            "the return from the `RedrawRequested` of the frame that follows the step, on `std::time::Instant`",
+        )
+    };
+    let search = if app {
+        "the command `workbench.action.findInFiles` with the query, executed on the App's command service over CDP; clock: the page's `performance.now()`, from just before the command"
+    } else {
+        "`Workspace::start_search`, started by the Search view's own code path, results streamed in the background and polled once per frame; clock: `std::time::Instant`, from the start of the search"
+    };
+    vec![
+        row("edit_apply", "10k inserts, applying", "ms", 1, pick(|l| l.edit_apply_ms),
+            format!("applying every seeded insert through {api}; the inserts alone")),
+        row("edit_apply_frame", "10k inserts, to next frame", "ms", 1, pick(|l| l.edit_apply_frame_ms),
+            format!("from before the first insert to the end of the next frame ({frame}); includes the inserts")),
+        row("edit_undo", "undo of all, applying", "ms", 1, pick(|l| l.edit_undo_ms),
+            "undoing every step until none is left (`Workspace::undo` / `TextModel.undo` in a loop); the undo alone".to_owned()),
+        row("edit_undo_frame", "undo of all, to next frame", "ms", 1, pick(|l| l.edit_undo_frame_ms),
+            format!("from before the first undo to the end of the next frame ({frame}); includes the undo")),
+        row("edit_undo_steps", "undo steps", "n", 0, count(|l| l.edit_undo_steps),
+            "how many undo steps there were (one per insert)".to_owned()),
+        row("start_hwm", "peak RSS before the script", "MB", 1, pick(|l| l.start_hwm_sum_mb),
+            "sum over the editor's processes of `VmHWM` (the kernel's peak resident size) read from /proc/<pid>/status right before the script: the startup and file-open peak; the sum over several processes is an upper bound of their simultaneous peak".to_owned()),
+        row("peak_hwm", "peak RSS after the script", "MB", 1, pick(|l| l.peak_hwm_sum_mb),
+            "the same sum of `VmHWM` read right after the script: the peak of the whole launch including the script; same caveat".to_owned()),
+        row("peak_hwm_max", "peak RSS, largest process", "MB", 1, pick(|l| l.peak_hwm_max_mb),
+            "the largest single process's `VmHWM` after the script (for the App, the renderer that holds the model)".to_owned()),
+        row("search_first", "search, first result", "ms", 1, pick(|l| l.search_first_ms),
+            format!("from the start of the search to the first result row drawn: {search}")),
+        row("search_complete", "search, complete", "ms", 1, pick(|l| l.search_complete_ms),
+            format!("from the start of the search to the end of the search with its final results shown (rustode: the presented frame after the state became Done; App: the sidebar progress bar active, then done, and the result message final): {search}")),
+        row("search_files", "files with matches", "n", 0, count(|l| l.search_files),
+            "files with at least one match in the results".to_owned()),
+        row("search_matches", "matches", "n", 0, count(|l| l.search_matches),
+            "matches in the results".to_owned()),
     ]
 }
 

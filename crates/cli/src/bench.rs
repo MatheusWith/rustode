@@ -160,9 +160,7 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
     };
     let environment = Environment::read(plan);
     create_run_folder(plan)?;
-    fixture::write(&plan.fixture(), plan.scenario.fixture)
-        .map_err(|err| Failure::Run(format!("cannot write the fixture: {err}")))?;
-    let fixture_sha256 = sha256(&plan.fixture());
+    let (fixture_sha256, tree) = write_fixture(plan)?;
     let mut status = Status::Ok;
     let mut reasons = Vec::new();
     let gui = if plan.runs_gui() && status == Status::Ok {
@@ -204,12 +202,30 @@ fn execute(plan: &Plan) -> Result<u8, Failure> {
         reasons,
         environment,
         fixture_sha256,
+        tree,
         rustode,
         gui,
         app,
     };
     write_report(&report)?;
     Ok(status.code())
+}
+
+/// Writes the scenario's fixture: a file (with its SHA-256) or, for a
+/// `search` scenario, the monorepo (with its summary).
+fn write_fixture(plan: &Plan) -> Result<(Option<String>, Option<fixture::TreeSummary>), Failure> {
+    let cannot = |err: std::io::Error| Failure::Run(format!("cannot write the fixture: {err}"));
+    match &plan.scenario.search {
+        Some(search) if plan.scenario.kind == scenario::Kind::Search => {
+            let tree = fixture::write_tree(&plan.fixture(), search, plan.scenario.fixture)
+                .map_err(cannot)?;
+            Ok((None, Some(tree)))
+        }
+        _ => {
+            fixture::write(&plan.fixture(), plan.scenario.fixture).map_err(cannot)?;
+            Ok((sha256(&plan.fixture()), None))
+        }
+    }
 }
 
 /// The in-process side of an `open-file` scenario: the recorded opens, or

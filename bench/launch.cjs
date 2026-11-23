@@ -16,9 +16,15 @@
  *
  * `cfg.target` is `app` (VSCodium, driven over CDP; no input is sent) or `gui`
  * (`rustode-gui`, which prints its first presented frame on stderr when
- * RUSTODE_REPORT_FIRST_FRAME is set). `cfg.measure` is `open`, `startup` or
- * `idle`; `cfg.cache` is `cold` (the editor's own files are dropped from the
- * page cache before each launch, bench/evict.py) or `warm`.
+ * RUSTODE_REPORT_FIRST_FRAME is set). `cfg.measure` is `open`, `startup`,
+ * `idle`, `edits` or `search`; `cfg.cache` is `cold` (the editor's own files
+ * are dropped from the page cache before each launch, bench/evict.py) or `warm`.
+ *
+ * `edits` and `search` run a script on the editor after it is ready, and no key
+ * is sent to either: the GUI runs it on itself (RUSTODE_BENCH_SCRIPT, the
+ * workspace's bench hook, which prints one report line on stderr); the App is
+ * driven over CDP through its own text model and command service
+ * (bench/app_internals.cjs).
  *
  * Each launch (warm-ups first, not recorded) gets a fresh isolated profile:
  *   1. drop the editor's files from the page cache if `cache` is `cold`;
@@ -52,6 +58,7 @@ const { spawn, spawnSync } = require('child_process');
 const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 // The QA harness's clock and polling helpers (process.hrtime: monotonic, ms).
 const { sleep, now, poll } = require(path.join(cfg.qa_root, 'suite/scenarios/lib.cjs'));
+const internals = require('./app_internals.cjs');
 const chromium = cfg.target === 'app' ? require(cfg.playwright_core).chromium : null;
 
 const EXIT = { ok: 0, error: 1, refused: 4, aborted: 5 };
@@ -103,6 +110,28 @@ function memoryOf(launch) {
 		} catch { /* gone, or not readable */ }
 	}
 	return { rss_mb: round1(rss / 1024), pss_mb: round1(pss / 1024), procs };
+}
+
+/**
+ * VmHWM (the kernel's peak resident size, kB) of the editor's processes, from /proc/<pid>/status:
+ * the sum over the processes (an upper bound of the peak at one instant, because the processes
+ * peak at different times) and the largest single process.
+ */
+function peakOf(launch) {
+	let sum = 0, max = 0;
+	for (const pid of editorPids(launch)) {
+		try {
+			const kb = +fs.readFileSync(`/proc/${pid}/status`, 'utf8').match(/^VmHWM:\s+(\d+)/m)[1];
+			sum += kb;
+			max = Math.max(max, kb);
+		} catch { /* gone, or not readable */ }
+	}
+	return { hwm_sum_mb: round1(sum / 1024), hwm_max_mb: round1(max / 1024) };
+}
+
+/** Records the peak resident sizes under `<prefix>_hwm_sum_mb` and `<prefix>_hwm_max_mb`. */
+function recordPeak(launch, rec, prefix) {
+	for (const [key, value] of Object.entries(peakOf(launch))) { rec[`${prefix}_${key}`] = value; }
 }
 
 /** Resident share (percent) of the editor's main file in the page cache, from `fincore`. */
@@ -207,21 +236,100 @@ async function recordGpu(browser) {
 	} catch (e) { out.gpu = { error: String(e.message || e).split('\n')[0] }; }
 }
 
+/** Runs in the page: whether the explorer shows the opened folder (its rows exist). */
+function folderShown() {
+	return !!document.querySelector('.explorer-folders-view .monaco-list-row');
+}
+
+/**
+ * The App's first presented frame, from a Chromium trace (gaps.md G22). The
+ * trace is started right after the CDP connection (categories `viz` and
+ * `blink.user_timing` only), a MutationObserver in the page marks the moment
+ * the fixture's first line enters the DOM (`performance.mark`, which lands in
+ * the same trace), and the frames the display compositor drew after the mark
+ * (`Display::DrawAndSwap`, which ends after `SoftwareRenderer::SwapBuffers`
+ * returned) are the App's counterpart of rustode's "first wgpu present
+ * returned". Trace timestamps and `process.hrtime` are the same clock
+ * (CLOCK_MONOTONIC; measured: they differ by the CDP round trip only).
+ */
+async function startTrace(browser) {
+	const session = await browser.newBrowserCDPSession();
+	const complete = new Promise(resolve => session.on('Tracing.tracingComplete', resolve));
+	await session.send('Tracing.start', {
+		transferMode: 'ReturnAsStream',
+		traceConfig: { recordMode: 'recordContinuously', includedCategories: ['viz', 'blink.user_timing'] },
+	});
+	return { session, complete };
+}
+
+/** Runs in the page: marks (once) the moment the fixture's first line is in the DOM. */
+function markFirstLine(want) {
+	const check = () => {
+		for (const line of document.querySelectorAll('.part.editor .monaco-editor .view-lines .view-line')) {
+			if (line.textContent.replace(/\u00a0/g, ' ').trimEnd() === want) {
+				performance.mark('rustode-first-line-in-dom');
+				return true;
+			}
+		}
+		return false;
+	};
+	if (check()) { return; }
+	const observer = new MutationObserver(() => { if (check()) { observer.disconnect(); } });
+	observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+}
+
+/** Stops the trace and records the frames the display compositor drew after the first-line mark. */
+async function finishTrace(launch, rec, tracer) {
+	await sleep(400); // let the frames after the first line be drawn
+	tracer.session.send('Tracing.end').catch(() => { });
+	const done = await tracer.complete;
+	let text = '';
+	for (;;) {
+		const chunk = await tracer.session.send('IO.read', { handle: done.stream, size: 1 << 20 });
+		text += chunk.data;
+		if (chunk.eof) { break; }
+	}
+	await tracer.session.send('IO.close', { handle: done.stream }).catch(() => { });
+	const parsed = JSON.parse(text);
+	const events = Array.isArray(parsed) ? parsed : parsed.traceEvents;
+	const mark = events.find(e => e.name === 'rustode-first-line-in-dom');
+	if (!mark) { rec.trace_error = 'no first-line mark in the trace'; return; }
+	const draws = events.filter(e => e.name === 'Display::DrawAndSwap' && e.ph === 'X' && e.ts >= mark.ts)
+		.sort((a, b) => a.ts - b.ts);
+	const toLaunch = us => round1(us / 1000 - launch.t0);
+	rec.spawn_to_dom_mark_ms = toLaunch(mark.ts);
+	rec.trace_frames_drawn = events.filter(e => e.name === 'Display::DrawAndSwap' && e.ph === 'X').length;
+	if (draws[0]) {
+		rec.spawn_to_first_swap_start_ms = toLaunch(draws[0].ts);
+		rec.spawn_to_first_swap_ms = toLaunch(draws[0].ts + draws[0].dur);
+		rec.first_swap_after_dom_ms = round1((draws[0].ts + draws[0].dur - mark.ts) / 1000);
+	}
+	if (draws[1]) { rec.spawn_to_second_swap_ms = toLaunch(draws[1].ts + draws[1].dur); }
+}
+
 async function measureApp(launch, rec) {
 	const endpoint = `http://127.0.0.1:${cfg.cdp_port}`;
 	rec.spawn_to_cdp_ms = (await until(launch, 'CDP endpoint', async () => {
 		try { return (await fetch(`${endpoint}/json/version`)).ok; } catch { return false; }
 	}, 25)).ms;
 	const browser = await chromium.connectOverCDP(endpoint);
+	let tracer = null;
 	try {
 		if (!out.gpu) { await recordGpu(browser); }
+		if (cfg.trace && cfg.measure !== 'search') { tracer = await startTrace(browser); }
 		const pages = () => browser.contexts().flatMap(c => c.pages());
 		const page = (await until(launch, 'workbench page', () => pages().find(p => /workbench/.test(p.url())), 25)).v;
+		if (tracer) { await page.evaluate(markFirstLine, cfg.first_line); }
 		try {
 			rec.spawn_to_workbench_ms = (await until(launch, 'editor part', () => page.evaluate(
 				() => !!document.querySelector('.monaco-workbench .part.editor')).catch(() => false), 25)).ms;
-			rec.spawn_to_first_line_ms = (await until(launch, "fixture's first line", () => page.evaluate(
-				firstLineShown, cfg.first_line).catch(() => false), cfg.poll_ms)).ms;
+			if (cfg.measure === 'search') {
+				rec.spawn_to_folder_ms = (await until(launch, 'the opened folder in the explorer', () => page.evaluate(
+					folderShown).catch(() => false), cfg.poll_ms)).ms;
+			} else {
+				rec.spawn_to_first_line_ms = (await until(launch, "fixture's first line", () => page.evaluate(
+					firstLineShown, cfg.first_line).catch(() => false), cfg.poll_ms)).ms;
+			}
 		} catch (e) {
 			if (e instanceof NoEndPoint) { rec.complaint = await page.evaluate(workbenchComplaint).catch(() => ''); }
 			await page.screenshot({ path: path.join(launch.dir, 'no-first-line.png') }).catch(() => { });
@@ -232,11 +340,53 @@ async function measureApp(launch, rec) {
 			if (fcp !== null) { rec.spawn_to_first_paint_ms = round1(fcp - launch.wall0); }
 		}
 		readyMemory(launch, rec);
+		if (tracer) { await finishTrace(launch, rec, tracer).catch(e => { rec.trace_error = String(e.message || e).split('\n')[0]; }); }
 		if (cfg.measure === 'idle') { await settle(launch, rec); }
+		if (cfg.measure === 'edits' || cfg.measure === 'search') { await runAppScript(launch, rec, page); }
 		await page.screenshot({ path: path.join(launch.dir, 'first-line.png') }).catch(() => { });
 	} finally {
 		await browser.close().catch(() => { }); // disconnects; the App keeps running
 	}
+}
+
+/** The App's side of the `edits` and `search` scenarios: the script, over CDP, on the App's own objects. */
+async function runAppScript(launch, rec, page) {
+	recordPeak(launch, rec, 'start');
+	const api = await internals.attach(page);
+	try {
+		if (cfg.measure === 'edits') {
+			const target = await api.model(path.basename(cfg.fixture), cfg.script.start_chars);
+			const r = await api.runEdits(target, cfg.script.seed, cfg.script.count);
+			Object.assign(rec, {
+				edit_start_chars: r.start_chars, edit_apply_ms: r.apply_ms, edit_apply_frame_ms: r.apply_frame_ms,
+				edit_applied_chars: r.applied_chars, edit_applied_hash: r.applied_hash,
+				edit_undo_ms: r.undo_ms, edit_undo_frame_ms: r.undo_frame_ms, edit_undo_steps: r.undo_steps,
+				edit_undone_chars: r.undone_chars, edit_undone_hash: r.undone_hash,
+			});
+		} else {
+			const s = cfg.script;
+			const r = await api.runSearch({
+				query: s.pattern, isRegex: s.regex, triggerSearch: true, filesToInclude: s.include, filesToExclude: s.exclude,
+				onlyOpenEditors: false,
+			}, cfg.timeout_ms);
+			const m = /^(\d[\d,]*) results? in (\d[\d,]*) files?/.exec(r.message || '');
+			const num = text => +text.replace(/,/g, '');
+			if (r.message === null || r.complete_ms === null) {
+				throw new NoEndPoint(`timeout: the search did not complete within ${cfg.timeout_ms} ms (message: ${r.message})`);
+			}
+			Object.assign(rec, {
+				search_first_ms: r.first_ms,
+				// The search view's progress bar went from active to done and the message stopped changing.
+				search_complete_ms: Math.max(r.complete_ms, r.first_ms || 0),
+				search_message_ms: r.counted_ms,
+				search_matches: m ? num(m[1]) : 0, search_files: m ? num(m[2]) : 0, search_message: r.message,
+				search_saw_progress: r.saw_progress,
+			});
+		}
+	} finally {
+		await api.cdp.detach().catch(() => { });
+	}
+	recordPeak(launch, rec, 'peak');
 }
 
 /** The GUI prints "first frame presented N us after main" after its first present. */
@@ -246,6 +396,32 @@ async function measureGui(launch, rec) {
 	rec.first_frame_after_main_ms = round1(launch.firstFrame.us / 1000);
 	readyMemory(launch, rec);
 	if (cfg.measure === 'idle') { await settle(launch, rec); }
+	if (cfg.measure === 'edits' || cfg.measure === 'search') {
+		recordPeak(launch, rec, 'start');
+		// The GUI runs RUSTODE_BENCH_SCRIPT on itself and prints one report line.
+		const line = (await until(launch, 'the bench report line', () => launch.bench, 20)).v;
+		if (line.error) { throw new Error(line.error); }
+		Object.assign(rec, guiBenchFields(line));
+		recordPeak(launch, rec, 'peak');
+	}
+}
+
+/** The bench line's `key=value` pairs as the record's fields (microseconds become ms). */
+function guiBenchFields(line) {
+	const ms = us => (us === 'none' ? null : round1(+us / 1000));
+	const f = line.fields;
+	if (line.kind === 'edits') {
+		return {
+			edit_start_chars: +f.start_chars, edit_apply_ms: ms(f.apply_us), edit_apply_frame_ms: ms(f.apply_frame_us),
+			edit_applied_chars: +f.applied_chars, edit_applied_hash: f.applied_hash,
+			edit_undo_ms: ms(f.undo_us), edit_undo_frame_ms: ms(f.undo_frame_us), edit_undo_steps: +f.undo_steps,
+			edit_undone_chars: +f.undone_chars, edit_undone_hash: f.undone_hash,
+		};
+	}
+	return {
+		search_first_ms: ms(f.first_result_us), search_complete_ms: ms(f.complete_us),
+		search_files: +f.files, search_matches: +f.matches, search_limit_hit: f.limit_hit === 'true', search_state: f.state,
+	};
 }
 
 /** Rss and Pss right after the end point: the memory a file costs once it is open (the watchdog's 1 s samples are too coarse). */
@@ -318,7 +494,7 @@ function start(label) {
 	const fill = (a, pid) => a.replaceAll('{profile_re}', reEscape(profile)).replaceAll('{profile}', profile)
 		.replaceAll('{rep_dir}', dir).replaceAll('{pid}', String(pid));
 	const [cmd, ...args] = cfg.app_command.map(a => fill(a));
-	const launch = { target: cfg.target, dir, profile, appExit: null, samplerExit: null, firstFrame: null };
+	const launch = { target: cfg.target, dir, profile, appExit: null, samplerExit: null, firstFrame: null, bench: null };
 	const log = fs.openSync(path.join(dir, 'app.log'), 'w');
 	launch.wall0 = Date.now();
 	launch.t0 = now();
@@ -333,8 +509,15 @@ function start(label) {
 			buffered += chunk.toString();
 			let nl;
 			while ((nl = buffered.indexOf('\n')) >= 0) {
-				const m = buffered.slice(0, nl).match(/first frame presented (\d+) us after main/);
+				const text = buffered.slice(0, nl);
+				const m = text.match(/first frame presented (\d+) us after main/);
 				if (m && !launch.firstFrame) { launch.firstFrame = { at, us: +m[1] }; }
+				const b = text.match(/^rustode-gui: bench (edits|search): (.*)$/);
+				if (b && !launch.bench) {
+					launch.bench = { kind: b[1], fields: Object.fromEntries(b[2].split(' ').map(p => p.split('='))) };
+				}
+				const e = text.match(/^rustode-gui: bench error: (.*)$/);
+				if (e && !launch.bench) { launch.bench = { error: e[1] }; }
 				buffered = buffered.slice(nl + 1);
 			}
 		});
@@ -385,7 +568,7 @@ function statusOf(rec) {
 }
 
 const out = {
-	schema: 'rustode-bench-app-results/2',
+	schema: 'rustode-bench-app-results/3',
 	target: cfg.target,
 	measure: cfg.measure,
 	cache: cfg.cache,

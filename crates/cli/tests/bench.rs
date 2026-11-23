@@ -65,8 +65,26 @@ def gui_launch(label, warmup, i):
             "first_frame_after_main_ms": 250.0 + i, "ready_rss_mb": 120.5 + i, "ready_pss_mb": 100.5 + i, "idle_rss_mb": 150.5 + i, "idle_pss_mb": 140.5 + i,
             "shutdown_ms": 20.0, "peak_rss_mb": 160 + i, "needed_sigkill": False,
             "evict_attempts": 5 if i == 2 else 1, "cache_reference_resident_pct": 28.4 if i == 2 else 0.0}
+def script_fields(launch_fn):
+    def wrapped(label, warmup, i):
+        r = launch_fn(label, warmup, i)
+        measure = config.get("measure")
+        side_hash = os.environ.get("FAKE_%s_HASH" % target.upper(), "c0ffee00")
+        if measure == "edits":
+            r.update({"edit_start_chars": 4100, "edit_apply_ms": 50.0 + i, "edit_apply_frame_ms": 60.0 + i,
+                      "edit_applied_chars": 4100 + config["script"]["count"], "edit_applied_hash": side_hash,
+                      "edit_undo_ms": 40.0 + i, "edit_undo_frame_ms": 45.0 + i, "edit_undo_steps": config["script"]["count"],
+                      "edit_undone_chars": 4100, "edit_undone_hash": "deadbeef",
+                      "start_hwm_sum_mb": 100.0, "start_hwm_max_mb": 100.0, "peak_hwm_sum_mb": 120.0 + i, "peak_hwm_max_mb": 120.0 + i})
+        if measure == "search":
+            r.update({"search_first_ms": 20.0 + i, "search_complete_ms": 90.0 + i,
+                      "search_files": int(os.environ.get("FAKE_FILES", "3")), "search_matches": int(os.environ.get("FAKE_MATCHES", "7")),
+                      "start_hwm_sum_mb": 100.0, "start_hwm_max_mb": 100.0, "peak_hwm_sum_mb": 130.0 + i, "peak_hwm_max_mb": 130.0 + i})
+        return r
+    return wrapped
 if target == "gui":
     launch = gui_launch
+launch = script_fields(launch)
 launches = [launch("warmup-%d" % i, True, 9) for i in range(1, config["warmup"] + 1)]
 launches += [launch("rep-%d" % i, False, i) for i in range(1, config["repetitions"] + 1)]
 status = os.environ.get("FAKE_STATUS", "ok")
@@ -326,7 +344,7 @@ fn the_versioned_scenario_list_has_the_open_file_scenario() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("bench/scenarios.toml"), "{text}");
-    assert!(text.contains("version 2"), "{text}");
+    assert!(text.contains("version 3"), "{text}");
     assert!(text.contains("open-file-1mb"), "{text}");
     assert!(text.contains("1048576 bytes"), "{text}");
 }
@@ -352,7 +370,7 @@ fn dry_run_prints_the_plan_and_launches_nothing() {
         "command ",
         "folder ",
         "open-file-1mb",
-        "list version 2",
+        "list version 3",
         "1048576 bytes",
         "Workspace::open",
         "sha256sum -c --quiet",
@@ -1007,4 +1025,423 @@ fn the_eviction_helper_drops_files_and_says_how_many() {
         "aaaa",
         "eviction never changes a file"
     );
+}
+
+/// A list with one scenario of each new kind, small enough to generate at once.
+const SCRIPT_LIST: &str = r#"
+version = 9
+
+[[scenario]]
+id = "edits-tiny"
+title = "Edits, tiny"
+kind = "edit-undo"
+
+[scenario.fixture]
+bytes = 4096
+line_bytes = 64
+
+[scenario.edits]
+seed = 5
+count = 40
+
+[scenario.gui]
+warmup = 1
+repetitions = 2
+timeout_s = 5
+
+[scenario.app]
+warmup = 1
+repetitions = 2
+timeout_s = 5
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+
+[[scenario]]
+id = "search-tiny"
+title = "Search, tiny"
+kind = "search"
+
+[scenario.fixture]
+bytes = 2048
+line_bytes = 64
+
+[scenario.search]
+files = 40
+seed = 3
+pattern = '\bhandle_[a-z]+_[0-9]{3}\b'
+regex = true
+include = "**/*.ts,**/*.rs"
+exclude = "**/legacy/**"
+
+[scenario.gui]
+warmup = 1
+repetitions = 2
+timeout_s = 5
+
+[scenario.app]
+warmup = 1
+repetitions = 2
+timeout_s = 5
+poll_ms = 10
+driver = "launch.cjs"
+settings = "app/settings.json"
+"#;
+
+impl Sandbox {
+    fn bench_script(&self, id: &str, env: &[(&str, &str)]) -> Output {
+        self.write("bench/scenarios.toml", SCRIPT_LIST);
+        self.write("bench/evict.py", "# fake, never run\n");
+        let gui = self.fake_gui();
+        let project = self.path("project");
+        let copies = self.path("copies");
+        self.command(&[
+            "bench",
+            id,
+            "--project",
+            project.to_str().expect("utf-8"),
+            "--out",
+            "out",
+            "--app-copy-dir",
+            copies.to_str().expect("utf-8"),
+            "--gui-bin",
+            gui.to_str().expect("utf-8"),
+        ])
+        .envs(env.iter().copied())
+        .output()
+        .expect("rustode runs")
+    }
+
+    fn note(&self, needle: &str) -> String {
+        let report = self.report();
+        report["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .filter_map(|n| n["text"].as_str())
+            .find(|t| t.contains(needle))
+            .unwrap_or_else(|| panic!("no note with {needle:?} in {:#}", report["notes"]))
+            .to_owned()
+    }
+}
+
+#[test]
+fn the_versioned_list_has_the_ticket_42_scenarios_and_no_typing() {
+    let out = Command::new(RUSTODE)
+        .args(["bench", "--list"])
+        .current_dir(repo_root())
+        .output()
+        .expect("runs");
+    let text = stdout(&out);
+    assert!(text.contains("list version 3"), "{text}");
+    for id in [
+        "edit-undo-10k",
+        "search-monorepo",
+        "startup-cold",
+        "open-file-1gb",
+    ] {
+        assert!(text.contains(id), "{id} missing: {text}");
+    }
+    assert!(
+        !text.contains("typing"),
+        "typing waits for ADR 0028: {text}"
+    );
+}
+
+#[test]
+fn the_dry_run_of_the_edit_scenario_gives_the_gui_a_script_and_sends_no_key() {
+    let sandbox = Sandbox::new("edits-dry");
+    let list = repo_root().join("bench/scenarios.toml");
+    let out = sandbox.run(&[
+        "bench",
+        "--dry-run",
+        "edit-undo-10k",
+        "--scenarios",
+        list.to_str().expect("utf-8"),
+        "--out",
+        "out",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let plan = stdout(&out);
+    for needle in [
+        "RUSTODE_BENCH_SCRIPT={\"kind\":\"edits\",\"seed\":1,\"count\":10000}",
+        "no key is sent",
+        "--unshare-net",
+    ] {
+        assert!(plan.contains(needle), "plan lacks {needle:?}:\n{plan}");
+    }
+    assert!(!sandbox.path("out").exists());
+}
+
+#[test]
+fn the_dry_run_of_the_search_scenario_plans_a_generated_monorepo() {
+    let sandbox = Sandbox::new("search-dry");
+    let list = repo_root().join("bench/scenarios.toml");
+    let out = sandbox.run(&[
+        "bench",
+        "--dry-run",
+        "search-monorepo",
+        "--scenarios",
+        list.to_str().expect("utf-8"),
+        "--out",
+        "out",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let plan = stdout(&out);
+    assert!(plan.contains("generate the monorepo"), "{plan}");
+    assert!(plan.contains("5000 source files"), "{plan}");
+    assert!(plan.contains("\"kind\":\"search\""), "{plan}");
+    assert!(
+        plan.contains("search-monorepo"),
+        "the folder is the fixture: {plan}"
+    );
+}
+
+#[test]
+fn a_new_kind_without_its_table_is_refused() {
+    let sandbox = Sandbox::new("script-bad");
+    for (bad, needle) in [
+        (
+            SCRIPT_LIST.replace("[scenario.edits]\nseed = 5\ncount = 40\n", ""),
+            "scenario.edits",
+        ),
+        (SCRIPT_LIST.replace("count = 40", "count = 0"), "count"),
+        (SCRIPT_LIST.replace("files = 40", "files = 0"), "files"),
+        (
+            SCRIPT_LIST.replace("kind = \"search\"", "kind = \"open-file\""),
+            "belongs to search",
+        ),
+    ] {
+        sandbox.write("bench/scenarios.toml", &bad);
+        let out = sandbox.run(&["bench", "--list"]);
+        assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+        assert!(stderr(&out).contains(needle), "{needle}: {}", stderr(&out));
+    }
+}
+
+#[test]
+fn the_edit_scenario_checks_that_both_sides_hold_the_same_text() {
+    let sandbox = Sandbox::new("edits-run");
+    let out = sandbox.bench_script("edits-tiny", &[]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = sandbox.report();
+    assert_eq!(report["scenario"]["kind"], "edit-undo");
+    assert_eq!(report["inputs"]["script"]["count"], 40);
+    for (side, metric, n) in [
+        ("rustode", "edit_apply", 2),
+        ("rustode", "edit_undo_frame", 2),
+        ("app", "edit_apply_frame", 2),
+        ("app", "peak_hwm", 2),
+        ("app", "edit_undo_steps", 2),
+    ] {
+        assert_eq!(result(&report, side, metric)["n"], n, "{side} {metric}");
+    }
+    assert_eq!(result(&report, "app", "edit_undo_steps")["p50"], 40.0);
+    assert!(
+        sandbox
+            .note("text hash after the inserts")
+            .ends_with(": equal")
+    );
+    assert!(sandbox.note("undo steps").contains("oracle 40"));
+    // The GUI's call carries the script, the App's driver config too.
+    let gui: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(sandbox.path("calls/run_virtual-gui.json")).expect("gui call"),
+    )
+    .expect("json");
+    assert_eq!(gui["config"]["measure"], "edits");
+    assert_eq!(gui["config"]["script"]["seed"], 5);
+    assert_eq!(gui["config"]["script"]["start_chars"], 4096);
+    let script = gui["config"]["env"]["RUSTODE_BENCH_SCRIPT"]
+        .as_str()
+        .expect("script env");
+    assert!(script.contains("\"kind\":\"edits\""), "{script}");
+    assert_eq!(
+        sandbox.harness_call().expect("app")["config"]["measure"],
+        "edits"
+    );
+}
+
+#[test]
+fn different_text_on_the_two_sides_is_called_out() {
+    let sandbox = Sandbox::new("edits-diff");
+    let out = sandbox.bench_script("edits-tiny", &[("FAKE_APP_HASH", "12345678")]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let note = sandbox.note("text hash after the inserts");
+    assert!(note.contains("NOT EQUAL"), "{note}");
+    assert!(
+        note.contains("12345678") && note.contains("c0ffee00"),
+        "{note}"
+    );
+}
+
+/// The matches of the generated tree, counted by `grep` (another engine than
+/// the generator's own oracle and than either editor's).
+fn grep_counts(tree: &Path) -> (u64, u64) {
+    let out = Command::new("grep")
+        .args(["-rEoc", r"\bhandle_[a-z]+_[0-9]{3}\b"])
+        .args(["--include=*.ts", "--include=*.rs", "--exclude-dir=legacy"])
+        .arg("src")
+        .current_dir(tree)
+        .output()
+        .expect("grep runs");
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let counts: Vec<u64> = text
+        .lines()
+        .filter_map(|l| l.rsplit(':').next()?.parse().ok())
+        .collect();
+    (
+        counts.iter().filter(|c| **c > 0).count() as u64,
+        counts.iter().sum(),
+    )
+}
+
+#[test]
+fn the_search_scenario_generates_a_tree_whose_counts_an_independent_grep_confirms() {
+    let sandbox = Sandbox::new("search-run");
+    let out = sandbox.bench_script("search-tiny", &[]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = sandbox.report();
+    let tree = &report["inputs"]["fixture"]["tree"];
+    assert_eq!(tree["oracle_applies"], true);
+    let folder = sandbox.run_folder().join("fixtures/search-tiny");
+    let (files, matches) = grep_counts(&folder);
+    assert_eq!(
+        tree["expected_files"], files,
+        "files with matches: oracle against grep"
+    );
+    assert_eq!(
+        tree["expected_matches"], matches,
+        "matches: oracle against grep"
+    );
+    assert!(matches > 0, "the tiny tree has something to find");
+    // The fake sides reported 3 files and 7 matches: not the oracle's.
+    assert!(sandbox.note("matches: ").contains("NOT EQUAL"));
+    // Hidden folders exist in the tree, so the excludes have work to do.
+    for hidden in ["node_modules", "generated", "logs", "src/legacy"] {
+        assert!(folder.join(hidden).is_dir(), "{hidden}");
+    }
+    assert!(folder.join(".gitignore").is_file());
+    let text = fs::read_to_string(sandbox.run_folder().join("report.txt")).expect("report.txt");
+    assert!(
+        text.contains("oracle      the generator planted the matches"),
+        "{text}"
+    );
+    // A second run whose sides report what the oracle expects.
+    let (e_files, e_matches) = (files.to_string(), matches.to_string());
+    let sandbox = Sandbox::new("search-run-ok");
+    let out = sandbox.bench_script(
+        "search-tiny",
+        &[("FAKE_FILES", &e_files), ("FAKE_MATCHES", &e_matches)],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(sandbox.note("matches: ").ends_with(": equal"));
+    assert_eq!(result(&sandbox.report(), "app", "search_complete")["n"], 2);
+}
+
+#[test]
+fn the_app_internals_module_is_valid_javascript_and_its_generator_matches_the_rust_one() {
+    let node = std::env::var_os("RUSTODE_NODE").map_or_else(
+        || {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                .join(".local/opt/node-v24.22.1-linux-x64/bin/node")
+        },
+        PathBuf::from,
+    );
+    if !node.exists() {
+        eprintln!("skipped: no Node at {}", node.display());
+        return;
+    }
+    let module = repo_root().join("bench/app_internals.cjs");
+    let out = Command::new(&node)
+        .arg("-e")
+        .arg(format!(
+            "const m = require({:?}); m.selfCheck(); console.log(JSON.stringify(m.editOffsets(1, 6, 1000)))",
+            module.display().to_string()
+        ))
+        .output()
+        .expect("node runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    // The six edits that crates/workspace/tests/bench.rs pins for the Rust generator.
+    assert_eq!(
+        stdout(&out).trim(),
+        r#"[[496,"r"],[95,"h"],[270,"u"],[320,"e"],[559,"v"],[330,"i"]]"#
+    );
+    let check = Command::new(&node)
+        .arg("--check")
+        .arg(&module)
+        .output()
+        .expect("node runs");
+    assert!(check.status.success(), "{}", stderr(&check));
+}
+
+#[test]
+fn the_apps_trace_of_its_first_frame_is_planned_and_can_be_turned_off() {
+    let sandbox = Sandbox::new("trace-dry");
+    let list = repo_root().join("bench/scenarios.toml");
+    let plan = |extra: &[&str]| {
+        let mut args = vec![
+            "bench",
+            "--dry-run",
+            "startup-warm",
+            "--scenarios",
+            list.to_str().expect("utf-8"),
+            "--out",
+            "out",
+        ];
+        args.extend_from_slice(extra);
+        let out = sandbox.run(&args);
+        assert!(out.status.success(), "{}", stderr(&out));
+        stdout(&out)
+    };
+    assert!(plan(&[]).contains("each launch is traced"), "{}", plan(&[]));
+    assert!(!plan(&["--no-app-trace"]).contains("traced"));
+    // The scenarios that script the editor are not traced.
+    let edits = sandbox.run(&[
+        "bench",
+        "--dry-run",
+        "edit-undo-10k",
+        "--scenarios",
+        list.to_str().expect("utf-8"),
+        "--out",
+        "out",
+    ]);
+    assert!(!stdout(&edits).contains("traced"));
+}
+
+#[test]
+fn the_traced_scenarios_hand_the_trace_flag_to_the_app_driver_only() {
+    let sandbox = Sandbox::new("trace-run");
+    sandbox.write("bench/evict.py", "# fake, never run\n");
+    let gui = sandbox.fake_gui();
+    sandbox.write(
+        "bench/scenarios.toml",
+        &LAUNCH_LIST.replace("poll_ms = 10", "poll_ms = 10\ntrace = true"),
+    );
+    let project = sandbox.path("project");
+    let copies = sandbox.path("copies");
+    let out = sandbox
+        .command(&[
+            "bench",
+            "startup-tiny",
+            "--project",
+            project.to_str().expect("utf-8"),
+            "--out",
+            "out",
+            "--app-copy-dir",
+            copies.to_str().expect("utf-8"),
+            "--gui-bin",
+            gui.to_str().expect("utf-8"),
+        ])
+        .output()
+        .expect("runs");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        sandbox.harness_call().expect("app")["config"]["trace"],
+        true
+    );
+    let gui: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(sandbox.path("calls/run_virtual-gui.json")).expect("gui call"),
+    )
+    .expect("json");
+    assert_eq!(gui["config"]["trace"], false);
 }

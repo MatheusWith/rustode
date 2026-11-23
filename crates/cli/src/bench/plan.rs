@@ -61,6 +61,9 @@ pub(crate) struct Plan<'a> {
     pub proc_dir: PathBuf,
     /// The rustode GUI binary for launch scenarios.
     pub gui_bin: PathBuf,
+    /// Whether the App's launches record the Chromium trace of their first
+    /// presented frame (the scenario asks for it and `--no-app-trace` is not given).
+    pub app_trace: bool,
     /// Mesa's EGL vendor file: makes the GUI's GL use Mesa's llvmpipe instead
     /// of the machine's GPU driver (`RUSTODE_BENCH_MESA_EGL`).
     pub mesa_egl: PathBuf,
@@ -122,6 +125,7 @@ impl<'a> Plan<'a> {
             ),
             lock: env_path("RUSTODE_BENCH_LOCK", runtime.join("rustode-bench.lock")),
             proc_dir: env_path("RUSTODE_BENCH_PROC", PathBuf::from("/proc")),
+            app_trace: scenario.app.trace && !options.no_app_trace,
             mesa_egl: env_path(
                 "RUSTODE_BENCH_MESA_EGL",
                 PathBuf::from("/usr/share/glvnd/egl_vendor.d/50_mesa.json"),
@@ -168,11 +172,35 @@ impl<'a> Plan<'a> {
         self.project.join("02-package-analysis/version.txt")
     }
 
-    /// The generated fixture.
+    /// The generated fixture: a file, or for a `search` scenario the root of
+    /// the generated monorepo.
     pub(crate) fn fixture(&self) -> PathBuf {
-        self.run_folder
-            .join("fixtures")
-            .join(format!("{}.txt", self.scenario.id))
+        let fixtures = self.run_folder.join("fixtures");
+        if self.scenario.kind == Kind::Search {
+            fixtures.join(&self.scenario.id)
+        } else {
+            fixtures.join(format!("{}.txt", self.scenario.id))
+        }
+    }
+
+    /// What the driver and the GUI's bench hook run once the editor is ready:
+    /// the seeded edits, or the search. `None` for the other kinds.
+    pub(crate) fn script(&self) -> Option<serde_json::Value> {
+        let s = self.scenario;
+        match s.kind {
+            Kind::EditUndo => s.edits.map(|e| {
+                serde_json::json!({
+                    "kind": "edits", "seed": e.seed, "count": e.count,
+                })
+            }),
+            Kind::Search => s.search.as_ref().map(|q| {
+                serde_json::json!({
+                    "kind": "search", "pattern": q.pattern, "regex": q.regex,
+                    "include": q.include, "exclude": q.exclude,
+                })
+            }),
+            Kind::OpenFile | Kind::Launch => None,
+        }
     }
 
     /// The fixture's first line, which the App must show.
@@ -282,6 +310,12 @@ impl<'a> Plan<'a> {
             kv("WGPU_BACKEND", "gl"),
         ];
         env.extend(self.software_rendering_env());
+        if let Some(script) = self.script() {
+            env.push((
+                rustode_workspace::bench::SCRIPT_ENV.to_owned(),
+                script.to_string(),
+            ));
+        }
         env
     }
 
@@ -415,13 +449,25 @@ impl<'a> Plan<'a> {
 
     fn describe_steps(&self, out: &mut String) {
         let s = self.scenario;
-        let _ = writeln!(
-            out,
-            "  1. fixture: generate {} ({} bytes, numbered ASCII lines of {} bytes with LF)",
-            display::path(&self.fixture()),
-            s.fixture.bytes,
-            s.fixture.line_bytes
-        );
+        if let Some(search) = &s.search {
+            let _ = writeln!(
+                out,
+                "  1. fixture: generate the monorepo {} (seed {}: {} source files of {} bytes in lines of {} bytes, plus node_modules, generated and log files that the excludes must hide)",
+                display::path(&self.fixture()),
+                search.seed,
+                search.files,
+                s.fixture.bytes,
+                s.fixture.line_bytes
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "  1. fixture: generate {} ({} bytes, numbered ASCII lines of {} bytes with LF)",
+                display::path(&self.fixture()),
+                s.fixture.bytes,
+                s.fixture.line_bytes
+            );
+        }
         if self.runs_in_process() {
             let build = if cfg!(debug_assertions) {
                 "debug"
@@ -475,6 +521,12 @@ impl<'a> Plan<'a> {
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
         let _ = writeln!(out, "       environment: {}", env.join(" "));
+        if let Some(script) = self.script() {
+            let _ = writeln!(
+                out,
+                "       script, run by the GUI on itself after its first frame (no key is sent): {script}"
+            );
+        }
         if let Some(launch) = self.scenario.launch {
             let _ = writeln!(
                 out,
@@ -528,8 +580,14 @@ impl<'a> Plan<'a> {
                 display::command(&self.sampler_command())
             ),
             format!(
-                "     timeout {} s per launch; the editor is checked every {} ms for the fixture's first line",
-                app.timeout_s, app.poll_ms
+                "     timeout {} s per launch; the editor is checked every {} ms for the fixture's first line{}",
+                app.timeout_s,
+                app.poll_ms,
+                if self.app_trace {
+                    "; each launch is traced (Chromium categories viz and blink.user_timing) to find the first frame presented after the first line entered the DOM"
+                } else {
+                    ""
+                }
             ),
             format!(
                 "  6. App cleanup: delete the copy, then check {} again",
