@@ -105,7 +105,7 @@ fn failure(events: &[ExtensionEvent]) -> String {
 
 #[test]
 fn a_search_lists_the_registry_results() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.search_results(&[
         Fixture::new("acme", "hello", "1.2.3"),
         Fixture::new("acme", "world", "0.1.0"),
@@ -147,7 +147,7 @@ fn a_search_lists_the_registry_results() {
 
 #[test]
 fn a_search_text_is_cut_at_200_chars_and_an_empty_one_sends_nothing() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.search_results(&[]);
     let (mut ws, _) = workspace("search-long", &stand_in);
     ws.search_extensions("   ");
@@ -165,7 +165,7 @@ fn a_search_text_is_cut_at_200_chars_and_an_empty_one_sends_nothing() {
 
 #[test]
 fn a_search_never_blocks_the_caller() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.search_results(&[Fixture::new("acme", "hello", "1.0.0")]);
     stand_in.hold();
     let (mut ws, _) = workspace("non-blocking", &stand_in);
@@ -182,7 +182,7 @@ fn a_search_never_blocks_the_caller() {
 
 #[test]
 fn only_the_latest_search_counts() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.search_results(&[Fixture::new("acme", "hello", "1.0.0")]);
     stand_in.hold();
     let (mut ws, _) = workspace("latest-search", &stand_in);
@@ -197,7 +197,7 @@ fn only_the_latest_search_counts() {
 
 #[test]
 fn a_failed_search_is_reported() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.route("/api/-/search", Reply::status(500));
     let (mut ws, _) = workspace("search-500", &stand_in);
     ws.search_extensions("hello");
@@ -250,7 +250,7 @@ fn assert_index(dir: &Path, folder: &Path) {
 
 #[test]
 fn an_install_lays_the_extension_out_as_vs_code_does() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("Acme", "Hello", "1.2.3"));
     let (mut ws, dir) = workspace("install", &stand_in);
     ws.install_extension("Acme.Hello").expect("install");
@@ -276,7 +276,7 @@ fn an_install_lays_the_extension_out_as_vs_code_does() {
 
 #[test]
 fn installed_extensions_are_listed_as_not_loaded() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("Acme", "Hello", "1.2.3"));
     let (mut ws, dir) = workspace("listed", &stand_in);
     ws.install_extension("Acme.Hello").expect("install");
@@ -297,7 +297,7 @@ fn installed_extensions_are_listed_as_not_loaded() {
 
 #[test]
 fn installing_the_installed_version_again_downloads_nothing() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
     let (mut ws, _) = workspace("reinstall", &stand_in);
@@ -319,7 +319,7 @@ fn installing_the_installed_version_again_downloads_nothing() {
 
 #[test]
 fn a_new_version_replaces_the_old_one() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
     let (mut ws, dir) = workspace("update", &stand_in);
     ws.install_extension("acme.hello").expect("install");
@@ -340,7 +340,7 @@ fn a_new_version_replaces_the_old_one() {
 
 #[test]
 fn a_platform_specific_extension_gets_its_linux_x64_build() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let mut windows = Fixture::new("acme", "native", "2.0.0");
     windows.target_platform = "win32-x64".into();
     let mut linux = Fixture::new("acme", "native", "2.0.0");
@@ -380,7 +380,7 @@ fn a_platform_specific_extension_gets_its_linux_x64_build() {
 
 #[test]
 fn an_extension_without_a_linux_build_is_not_installed() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let mut windows = Fixture::new("acme", "native", "2.0.0");
     windows.target_platform = "win32-x64".into();
     stand_in.route(
@@ -396,7 +396,7 @@ fn an_extension_without_a_linux_build_is_not_installed() {
 
 #[test]
 fn a_download_whose_sha256_differs_is_refused_and_leaves_nothing() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
     stand_in.route(
@@ -417,7 +417,7 @@ fn a_download_whose_sha256_differs_is_refused_and_leaves_nothing() {
 
 #[test]
 fn a_download_without_a_published_sha256_is_refused() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
     let mut metadata = fixture.metadata(stand_in.url());
@@ -438,7 +438,7 @@ fn a_download_without_a_published_sha256_is_refused() {
 
 #[test]
 fn an_entry_that_leaves_the_extension_folder_is_refused() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let mut fixture = Fixture::new("acme", "slip", "1.0.0");
     fixture
         .files
@@ -455,10 +455,12 @@ fn an_entry_that_leaves_the_extension_folder_is_refused() {
 
 #[test]
 fn a_vsix_for_another_extension_is_refused() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
-    let other = Fixture::new("acme", "other", "1.0.0").vsix();
+    let other = Fixture::new("acme", "other", "1.0.0")
+        .vsix()
+        .expect("the fixture packs");
     stand_in.route(&fixture.download_path(), Reply::bytes(other.clone()));
     stand_in.route(
         &fixture.sha256_path(),
@@ -473,13 +475,13 @@ fn a_vsix_for_another_extension_is_refused() {
 
 #[test]
 fn a_vsix_without_a_manifest_or_not_a_zip_is_refused() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
     let (mut ws, _) = workspace("bad-vsix", &stand_in);
     for (bytes, expected) in [
         (
-            vsix(&[("extension/README.md", b"no manifest")]),
+            vsix(&[("extension/README.md", b"no manifest")]).expect("the archive packs"),
             "no extension/package.json",
         ),
         (b"not a zip".to_vec(), "not a VSIX"),
@@ -515,7 +517,7 @@ fn the_microsoft_marketplace_is_never_contacted() {
     }
     assert_eq!(ws.extension_registry(), rustode_workspace::OPEN_VSX);
 
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
     let mut metadata = fixture.metadata(stand_in.url());
@@ -542,11 +544,14 @@ fn the_microsoft_marketplace_is_never_contacted() {
 
 #[test]
 fn redirects_are_followed_and_checked() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let fixture = Fixture::new("acme", "hello", "1.0.0");
     stand_in.publish(&fixture);
     let moved = "/storage/acme.hello-1.0.0.vsix";
-    stand_in.route(moved, Reply::bytes(fixture.vsix()));
+    stand_in.route(
+        moved,
+        Reply::bytes(fixture.vsix().expect("the fixture packs")),
+    );
     stand_in.route(&fixture.download_path(), Reply::redirect(moved));
     let (mut ws, _) = workspace("redirect", &stand_in);
     ws.install_extension("acme.hello").expect("install");
@@ -594,7 +599,7 @@ fn registries_must_be_https_or_on_this_machine() {
 
 #[test]
 fn uninstall_removes_the_folder_and_the_index_entry() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
     stand_in.publish(&Fixture::new("acme", "world", "3.0.0"));
     let (mut ws, dir) = workspace("uninstall", &stand_in);
@@ -631,7 +636,7 @@ fn uninstall_removes_the_folder_and_the_index_entry() {
 
 #[test]
 fn a_listing_finishes_interrupted_deletions() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = workspace("cleanup", &stand_in);
     std::fs::create_dir_all(dir.join("acme.gone-1.0.0-universal.1234.vsctmp/sub")).expect("vsctmp");
     std::fs::create_dir_all(dir.join("acme.old-1.0.0-universal")).expect("obsolete folder");
@@ -648,7 +653,7 @@ fn a_listing_finishes_interrupted_deletions() {
 
 #[test]
 fn an_index_written_by_vs_code_is_listed() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = workspace("vs-code-index", &stand_in);
     let folder = dir.join("acme.nls-1.0.0");
     std::fs::create_dir_all(&folder).expect("folder");
@@ -701,7 +706,7 @@ fn an_index_written_by_vs_code_is_listed() {
 
 #[test]
 fn an_invalid_index_is_reported_and_never_overwritten() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
     let (mut ws, dir) = workspace("bad-index", &stand_in);
     std::fs::create_dir_all(&dir).expect("dir");
@@ -726,7 +731,7 @@ fn commands_are_refused_before_they_start() {
         Err(ExtensionError::NoLocation)
     );
     assert_eq!(ws.refresh_extensions(), Err(ExtensionError::NoLocation));
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.hold();
     let (mut ws, _) = workspace("refused", &stand_in);
     for bad in ["hello", "../../etc.passwd", "a.b.c", "acme/x.y"] {
@@ -750,7 +755,7 @@ fn commands_are_refused_before_they_start() {
 
 #[test]
 fn extension_commands_run_by_id_with_an_argument() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
     stand_in.search_results(&[Fixture::new("acme", "hello", "1.0.0")]);
     let (mut ws, _) = workspace("execute-with", &stand_in);
@@ -785,7 +790,7 @@ fn extension_commands_run_by_id_with_an_argument() {
 
 #[test]
 fn the_waker_is_called_when_results_arrive() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.search_results(&[]);
     let (mut ws, _) = workspace("waker", &stand_in);
     let calls = Arc::new(AtomicUsize::new(0));
@@ -855,7 +860,7 @@ fn with_hello(name: &str, stand_in: &StandIn) -> (Workspace, PathBuf) {
 
 #[test]
 fn disabling_is_kept_as_vs_code_keeps_it_and_survives_a_restart() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("disable", &stand_in);
     assert_eq!(enablement(&ws, "acme.hello"), EnablementState::Enabled);
     assert_eq!(
@@ -893,7 +898,7 @@ fn disabling_is_kept_as_vs_code_keeps_it_and_survives_a_restart() {
 
 #[test]
 fn a_disabled_extension_stays_disabled_after_a_restart_until_enabled() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("restart", &stand_in);
     ws.disable_extension("acme.hello").expect("disable");
     settle(&mut ws);
@@ -939,7 +944,7 @@ fn a_disabled_extension_stays_disabled_after_a_restart_until_enabled() {
 
 #[test]
 fn enabling_an_enabled_extension_changes_nothing() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("enable-twice", &stand_in);
     ws.enable_extension("acme.hello").expect("enable");
     let events = settle(&mut ws);
@@ -968,7 +973,7 @@ fn enabling_an_enabled_extension_changes_nothing() {
 
 #[test]
 fn enable_and_disable_run_by_command_id() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, _) = with_hello("enable-commands", &stand_in);
     assert_eq!(
         ws.execute_with("workbench.extensions.disableExtension", "acme.hello"),
@@ -993,7 +998,7 @@ fn enable_and_disable_run_by_command_id() {
 
 #[test]
 fn enabling_an_extension_that_is_not_installed_fails() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = workspace("enable-missing", &stand_in);
     ws.enable_extension("acme.hello").expect("queued");
     let message = failure(&settle(&mut ws));
@@ -1006,7 +1011,7 @@ fn enabling_an_extension_that_is_not_installed_fails() {
 
 #[test]
 fn a_new_version_stays_disabled_and_uninstalling_forgets_it() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("disabled-update", &stand_in);
     ws.disable_extension("acme.hello").expect("disable");
     settle(&mut ws);
@@ -1055,7 +1060,7 @@ fn write_extension(dir: &Path, id: &str, version: &str, manifest: &serde_json::V
 
 #[test]
 fn an_invalid_extension_is_listed_as_invalid_and_its_enablement_cannot_change() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = workspace("invalid", &stand_in);
     write_extension(
         &dir,
@@ -1093,7 +1098,7 @@ fn an_invalid_extension_is_listed_as_invalid_and_its_enablement_cannot_change() 
 
 #[test]
 fn an_extension_disabled_before_it_became_invalid_stays_disabled_and_can_be_enabled() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = workspace("invalid-disabled", &stand_in);
     write_extension(
         &dir,
@@ -1128,7 +1133,7 @@ fn an_extension_disabled_before_it_became_invalid_stays_disabled_and_can_be_enab
 
 #[test]
 fn an_installed_extension_for_a_newer_vs_code_is_invalid() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let mut fixture = Fixture::new("acme", "future", "1.0.0");
     fixture.engine = "^1.200.0".into();
     stand_in.publish(&fixture);
@@ -1152,7 +1157,7 @@ fn an_installed_extension_for_a_newer_vs_code_is_invalid() {
 
 #[test]
 fn state_written_by_vs_code_is_read_and_its_other_rows_are_kept() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("vs-code-state", &stand_in);
     std::fs::create_dir_all(storage(&dir)).expect("storage");
     std::fs::write(
@@ -1177,7 +1182,7 @@ fn state_written_by_vs_code_is_read_and_its_other_rows_are_kept() {
 
 #[test]
 fn an_unreadable_state_file_is_reported_and_never_overwritten() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("bad-state", &stand_in);
     std::fs::create_dir_all(storage(&dir)).expect("storage");
     for bad in [
@@ -1207,7 +1212,7 @@ fn an_unreadable_state_file_is_reported_and_never_overwritten() {
 
 #[test]
 fn enablement_needs_a_global_storage_folder() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let dir = temp("no-storage").join("extensions");
     let mut ws = Workspace::new();
     ws.set_extensions_location(&dir);
@@ -1240,7 +1245,7 @@ fn enablement_needs_a_global_storage_folder() {
 
 #[test]
 fn enable_and_disable_wait_for_an_install_of_the_same_extension() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     stand_in.publish(&Fixture::new("acme", "hello", "1.0.0"));
     stand_in.hold();
     let (mut ws, _) = workspace("busy-enable", &stand_in);
@@ -1313,7 +1318,7 @@ fn with_extra_fields(name: &str, stand_in: &StandIn) -> (Workspace, PathBuf) {
 
 #[test]
 fn extensions_json_is_written_in_vs_codes_key_order() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (_, dir) = with_extra_fields("index-order", &stand_in);
     let text = std::fs::read_to_string(dir.join("extensions.json")).expect("index");
     let entries: Value = serde_json::from_str(&text).expect("json");
@@ -1347,7 +1352,7 @@ fn extensions_json_is_written_in_vs_codes_key_order() {
 
 #[test]
 fn package_json_keeps_its_field_order_and_gets_metadata_last() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (ws, dir) = with_extra_fields("manifest-order", &stand_in);
     // Indented with tabs, as `JSON.stringify(manifest, null, '\t')` does.
     let folder = dir.join("acme.hello-1.2.3-universal");

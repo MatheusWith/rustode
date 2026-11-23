@@ -113,7 +113,7 @@ fn search(harness: &mut Harness<'_, EditorApp>) {
 
 #[test]
 fn ctrl_shift_x_shows_the_panel_with_its_search_box_focused() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut harness, _) = open("show", &stand_in);
     assert!(labels(&harness).iter().all(|label| label != "EXTENSIONS"));
     ctrl_shift_x(&mut harness);
@@ -132,7 +132,7 @@ fn ctrl_shift_x_shows_the_panel_with_its_search_box_focused() {
 
 #[test]
 fn a_search_shows_install_buttons() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut harness, _) = open("search", &stand_in);
     search(&mut harness);
@@ -146,7 +146,7 @@ fn a_search_shows_install_buttons() {
 
 #[test]
 fn install_then_uninstall_with_the_buttons() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut harness, extensions) = open("install", &stand_in);
     search(&mut harness);
@@ -185,7 +185,7 @@ fn install_then_uninstall_with_the_buttons() {
 
 #[test]
 fn disable_then_enable_with_the_buttons() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut harness, extensions) = open("enable", &stand_in);
     let state = extensions
@@ -225,7 +225,7 @@ fn disable_then_enable_with_the_buttons() {
 
 #[test]
 fn an_invalid_extension_shows_why_and_cannot_be_enabled() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut harness, extensions) = open("invalid", &stand_in);
     let folder = extensions.join("acme.broken-1.0.0");
     std::fs::create_dir_all(&folder).expect("folder");

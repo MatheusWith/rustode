@@ -117,7 +117,7 @@ fn publish(stand_in: &StandIn) {
 
 #[test]
 fn ctrl_shift_x_shows_the_view_and_a_search_lists_results() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut app, _) = app("search", &stand_in);
     let mut terminal = Terminal::new(TestBackend::new(100, 14)).expect("terminal");
@@ -132,7 +132,7 @@ fn ctrl_shift_x_shows_the_view_and_a_search_lists_results() {
 
 #[test]
 fn enter_installs_and_the_installed_list_says_not_loaded() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut app, extensions) = app("install", &stand_in);
     let mut terminal = Terminal::new(TestBackend::new(100, 14)).expect("terminal");
@@ -168,7 +168,7 @@ fn enter_installs_and_the_installed_list_says_not_loaded() {
 
 #[test]
 fn ctrl_shift_x_again_and_escape_go_back_to_the_editor() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut app, _) = app("focus", &stand_in);
     let mut terminal = Terminal::new(TestBackend::new(100, 12)).expect("terminal");
     send(&mut app, &mut terminal, &[ctrl_shift_x()]);
@@ -209,7 +209,7 @@ fn ctrl_shift_x_again_and_escape_go_back_to_the_editor() {
 
 #[test]
 fn a_failed_install_is_reported_in_the_status_bar() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let hello = Fixture::new("acme", "hello", "1.2.3");
     stand_in.search_results(std::slice::from_ref(&hello));
     let (mut app, _) = app("failed", &stand_in);
@@ -235,7 +235,7 @@ fn a_failed_install_is_reported_in_the_status_bar() {
 
 #[test]
 fn enter_disables_and_enables_an_installed_extension() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut app, extensions) = app("enable", &stand_in);
     let state = extensions
@@ -282,7 +282,7 @@ fn enter_disables_and_enables_an_installed_extension() {
 
 #[test]
 fn an_invalid_extension_says_why_on_enter() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut app, extensions) = app("invalid", &stand_in);
     let folder = extensions.join("acme.broken-1.0.0");
     std::fs::create_dir_all(&folder).expect("folder");
@@ -325,7 +325,7 @@ fn an_invalid_extension_says_why_on_enter() {
 /// deterministically.
 #[test]
 fn a_running_operation_is_labelled_until_it_is_polled() {
-    let stand_in = StandIn::start();
+    let stand_in = StandIn::start().expect("the stand-in starts");
     publish(&stand_in);
     let (mut app, _) = app("running", &stand_in);
     let mut terminal = Terminal::new(TestBackend::new(100, 14)).expect("terminal");

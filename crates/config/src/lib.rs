@@ -7,6 +7,18 @@
 //!
 //! Nothing here fails on bad input: every problem is a [`Diagnostic`] with a line and column.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 mod config;
 mod diagnostic;
 pub mod jsonc;

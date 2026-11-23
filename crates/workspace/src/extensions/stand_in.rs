@@ -127,8 +127,10 @@ impl Fixture {
 
     /// Its VSIX: the manifest files, `extension/package.json`, a README,
     /// a script, and [`Fixture::files`].
-    #[must_use]
-    pub fn vsix(&self) -> Vec<u8> {
+    ///
+    /// # Errors
+    /// When a name in [`Fixture::files`] is not valid in a zip archive.
+    pub fn vsix(&self) -> Result<Vec<u8>, zip::result::ZipError> {
         let manifest = self.manifest().to_string();
         let mut files: Vec<(String, Vec<u8>)> = vec![
             (
@@ -224,23 +226,22 @@ impl Fixture {
 /// Builds a VSIX (a zip archive, deflated) from `(path, bytes)` entries;
 /// a path ending in `/` is a folder.
 ///
-/// # Panics
-/// Never for in-memory archives with valid names.
-#[must_use]
-pub fn vsix(entries: &[(&str, &[u8])]) -> Vec<u8> {
+/// # Errors
+/// When an entry's name is not valid in a zip archive.
+pub fn vsix(entries: &[(&str, &[u8])]) -> Result<Vec<u8>, zip::result::ZipError> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o644);
     for (name, bytes) in entries {
         if name.ends_with('/') {
-            writer.add_directory(*name, options).expect("zip folder");
+            writer.add_directory(*name, options)?;
         } else {
-            writer.start_file(*name, options).expect("zip entry");
-            writer.write_all(bytes).expect("zip write");
+            writer.start_file(*name, options)?;
+            writer.write_all(bytes)?;
         }
     }
-    writer.finish().expect("zip finish").into_inner()
+    Ok(writer.finish()?.into_inner())
 }
 
 /// The SHA-256 of `bytes`, in lower-case hex.
@@ -298,12 +299,11 @@ impl std::fmt::Debug for StandIn {
 impl StandIn {
     /// Starts a server on a free port of 127.0.0.1.
     ///
-    /// # Panics
+    /// # Errors
     /// When no port can be bound.
-    #[must_use]
-    pub fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1");
-        let addr = listener.local_addr().expect("local address");
+    pub fn start() -> std::io::Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let addr = listener.local_addr()?;
         let state = Arc::new(State::default());
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
@@ -320,13 +320,13 @@ impl StandIn {
                 }
             })
         };
-        Self {
+        Ok(Self {
             addr,
             url: format!("http://{addr}"),
             state,
             stop,
             thread: Some(thread),
-        }
+        })
     }
 
     /// The base URL, e.g. `http://127.0.0.1:41234`.
@@ -376,8 +376,22 @@ impl StandIn {
 
     /// Publishes `fixture`: its metadata (also under `/linux-x64` for a
     /// platform build), its VSIX ([`Fixture::vsix`]) and its SHA-256.
+    ///
+    /// A fixture whose package cannot be built is served as a 500 reply
+    /// that says why, so the test that publishes it fails visibly.
     pub fn publish(&self, fixture: &Fixture) {
-        let vsix = fixture.vsix();
+        let vsix = match fixture.vsix() {
+            Ok(vsix) => vsix,
+            Err(err) => {
+                let reply = Reply {
+                    status: 500,
+                    headers: Vec::new(),
+                    body: format!("the stand-in cannot build the VSIX: {err}").into_bytes(),
+                };
+                self.route(&fixture.download_path(), reply);
+                return;
+            }
+        };
         let base = format!("/api/{}/{}", fixture.namespace, fixture.name);
         let metadata = Reply::json(&fixture.metadata(&self.url));
         self.route(&base, metadata.clone());

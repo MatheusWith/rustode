@@ -1,5 +1,17 @@
 //! The single in-process API that every frontend uses.
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 pub mod bench;
 mod bulk_edit;
 mod child;

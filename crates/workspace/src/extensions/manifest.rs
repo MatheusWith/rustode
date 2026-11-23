@@ -36,6 +36,15 @@ pub const VSCODE_API_VERSION: &str = "1.147.0";
 /// minute and second.
 pub const VSCODE_API_DATE: [u32; 6] = [2026, 11, 12, 16, 39, 10];
 
+/// A built-in pattern that does not compile: a rustode bug, reported as a
+/// problem so that validation never panics.
+fn pattern_bug(err: &regex::Error) -> ManifestProblem {
+    ManifestProblem::error(format!(
+        "rustode cannot check this manifest because one of its own patterns does not compile \
+         ({err}); this is a rustode bug, please report it"
+    ))
+}
+
 /// Something validation found in a manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestProblem {
@@ -350,11 +359,18 @@ fn validate(fields: &Map<String, Value>, location: &Path) -> Vec<ManifestProblem
         return problems;
     }
     let version = fields["version"].as_str().unwrap_or_default();
-    if !is_semver(version) {
-        problems.push(ManifestProblem::error(
-            "the extension's version is not semver compatible",
-        ));
-        return problems;
+    match is_semver(version) {
+        Ok(true) => {}
+        Ok(false) => {
+            problems.push(ManifestProblem::error(
+                "the extension's version is not semver compatible",
+            ));
+            return problems;
+        }
+        Err(err) => {
+            problems.push(pattern_bug(&err));
+            return problems;
+        }
     }
     let engine = fields["engines"]["vscode"].as_str().unwrap_or_default();
     if has_code(fields)
@@ -389,21 +405,21 @@ fn stays_inside(location: &Path, entry: &str) -> bool {
 
 /// A version as the scanner reads it: strict `SemVer`, an optional leading
 /// `v`, at most 256 chars, numbers below 2^53.
-fn is_semver(version: &str) -> bool {
-    static SEMVER: LazyLock<Regex> = LazyLock::new(|| {
+fn is_semver(version: &str) -> Result<bool, regex::Error> {
+    static SEMVER: LazyLock<Result<Regex, regex::Error>> = LazyLock::new(|| {
         let number = "0|[1-9][0-9]*";
         let pre = "(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][a-zA-Z0-9-]*)";
         let build = "[0-9A-Za-z-]+";
         Regex::new(&format!(
             r"^v?({number})\.({number})\.({number})(?:-{pre}(?:\.{pre})*)?(?:\+{build}(?:\.{build})*)?$"
         ))
-        .unwrap_or_else(|err| unreachable!("the SemVer pattern is valid: {err}"))
     });
     const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
-    version.len() <= 256
-        && SEMVER.captures(version).is_some_and(|parts| {
+    let semver = SEMVER.as_ref().map_err(Clone::clone)?;
+    Ok(version.len() <= 256
+        && semver.captures(version).is_some_and(|parts| {
             (1..=3).all(|i| parts[i].parse::<u64>().is_ok_and(|n| n <= MAX_SAFE_INTEGER))
-        })
+        }))
 }
 
 /// An `engines.vscode` value or a product version, read.
@@ -422,32 +438,35 @@ fn js_trim(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }
 
-fn parse_requirement(text: &str) -> Option<Requirement> {
-    static VERSION: LazyLock<Regex> = LazyLock::new(|| {
+/// `Ok(None)` when `text` is not a requirement; an error only if a pattern
+/// does not compile, which no input can cause.
+fn parse_requirement(text: &str) -> Result<Option<Requirement>, regex::Error> {
+    static VERSION: LazyLock<Result<Regex, regex::Error>> = LazyLock::new(|| {
         Regex::new(r"^(\^|>=)?([0-9]+|x)\.([0-9]+|x)\.([0-9]+|x)(-[^\n\r\u{2028}\u{2029}]*)?$")
-            .unwrap_or_else(|err| unreachable!("the version pattern is valid: {err}"))
     });
-    static NOT_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^-([0-9]{4})([0-9]{2})([0-9]{2})([0-9]{2})?([0-9]{2})?$")
-            .unwrap_or_else(|err| unreachable!("the date pattern is valid: {err}"))
-    });
+    static NOT_BEFORE: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^-([0-9]{4})([0-9]{2})([0-9]{2})([0-9]{2})?([0-9]{2})?$"));
     let text = js_trim(text);
     if text == "*" {
-        return Some(Requirement {
+        return Ok(Some(Requirement {
             caret: false,
             minimum: false,
             parts: [(0, false); 3],
             not_before: None,
-        });
+        }));
     }
-    let found = VERSION.captures(text)?;
+    let version = VERSION.as_ref().map_err(Clone::clone)?;
+    let not_before_pattern = NOT_BEFORE.as_ref().map_err(Clone::clone)?;
+    let Some(found) = version.captures(text) else {
+        return Ok(None);
+    };
     let part = |i: usize| match &found[i] {
         "x" => (0, false),
         digits => (digits.parse::<u64>().unwrap_or(u64::MAX), true),
     };
     let not_before = found
         .get(5)
-        .and_then(|pre| NOT_BEFORE.captures(pre.as_str()))
+        .and_then(|pre| not_before_pattern.captures(pre.as_str()))
         .map(|date| {
             let field = |i: usize| {
                 date.get(i)
@@ -456,12 +475,12 @@ fn parse_requirement(text: &str) -> Option<Requirement> {
             };
             [field(1), field(2), field(3), field(4), field(5)]
         });
-    Some(Requirement {
+    Ok(Some(Requirement {
         caret: found.get(1).is_some_and(|m| m.as_str() == "^"),
         minimum: found.get(1).is_some_and(|m| m.as_str() == ">="),
         parts: [part(2), part(3), part(4)],
         not_before,
-    })
+    }))
 }
 
 /// The requirement with `^` applied: the parts after the first non-zero
@@ -524,7 +543,8 @@ fn satisfies(product: [u64; 3], date: [u32; 6], wanted: Requirement) -> bool {
 /// Checks `engines.vscode` against the API `version` of `date`
 /// (`isVersionValid`, `extensionValidator.ts:348-379`).
 fn check_engine(engine: &str, version: &str, date: [u32; 6]) -> Result<(), String> {
-    let Some(wanted) = parse_requirement(engine).map(normalized) else {
+    let wanted = parse_requirement(engine).map_err(|err| pattern_bug(&err).message)?;
+    let Some(wanted) = wanted.map(normalized) else {
         return Err(format!(
             "cannot parse `engines.vscode` value {engine}; use, for example, ^1.22.0 or ^1.22.x"
         ));
@@ -540,7 +560,9 @@ fn check_engine(engine: &str, version: &str, date: [u32; 6]) -> Result<(), Strin
             "`engines.vscode` ({engine}) is not specific enough: name at least the major version, e.g. ^1.10.0, 1.10.x or 1.x.x"
         ));
     }
-    let product = parse_requirement(version).map_or([0; 3], |p| p.parts.map(|(n, _)| n));
+    let product = parse_requirement(version)
+        .map_err(|err| pattern_bug(&err).message)?
+        .map_or([0; 3], |p| p.parts.map(|(n, _)| n));
     if satisfies(product, date, wanted) {
         Ok(())
     } else {
@@ -625,7 +647,7 @@ mod tests {
             "1.2.3+build.5",
             "1.2.3-rc.1+b",
         ] {
-            assert!(is_semver(good), "{good}");
+            assert_eq!(is_semver(good), Ok(true), "{good}");
         }
         for bad in [
             "1.0",
@@ -638,9 +660,9 @@ mod tests {
             "9007199254740992.0.0",
             "١.٠.٠",
         ] {
-            assert!(!is_semver(bad), "{bad}");
+            assert_eq!(is_semver(bad), Ok(false), "{bad}");
         }
-        assert!(!is_semver(&format!("1.0.0-{}", "a".repeat(260))));
+        assert_eq!(is_semver(&format!("1.0.0-{}", "a".repeat(260))), Ok(false));
     }
 
     #[test]
