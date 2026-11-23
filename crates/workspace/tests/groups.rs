@@ -267,7 +267,9 @@ fn closing_one_view_keeps_the_document_open_for_the_other() {
     assert_eq!(ws.group_ids(), [left], "the emptied group closed");
     assert_eq!(ws.active_group(), left);
     // The last view of a dirty document refuses without discard.
-    assert!(matches!(ws.close_editor(left, doc, false), Err(Error::Dirty(d)) if d == doc));
+    assert!(
+        matches!(ws.close_editor(left, doc, false), Err(Error::Dirty { id: d, .. }) if d == doc)
+    );
     ws.close_editor(left, doc, true).expect("discard");
     assert!(ws.document(doc).is_none());
     assert_eq!(ws.group_ids().len(), 1, "the last group stays, empty");
@@ -350,7 +352,7 @@ fn closing_all_editors_in_a_group_closes_the_group() {
 
 fn run_err(ws: &mut Workspace, id: &str, expected: DocumentId) {
     assert!(
-        matches!(ws.execute(id), Err(Error::Dirty(d)) if d == expected),
+        matches!(ws.execute(id), Err(Error::Dirty { id: d, .. }) if d == expected),
         "{id}"
     );
 }

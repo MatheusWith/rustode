@@ -15,3 +15,14 @@ fn fixtures(user: &str) {
     // ok: rustode.microsoft-marketplace-or-telemetry
     let url = "https://open-vsx.org/api";
 }
+
+fn error_formats(err: Error, count: usize) {
+    // ruleid: rustode.debug-format-of-error-in-frontend
+    let a = format!("failed: {err:?}");
+    // ruleid: rustode.debug-format-of-error-in-frontend
+    let b = format!("failed: {:?}", err);
+    // ok: rustode.debug-format-of-error-in-frontend
+    let c = format!("failed: {err}");
+    // ok: rustode.debug-format-of-error-in-frontend
+    let d = format!("{count:?} problems");
+}

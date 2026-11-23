@@ -26,9 +26,15 @@ impl App {
     }
 
     /// The picker's rows for `query`, when the quick input is the picker.
-    pub(crate) fn language_items(&self, query: &str) -> Option<Vec<QuickItem>> {
+    pub(crate) fn language_items(&mut self, query: &str) -> Option<Vec<QuickItem>> {
         let id = self.quick.as_ref()?.language?;
-        let picks = self.workspace.language_picks(id, query).unwrap_or_default();
+        let picks = match self.workspace.language_picks(id, query) {
+            Ok(picks) => picks,
+            Err(err) => {
+                self.message = Some(err.to_string());
+                Vec::new()
+            }
+        };
         Some(picks.into_iter().map(QuickItem::Language).collect())
     }
 

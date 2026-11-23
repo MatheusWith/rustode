@@ -178,6 +178,8 @@ pub struct App {
     pub(crate) suggest: crate::suggest::State,
     confirm_quit: bool,
     pub(crate) confirm_close: Option<DocumentId>,
+    /// The open disk-conflict prompt (`conflict.rs`).
+    pub(crate) conflict: Option<rustode_workspace::ConflictPrompt>,
     quit: bool,
     latency: LatencyRecorder,
 }
@@ -234,6 +236,7 @@ impl App {
             theme: Theme::new(ColorMode::detect(|key| std::env::var(key).ok())),
             confirm_quit: false,
             confirm_close: None,
+            conflict: None,
             quit: false,
             latency: LatencyRecorder::new(),
         })
@@ -357,7 +360,11 @@ impl App {
     pub fn handle(&mut self, event: &Event) {
         self.workspace.poll_language_servers();
         self.workspace.poll_debug();
+        self.refresh_conflict_prompt();
         match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release && self.conflict.is_some() => {
+                self.conflict_key(*key);
+            }
             Event::Key(key) if key.kind != KeyEventKind::Release && self.quick.is_some() => {
                 self.quick_key(*key);
             }
@@ -380,6 +387,7 @@ impl App {
         }
         self.workspace.poll_extensions();
         self.take_events();
+        self.restore_conflict_prompt();
     }
 
     /// A key: the user's `keybindings.json` first (later entries win, a
@@ -510,7 +518,7 @@ impl App {
 
     /// Runs a command by VS Code id: through the TUI's own handling when a
     /// key could run it, else through the workspace's registry.
-    fn run_id(&mut self, id: &str) {
+    pub(crate) fn run_id(&mut self, id: &str) {
         if let Some(command) = keys::from_id(id) {
             self.run_command(command);
             return;
@@ -642,21 +650,15 @@ impl App {
         }
     }
 
-    /// Ctrl+S. After the file changed on disk under unsaved edits, saving
-    /// keeps the user's version (the conflict prompt says so).
+    /// Ctrl+S. When the file changed on disk under unsaved edits, saving
+    /// asks (`conflict.rs`) instead of picking a version.
     fn save(&mut self) {
         let Some(id) = self.document() else { return };
-        let result = match self.workspace.save(id) {
-            Err(Error::Conflict(_)) => self
-                .workspace
-                .resolve_conflict(id, Resolution::KeepMine)
-                .and_then(|()| self.workspace.save(id)),
-            other => other,
-        };
-        self.message = Some(match result {
-            Ok(()) => "Saved".to_owned(),
-            Err(err) => err.to_string(),
-        });
+        match self.workspace.save(id) {
+            Ok(()) => self.message = Some("Saved".to_owned()),
+            Err(Error::Conflict { .. }) => self.open_conflict_prompt(),
+            Err(err) => self.message = Some(err.to_string()),
+        }
     }
 
     /// F5: loads the disk version after a conflict, else starts debugging
@@ -715,7 +717,7 @@ impl App {
                     self.focus = Focus::Explorer;
                 }
             }
-            Err(Error::Dirty(_)) => {
+            Err(Error::Dirty { .. }) => {
                 self.confirm_close = Some(id);
                 self.message = Some(
                     "Unsaved changes: Ctrl+W again closes without saving, Ctrl+S saves".to_owned(),
@@ -1046,7 +1048,9 @@ impl App {
             .iter()
             .find(|(y, x0, x1, _)| *y == row && (*x0..*x1).contains(&column))
         {
-            let _ = self.workspace.activate(id);
+            if let Err(err) = self.workspace.activate(id) {
+                self.message = Some(err.to_string());
+            }
             self.focus = Focus::Editor;
             return;
         }
@@ -1230,7 +1234,7 @@ impl App {
         for event in &events {
             let message = match event {
                 WorkspaceEvent::Conflict { .. } => {
-                    "The file changed on disk: Ctrl+S keeps your version, F5 loads the disk version"
+                    "The file changed on disk: Ctrl+S asks whether to overwrite it, F5 loads the disk version"
                         .to_owned()
                 }
                 WorkspaceEvent::Deleted { .. } => {

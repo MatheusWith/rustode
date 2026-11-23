@@ -229,6 +229,15 @@ pub(crate) struct Outcome {
 }
 
 impl Outcome {
+    /// Folds in the result of a search from the widget's origin: the
+    /// selection moved, or why it could not.
+    fn search(&mut self, result: Result<bool, String>) {
+        match result {
+            Ok(moved) => self.reveal |= moved,
+            Err(err) => self.message = Some(err),
+        }
+    }
+
     fn report(&mut self, result: Result<String, String>) {
         match result {
             Ok(message) if message.is_empty() => {}
@@ -255,12 +264,17 @@ impl Find {
     /// Ctrl+F, or Ctrl+H with `replace`: shows the widget, seeded with a
     /// selection on one line unless the find field has focus, and searches
     /// from the selection's start.
-    pub(crate) fn open(&mut self, ctx: &Context, workspace: &mut Workspace, replace: bool) -> bool {
+    pub(crate) fn open(
+        &mut self,
+        ctx: &Context,
+        workspace: &mut Workspace,
+        replace: bool,
+    ) -> Result<bool, String> {
         let Some(document) = workspace
             .active_document()
             .and_then(|id| workspace.document(id))
         else {
-            return false;
+            return Ok(false);
         };
         let in_find = ctx.memory(|memory| memory.has_focus(find_id()));
         let selection = document.primary_selection().range();
@@ -291,16 +305,20 @@ impl Find {
 
     /// Selects the first match from where the widget opened; returns
     /// whether the selection moved.
-    fn search_from_origin(&mut self, workspace: &mut Workspace) -> bool {
+    fn search_from_origin(&mut self, workspace: &mut Workspace) -> Result<bool, String> {
         let (Some(id), Ok(query)) = (workspace.active_document(), self.query()) else {
-            return false;
+            return Ok(false);
         };
         if query.pattern().is_empty() {
-            return false;
+            return Ok(false);
         }
-        let _ = workspace.set_cursor(id, self.origin);
-        let _ = workspace.find_next(id, &query);
-        true
+        workspace
+            .set_cursor(id, self.origin)
+            .map_err(|err| err.to_string())?;
+        workspace
+            .find_next(id, &query)
+            .map_err(|err| err.to_string())?;
+        Ok(true)
     }
 
     /// F3 / Enter and Shift+F3 / Shift+Enter: the next or previous match,
@@ -358,9 +376,11 @@ impl Find {
         if current {
             return;
         }
-        let found = self
-            .query()
-            .map(|query| workspace.find_all(id, &query).unwrap_or_default());
+        let found = self.query().and_then(|query| {
+            workspace
+                .find_all(id, &query)
+                .map_err(|err| err.to_string())
+        });
         self.matches = Some(Matches {
             document: id,
             version,
@@ -460,7 +480,7 @@ impl Find {
             Action::Toggle(toggle) => {
                 let flag = toggle.flag(&mut self.options);
                 *flag = !*flag;
-                outcome.reveal |= self.search_from_origin(workspace);
+                outcome.search(self.search_from_origin(workspace));
             }
         }
     }
@@ -704,7 +724,7 @@ fn find_row(
     label_field(ui, find_id(), "Find");
     if response.changed() {
         outcome.changed = true;
-        outcome.reveal |= find.search_from_origin(workspace);
+        outcome.search(find.search_from_origin(workspace));
     }
     toggles(ui, workspace, find, field, outcome);
     let (count, failed) = find.count(workspace);

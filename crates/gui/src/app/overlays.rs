@@ -18,9 +18,8 @@ impl EditorApp {
     pub(super) fn run_find(&mut self, ctx: &Context, command: Workbench) {
         let result = match command {
             Workbench::Find | Workbench::Replace => {
-                Ok(self
-                    .find
-                    .open(ctx, &mut self.workspace, command == Workbench::Replace))
+                self.find
+                    .open(ctx, &mut self.workspace, command == Workbench::Replace)
             }
             _ => self
                 .find
@@ -156,7 +155,38 @@ impl EditorApp {
                 changed = true;
             }
         }
+        changed |= self.show_conflict(&ctx);
         changed
+    }
+
+    /// The disk-conflict prompt, while the active document still has the
+    /// conflict it was opened for.
+    fn show_conflict(&mut self, ctx: &Context) -> bool {
+        if let Some(prompt) = &self.conflict
+            && !self
+                .workspace
+                .document(prompt.document)
+                .is_some_and(Document::has_conflict)
+        {
+            self.conflict = None;
+        }
+        let Some(prompt) = self.conflict.clone() else {
+            return false;
+        };
+        match crate::conflict::show(ctx, &prompt) {
+            crate::conflict::Reply::None => false,
+            crate::conflict::Reply::Dismiss => {
+                self.conflict = None;
+                self.focus_editor(ctx);
+                true
+            }
+            crate::conflict::Reply::Run(command) => {
+                self.conflict = None;
+                self.run_command(ctx, command);
+                self.focus_editor(ctx);
+                true
+            }
+        }
     }
 
     /// What the location list or the rename box did.

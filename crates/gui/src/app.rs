@@ -99,6 +99,8 @@ pub struct EditorApp {
     notice: Option<String>,
     /// The tab whose unsaved changes the next close discards.
     confirm_close: Option<DocumentId>,
+    /// The open disk-conflict prompt (`conflict.rs`).
+    conflict: Option<rustode_workspace::ConflictPrompt>,
     /// The title last sent to the window.
     title: Option<String>,
     /// Set when the window runs under [`crate::run`], to time frames.
@@ -212,6 +214,7 @@ impl EditorApp {
             error: None,
             notice: None,
             confirm_close: None,
+            conflict: None,
             title: None,
             latency: None,
             extensions: extensions::Panel::default(),
@@ -339,9 +342,9 @@ impl EditorApp {
     fn note(&mut self) {
         for event in self.workspace.take_events() {
             self.notice = match event {
-                Event::Conflict { .. } => {
-                    Some("The file changed on disk; the unsaved changes are kept.".to_owned())
-                }
+                Event::Conflict { .. } => Some(
+                    "The file changed on disk; saving will ask whether to overwrite it.".to_owned(),
+                ),
                 Event::Deleted { .. } => Some("The file was deleted from disk.".to_owned()),
                 Event::Renamed { to, .. } => {
                     Some(format!("The file was moved to {}.", to.display()))
@@ -688,6 +691,7 @@ impl EditorApp {
         };
         match self.workspace.save(id) {
             Ok(()) => self.error = None,
+            Err(Error::Conflict { .. }) => self.conflict = self.workspace.conflict_prompt(id),
             Err(err) => self.error = Some(format!("Save failed: {err}")),
         }
     }
@@ -709,8 +713,8 @@ impl EditorApp {
                     self.focus_editor(ctx);
                 }
             }
-            Err(Error::Dirty(_)) => {
-                let _ = self.workspace.activate(id);
+            Err(Error::Dirty { .. }) => {
+                self.activate(id);
                 self.confirm_close = Some(id);
                 self.message = Some(CLOSE_PROMPT.to_owned());
             }
@@ -873,20 +877,34 @@ impl EditorApp {
         changed
     }
 
+    /// Switches to a tab; why it could not is shown in the status bar.
+    fn activate(&mut self, id: DocumentId) {
+        if let Err(err) = self.workspace.activate(id) {
+            self.message = Some(err.to_string());
+        }
+    }
+
+    /// Gives a group the focus; why it could not is shown in the status bar.
+    fn focus_group(&mut self, group: GroupId) {
+        if let Err(err) = self.workspace.focus_group(group) {
+            self.message = Some(err.to_string());
+        }
+    }
+
     /// What a click or key on a group's strip asked. A click on a group
     /// that does not have the focus gives it the focus first.
     fn tab_action(&mut self, ctx: &Context, group: GroupId, action: Option<tabs::Action>) -> bool {
         let Some(action) = action else { return false };
         if group != self.workspace.active_group() {
-            let _ = self.workspace.focus_group(group);
+            self.focus_group(group);
         }
         match action {
             tabs::Action::Activate(id) => {
-                let _ = self.workspace.activate(id);
+                self.activate(id);
                 self.focus_editor(ctx);
             }
             tabs::Action::Select(id) => {
-                let _ = self.workspace.activate(id);
+                self.activate(id);
                 focus(ctx, tabs::tab_id(id));
             }
             tabs::Action::Close(id) => self.close(ctx, id),
@@ -907,7 +925,7 @@ impl EditorApp {
                 self.message = None;
                 self.focus_editor(ctx);
             }
-            Err(Error::Dirty(_)) => {
+            Err(Error::Dirty { .. }) => {
                 self.message = Some(CLOSE_PROMPT.to_owned());
             }
             Err(err) => self.message = Some(err.to_string()),
@@ -994,8 +1012,10 @@ impl EditorApp {
         }
         if let Some(offset) = outcome.pressed {
             // A press on another group focuses it and puts its caret there.
-            let _ = self.workspace.focus_group(group);
-            let _ = self.workspace.set_cursor(id, offset);
+            self.focus_group(group);
+            if let Err(err) = self.workspace.set_cursor(id, offset) {
+                self.message = Some(err.to_string());
+            }
             self.focus_editor(ui.ctx());
             return true;
         }

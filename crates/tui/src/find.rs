@@ -133,8 +133,13 @@ impl App {
             return;
         };
         if let Some(Ok(query)) = self.query() {
-            let _ = self.workspace.set_cursor(id, origin);
-            let _ = self.workspace.find_next(id, &query);
+            let result = self
+                .workspace
+                .set_cursor(id, origin)
+                .and_then(|()| self.workspace.find_next(id, &query).map(|_| ()));
+            if let Err(err) = result {
+                self.message = Some(err.to_string());
+            }
         }
     }
 
@@ -194,8 +199,9 @@ impl App {
         if query.pattern().is_empty() {
             return String::new();
         }
-        let Ok(matches) = self.workspace.find_all(id, &query) else {
-            return String::new();
+        let matches = match self.workspace.find_all(id, &query) {
+            Ok(matches) => matches,
+            Err(err) => return err.to_string(),
         };
         if matches.is_empty() {
             return "No results".to_owned();

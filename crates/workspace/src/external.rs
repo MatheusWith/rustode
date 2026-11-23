@@ -18,7 +18,9 @@
 //! VS Code finds the conflict only when a save fails because the file is
 //! newer, and offers "Compare" and "Overwrite"
 //! (`src/vs/workbench/contrib/files/browser/editors/textFileSaveErrorHandler.ts:113-135`),
-//! then accepts or reverts the local changes (`…:418-442`). rustode raises
+//! then accepts or reverts the local changes (`…:410-442`; ids
+//! `workbench.files.action.saveIgnoreModifiedSince` at `:387`,
+//! `…acceptLocalChanges` and `…revertLocalChanges` in `fileActions.contribution.ts:199-200`). rustode raises
 //! the conflict as soon as the watcher reports the change, and resolves it
 //! with the same two choices.
 //!
@@ -42,7 +44,70 @@ pub enum Resolution {
     KeepMine,
 }
 
+/// One way out of a conflict, as the prompt offers it: a registered command
+/// ([`COMMANDS`](crate::COMMANDS)) and the short word on its button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConflictChoice {
+    /// The command's VS Code id; [`Workspace::execute`] runs it.
+    pub command: &'static str,
+    /// The button or key hint: VS Code's own word for the action.
+    pub label: &'static str,
+}
+
+/// What a frontend shows when a save hit a conflict: the sentence and the
+/// choices. The workspace decides both; the frontends only draw them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictPrompt {
+    /// The document in conflict.
+    pub document: DocumentId,
+    /// VS Code's "Failed to save" sentence (`staleSaveError`,
+    /// `textFileSaveErrorHandler.ts:129`), without the compare choice.
+    pub message: String,
+    /// The choices, in VS Code's order.
+    pub choices: Vec<ConflictChoice>,
+}
+
+/// VS Code's "Overwrite" (`SaveModelIgnoreModifiedSinceAction`,
+/// `textFileSaveErrorHandler.ts:387`).
+pub(crate) const OVERWRITE: &str = "workbench.files.action.saveIgnoreModifiedSince";
+/// VS Code's "Discard your changes and revert to file contents"
+/// (`fileActions.contribution.ts:200`).
+pub(crate) const REVERT: &str = "workbench.files.action.revertLocalChanges";
+
 impl Workspace {
+    /// The prompt for a document whose file changed under unsaved edits, or
+    /// `None` when it has no conflict. Compare (VS Code's
+    /// `workbench.files.action.resolveConflict`) needs a diff editor, which
+    /// rustode does not have, so it is not offered.
+    #[must_use]
+    pub fn conflict_prompt(&self, id: DocumentId) -> Option<ConflictPrompt> {
+        let document = self.document(id).filter(|d| d.has_conflict())?;
+        Some(ConflictPrompt {
+            document: id,
+            message: format!(
+                "Failed to save '{}': The content of the file is newer. Please overwrite the \
+                 content of the file with your changes or revert to the file contents.",
+                document.name()
+            ),
+            choices: vec![
+                ConflictChoice {
+                    command: OVERWRITE,
+                    label: "Overwrite",
+                },
+                ConflictChoice {
+                    command: REVERT,
+                    label: "Revert",
+                },
+            ],
+        })
+    }
+
+    /// Keeps the document's text and writes it over the file.
+    pub(crate) fn overwrite_conflict(&mut self, id: DocumentId) -> Result<(), Error> {
+        self.resolve_conflict(id, Resolution::KeepMine)?;
+        self.save(id)
+    }
+
     /// Processes the file changes the watcher saw since the last call,
     /// reloading clean documents and raising conflicts for dirty ones.
     /// Frontends call it from their event loop; the outcome is reported as
@@ -110,7 +175,10 @@ impl Workspace {
     ) -> Result<(), Error> {
         let document = self.document_mut(id)?;
         let Some(theirs) = document.conflict.take() else {
-            return Err(Error::NoConflict(id));
+            return Err(Error::NoConflict {
+                id,
+                name: document.name(),
+            });
         };
         match resolution {
             Resolution::KeepMine => {

@@ -39,15 +39,14 @@ pub fn check(stdin: &str) -> Result<Vec<String>, String> {
 }
 
 fn check_range(local_sha: &str, remote_sha: &str) -> Result<Vec<String>, String> {
-    let range = if remote_sha == ZERO {
-        vec![
-            local_sha.to_owned(),
-            "--not".to_owned(),
-            "--remotes".to_owned(),
-        ]
-    } else {
-        vec![format!("{remote_sha}..{local_sha}")]
-    };
+    // Commits already on a remote are not this push's to check: after a
+    // rebase the old tip is not an ancestor, and `old..new` would also list
+    // main's squash commits.
+    let mut range = vec![local_sha.to_owned()];
+    if remote_sha != ZERO {
+        range.push(format!("^{remote_sha}"));
+    }
+    range.extend(["--not".to_owned(), "--remotes".to_owned()]);
     let mut args = vec!["rev-list".to_owned(), "--no-merges".to_owned()];
     args.extend(range);
     let mut problems = Vec::new();

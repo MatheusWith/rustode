@@ -545,7 +545,11 @@ impl Workspace {
                     && self.document(id).is_some_and(crate::Document::is_dirty)
             })
         {
-            return Err(Error::Dirty(dirty));
+            let name = self
+                .document(dirty)
+                .map(crate::Document::name)
+                .unwrap_or_default();
+            return Err(Error::Dirty { id: dirty, name });
         }
         for id in tabs {
             if self.groups.showing(id) > 1 {
