@@ -1,0 +1,5 @@
+2026-11-23T12:47:47.302678Z  INFO wgpu_hal::gles::egl: EGL says it can present to the window but not natively
+2026-11-23T12:47:47.347237Z  INFO egui_wgpu: The only available wgpu adapter was not suitable: backend: Gl, device_type: Other, name: "NVIDIA GeForce RTX 3050 Laptop GPU/PCIe/SSE2", driver_info: "3.3.0 NVIDIA 580.196.07", vendor: NVIDIA (0x10DE), subgroup_size: 4..=128, transient_saves_memory: None,
+2026-11-23T12:47:47.348717Z ERROR eframe::native::run: Exiting because of error: WGPU error: No suitable graphics adapter found; noop not requested, vulkan not requested, metal not requested, dx12 not requested, gl not compatible with provided surface, webgpu not requested
+error: app creation error: the window closed before it presented a frame: no usable graphics adapter (run with RUSTODE_LOG=info for the graphics error)
+exit status: 1

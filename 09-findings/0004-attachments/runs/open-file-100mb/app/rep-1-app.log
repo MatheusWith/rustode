@@ -1,0 +1,24 @@
+The packaged Node.js compile cache for main is not active (status: disabled, configured: <copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/node-compile-cache/main, active: none).
+
+DevTools listening on ws://127.0.0.1:9333/devtools/browser/aa639dad-16ed-43ac-8865-f316b4461615
+MESA-EGL: warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+Warning: 'remote-debugging-port' is not in the list of known options, but still passed to Electron/Chromium.
+[90m[main 2026-11-23T12:24:31.638Z][0m [node-compile-cache] main: packaged cache inactive (status: disabled, configured: <copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/node-compile-cache/main, active: none)
+[91m[main 2026-11-23T12:24:31.657Z][0m Error: Unable to retrieve mac address (unexpected format)
+    at U_ (file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:63:5634)
+    at f9 (file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:63:5958)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:63:5877
+    at async cO (file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:108:101981)
+    at async pO (file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:108:102326)
+    at async Promise.all (index 0)
+    at async va.startup (file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:169:13221)
+    at async $E.startup (file://<copies>/rustode-bench-app.31e898b681c91315/VSCode-linux-x64/resources/app/out/mainImpl.js:200:56875)
+[90m[main 2026-11-23T12:24:31.662Z][0m StorageMainService: creating application shared storage
+[939681:1123/092431.717947:ERROR:gpu/ipc/client/command_buffer_proxy_impl.cc:285] ContextResult::kTransientFailure: Failed to send GpuControl.CreateCommandBuffer.
+[90m[main 2026-11-23T12:24:31.720Z][0m [shared storage] Creating shared storage database at '<copies>/rustode-bench-app.31e898b681c91315/profiles/rep-1-t3qY1z/shared/sharedStorage/state.vscdb' (wasCreated: true)
+[90m[main 2026-11-23T12:24:31.720Z][0m [shared storage] Initializing fallback application storage (path: <copies>/rustode-bench-app.31e898b681c91315/profiles/rep-1-t3qY1z/ud/User/globalStorage/state.vscdb)
+[90m[main 2026-11-23T12:24:31.724Z][0m [shared storage] Fallback application storage initialized with 3 items
+[90m[main 2026-11-23T12:24:31.725Z][0m update#setState disabled
+[90m[main 2026-11-23T12:24:31.725Z][0m update#ctor - updates are disabled as there is no update URL
+[90m[main 2026-11-23T12:24:34.562Z][0m Extension host with pid 939733 exited with code: 0, signal: unknown.

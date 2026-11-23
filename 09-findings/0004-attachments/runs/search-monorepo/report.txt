@@ -1,0 +1,101 @@
+rustode bench report
+
+run         2026-11-23-122932-search-monorepo
+status      ok
+command     <target>/release/rustode bench search-monorepo --scenarios bench/scenarios.toml --project <project> --out <runs> --app-copy-dir <copies> --gui-bin <target>/release/rustode-gui
+folder      <clone>
+run folder  <runs>/2026-11-23-122932-search-monorepo
+scenario    search-monorepo: Regex search over a generated monorepo of 5,000 source files (bench/scenarios.toml, list version 3)
+time        2026-11-23T12:29:32Z to 2026-11-23T12:30:58Z (UTC)
+
+inputs (from the scenario list; not results)
+  fixture     fixtures/search-monorepo/: a generated monorepo (seed 1): 5626 files, 91800017 bytes, 5000 source files of 16384 bytes in lines of 80 bytes; digest fnv1a64 a8742422fd66a4d1
+  query       regex /\bhandle_[a-z]+_[0-9]{3}\b/ include '**/*.ts,**/*.rs' exclude '**/legacy/**' (default excludes and ignore files on)
+  oracle      the generator planted the matches: 3500 searched files, 3002 with matches, 10436 matches (counted from the text it wrote, not by a regex engine)
+  rustode GUI 1 warm-up + 5 recorded launches; timeout 300 s each
+  App         1 warm-up + 5 recorded launches; timeout 300 s each; first line checked every 10 ms
+  guards      the App starts only with MemAvailable >= 2000 MB; the QA watchdog aborts it below 700 MB, or with PSI some avg10 > 40 for 5 samples
+
+environment (measured at the start of the run)
+  rustode     0.1.0, git 6d7b04e50f98 (clean), release build
+  App         1.147.0, commit 22d8dccf0f29c4c824501c342e4d3c8a69776214, x64 (02-package-analysis/version.txt)
+  machine     Linux 7.3.4-arch1-2; 11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz; 12 CPUs; MemTotal 7708 MB; MemAvailable 3481 MB
+
+rustode GUI (measured)
+  binary      <target>/release/rustode-gui (release build, from its path); rustode-gui 0.1.0; sha256 3f3a3e96b70e13fd2c534090af7f7f2c345035a5570d9a4904680b5a7715ea95
+  rendering   WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe VK_ICD_FILENAMES=/nonexistent
+  driver      Node v24.22.1; status ok
+
+App integrity (<project>/01-app/VSCode-linux-x64 against <project>/02-package-analysis/manifest-sha256.txt; measured)
+  before      ok: 3008 listed files match, 0 files outside the manifest
+  copy        ok: 3008 listed files match, 0 files outside the manifest (<copies>/rustode-bench-app.6b2c6c78963b0d19/VSCode-linux-x64)
+  after       ok: 3008 listed files match, 0 files outside the manifest
+  The App ran from a verified copy outside 01-app/, deleted after the run.
+  The App added 0 files to its copy during the run (measured; app/copy-writes.txt).
+  rendering   gl_renderer=ANGLE (Mesa, llvmpipe (LLVM 23.1.4 256 bits), OpenGL ES 3.2 Mesa 26.2.7-arch1.1); gl_implementation=(gl=egl-angle,angle=opengl); gpu_compositing=disabled_software; opengl=unavailable_off; vulkan=disabled_off
+  driver      Node v24.22.1, playwright-core 1.61.0-alpha-2026-06-04; status ok
+
+results (nearest-rank percentiles)
+  side     metric                     unit   n        min        p50        p95        max  label
+  rustode  launch to first frame      ms     5        142        144        173        173  measured
+  rustode  main to first frame        ms     5        140        142        171        171  measured
+  rustode  shutdown after SIGTERM     ms     5         60         61         62         62  measured
+  rustode  peak RSS, all processes    MB     5         78         79        100        100  measured
+  rustode  RSS at first frame         MB     5        126        126        126        126  measured
+  rustode  PSS at first frame         MB     5        100        100        100        100  measured
+  rustode  peak RSS before the script MB     5      125.5      125.7      126.3      126.3  measured
+  rustode  peak RSS after the script  MB     5      132.3      132.7      132.8      132.8  measured
+  rustode  peak RSS, largest process  MB     5      132.3      132.7      132.8      132.8  measured
+  rustode  search, first result       ms     5       94.5       96.7      104.9      104.9  measured
+  rustode  search, complete           ms     5       94.5       96.7      104.9      104.9  measured
+  rustode  files with matches         n      5       3002       3002       3002       3002  measured
+  rustode  matches                    n      5      10436      10436      10436      10436  measured
+  App      launch to CDP endpoint     ms     5        214        218        286        286  measured
+  App      launch to first paint      ms     5       1786       1802       1818       1818  measured
+  App      launch to workbench        ms     5       1771       1787       1808       1808  measured
+  App      shutdown after SIGTERM     ms     5        257        265        274        274  measured
+  App      peak RSS, all processes    MB     5       1444       1505       1509       1509  measured
+  App      RSS at first line          MB     5       1203       1222       1231       1231  measured
+  App      PSS at first line          MB     5        561        574        586        586  measured
+  App      peak RSS before the script MB     5     1265.8     1274.2     1282.3     1282.3  measured
+  App      peak RSS after the script  MB     5     1607.1     1620.8     1626.8     1626.8  measured
+  App      peak RSS, largest process  MB     5      454.1      465.4      474.2      474.2  measured
+  App      search, first result       ms     5      389.3      420.3      446.7      446.7  measured
+  App      search, complete           ms     5      507.5      532.1      544.2      544.2  measured
+  App      files with matches         n      5       3002       3002       3002       3002  measured
+  App      matches                    n      5      10436      10436      10436      10436  measured
+
+what the results measure
+  - rustode launch to first frame: from spawning `rustode-gui` (release build, the fixture on its command line, a fresh profile folder, software rendering) to the arrival of the line the GUI prints after returning from its first `RedrawRequested` (eframe has painted and called `wgpu::Queue::present`); the driver's clock, the same one the App's times use. The file is already open in that frame, because the GUI opens its arguments before it creates the window
+  - rustode main to first frame: the GUI's own `Instant`: from `rustode_trace::init_from_env` (the first thing `main` does) to the same first present; it leaves out exec, dynamic linking and the driver's pipe
+  - rustode shutdown after SIGTERM: SIGTERM to the GUI process until no process of its tree is left (SIGKILL after 10 s)
+  - rustode peak RSS, all processes: the largest total RSS of the GUI's process tree in the QA watchdog's 1 s samples (collectors/sampler.py); the GUI is stopped as soon as its first frame arrives, so this is usually one sample taken at the start: prefer the RSS at the first frame
+  - rustode RSS at first frame: summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup right after the first-frame line arrived: the memory of the open file and the first frame
+  - rustode PSS at first frame: summed `Pss` of the same processes at the same moment
+  - rustode peak RSS before the script: sum over the editor's processes of `VmHWM` (the kernel's peak resident size) read from /proc/<pid>/status right before the script: the startup and file-open peak; the sum over several processes is an upper bound of their simultaneous peak
+  - rustode peak RSS after the script: the same sum of `VmHWM` read right after the script: the peak of the whole launch including the script; same caveat
+  - rustode peak RSS, largest process: the largest single process's `VmHWM` after the script (for the App, the renderer that holds the model)
+  - rustode search, first result: from the start of the search to the first result row drawn: `Workspace::start_search`, started by the Search view's own code path, results streamed in the background and polled once per frame; clock: `std::time::Instant`, from the start of the search
+  - rustode search, complete: from the start of the search to the end of the search with its final results shown (rustode: the presented frame after the state became Done; App: the sidebar progress bar active, then done, and the result message final): `Workspace::start_search`, started by the Search view's own code path, results streamed in the background and polled once per frame; clock: `std::time::Instant`, from the start of the search
+  - rustode files with matches: files with at least one match in the results
+  - rustode matches: matches in the results
+  - App launch to CDP endpoint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to its CDP endpoint answering `/json/version`, checked every 25 ms
+  - App launch to first paint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to Chromium's first contentful paint in the workbench page (`performance` paint timing, a wall-clock time read over CDP, minus the wall-clock time of the spawn): the first frame with content that Chromium painted, which can be before the editor is usable
+  - App launch to workbench: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's "workbench ready"
+  - App shutdown after SIGTERM: SIGTERM to the App's main process until no process of its profile is left (SIGKILL after 10 s), as the QA startup benchmark does
+  - App peak RSS, all processes: the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py); the App is stopped about a second after its first line, so this is one to three samples: prefer the RSS at the first line
+  - App RSS at first line: summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup right after the first line was seen (the App is still starting some processes then); shared pages are counted once per process
+  - App PSS at first line: summed `Pss` of the same processes at the same moment
+  - App peak RSS before the script: sum over the editor's processes of `VmHWM` (the kernel's peak resident size) read from /proc/<pid>/status right before the script: the startup and file-open peak; the sum over several processes is an upper bound of their simultaneous peak
+  - App peak RSS after the script: the same sum of `VmHWM` read right after the script: the peak of the whole launch including the script; same caveat
+  - App peak RSS, largest process: the largest single process's `VmHWM` after the script (for the App, the renderer that holds the model)
+  - App search, first result: from the start of the search to the first result row drawn: the command `workbench.action.findInFiles` with the query, executed on the App's command service over CDP; clock: the page's `performance.now()`, from just before the command
+  - App search, complete: from the start of the search to the end of the search with its final results shown (rustode: the presented frame after the state became Done; App: the sidebar progress bar active, then done, and the result message final): the command `workbench.action.findInFiles` with the query, executed on the App's command service over CDP; clock: the page's `performance.now()`, from just before the command
+  - App files with matches: files with at least one match in the results
+  - App matches: matches in the results
+
+notes
+  - (estimated) Each App time is late by up to one polling interval plus one CDP round trip: about 10 ms for the first line and 25 ms for the CDP endpoint and the workbench (estimated from the polling intervals, not measured).
+  - (measured) files with matches: rustode 3002; App 3002; oracle 3002: equal
+  - (measured) matches: rustode 10436; App 10436; oracle 10436: equal
+  - Both editors searched the same generated tree with the same pattern, include and exclude globs, default excludes and ignore files, and each through its own search (rustode's `Workspace::start_search`, streamed into the Search view; the App's `workbench.action.findInFiles` command, which runs ripgrep). The pattern is written to mean the same in the Rust `regex` crate and in ripgrep's engine (ASCII classes and word boundaries). 'First result' is the first result row drawn (rustode: the frame presented after the first file arrived; App: the first `.monaco-list-row` of the search view, seen by a MutationObserver in the page); 'complete' is when the search has ended and its results are shown (rustode: the frame presented after the search state became `Done`; App: the sidebar's progress bar went from `active` to `done`, and the result message had stopped changing). The counts are checked against each other and against the generator's oracle below.

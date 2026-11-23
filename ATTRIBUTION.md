@@ -207,6 +207,18 @@ The rustode editor reimplements behavior studied in the source tree (`02-package
 | `moveEditorToNextGroup` (Ctrl+Alt+Right) and `moveEditorToPreviousGroup` (Ctrl+Alt+Left) | `src/vs/workbench/browser/parts/editor/editorActions.ts:2128-2156` | `crates/workspace/src/groups.rs`, `crates/workspace/src/commands.rs` |
 | A group never gets narrower than the editor's 220-point minimum width nor shorter than a tab strip plus 70 points; the unfocused group's active tab (`tab.unfocusedActiveForeground`, `tab.unfocusedActiveBorderTop`) and the group border (`editorGroup.border`) in Dark Modern | `src/vs/workbench/browser/parts/editor/editor.ts:30`, `extensions/theme-defaults/themes/dark_modern.json:36`, `:113-114` | `crates/gui/src/groups.rs`, `crates/gui/src/tabs.rs`, `crates/gui/src/app.rs` |
 
+### Studied only to drive and observe the App in `rustode bench`
+
+Nothing below is reimplemented; it is read in the source tree to know what to call and what to watch in the App's own workbench ([`09-findings/0004`](09-findings/0004-full-app-suite.md)).
+
+| What | Studied in (Code - OSS, MIT) | Used in |
+|---|---|---|
+| The Find in Files command and its arguments (`query`, `isRegex`, `filesToInclude`, `filesToExclude`, `triggerSearch`, `onlyOpenEditors`) | `src/vs/workbench/contrib/search/browser/searchActionsBase.ts:73-86`, `:92-151` | `bench/app_internals.cjs`, `bench/launch.cjs` |
+| The Search view's completion: `onSearchComplete` ends the progress and sets the idle state; the result message "N results in M files" | `src/vs/workbench/contrib/search/browser/searchView.ts:1799-1810`, `:2189-2199` | `bench/app_internals.cjs` (what the page observer waits for) |
+| The text model's edit API (`pushEditOperations`, `getPositionAt`; also `pushStackElement`, `undo`, `canUndo`) | `src/vs/editor/common/model/textModel.ts:776`, `:1340` | `bench/app_internals.cjs` |
+
+The edit generator of `rustode bench` is mulberry32 (a public-domain 32-bit generator by Tommy Ettinger), written independently in Rust (`crates/workspace/src/bench.rs`) and JavaScript (`bench/app_internals.cjs`); SplitMix64 (public domain, Sebastiano Vigna) seeds the generated monorepo (`crates/cli/src/bench/fixture.rs`).
+
 ## Trademarks
 
 "Visual Studio Code", "VS Code" and the Microsoft logos are trademarks of Microsoft Corporation. "VSCodium" and its logo belong to the VSCodium project. None of the licenses above covers trademarks, and this project is not affiliated with either of them.

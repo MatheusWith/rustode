@@ -1,0 +1,23 @@
+The packaged Node.js compile cache for main is not active (status: disabled, configured: <copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/node-compile-cache/main, active: none).
+
+DevTools listening on ws://127.0.0.1:9333/devtools/browser/acab5a01-707b-4f6f-85c7-0d52d1091e15
+MESA-EGL: warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+Warning: 'remote-debugging-port' is not in the list of known options, but still passed to Electron/Chromium.
+[90m[main 2026-11-23T12:52:08.878Z][0m [node-compile-cache] main: packaged cache inactive (status: disabled, configured: <copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/node-compile-cache/main, active: none)
+[91m[main 2026-11-23T12:52:08.899Z][0m Error: Unable to retrieve mac address (unexpected format)
+    at U_ (file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:63:5634)
+    at f9 (file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:63:5958)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:63:5877
+    at async cO (file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:108:101981)
+    at async pO (file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:108:102326)
+    at async Promise.all (index 0)
+    at async va.startup (file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:169:13221)
+    at async $E.startup (file://<copies>/rustode-bench-app.f43c9ea4913c6a25/VSCode-linux-x64/resources/app/out/mainImpl.js:200:56875)
+[90m[main 2026-11-23T12:52:08.907Z][0m StorageMainService: creating application shared storage
+[90m[main 2026-11-23T12:52:08.996Z][0m [shared storage] Creating shared storage database at '<copies>/rustode-bench-app.f43c9ea4913c6a25/profiles/rep-1-ZupbcM/shared/sharedStorage/state.vscdb' (wasCreated: true)
+[90m[main 2026-11-23T12:52:08.997Z][0m [shared storage] Initializing fallback application storage (path: <copies>/rustode-bench-app.f43c9ea4913c6a25/profiles/rep-1-ZupbcM/ud/User/globalStorage/state.vscdb)
+[90m[main 2026-11-23T12:52:08.999Z][0m [shared storage] Fallback application storage initialized with 3 items
+[90m[main 2026-11-23T12:52:09.000Z][0m update#setState disabled
+[90m[main 2026-11-23T12:52:09.000Z][0m update#ctor - updates are disabled as there is no update URL
+[90m[main 2026-11-23T12:52:18.405Z][0m Extension host with pid 961513 exited with code: 0, signal: unknown.

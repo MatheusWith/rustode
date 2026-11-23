@@ -1,0 +1,4 @@
+2026-11-23T12:29:37.453795Z  WARN egui_wgpu: Software rasterizer detected - loss of performance expected. backend: Gl, device_type: Cpu, name: "llvmpipe (LLVM 23.1.4, 256 bits)", driver_info: "4.6 (Core Profile) Mesa 26.2.7-arch1.1", vendor: Mesa (0x10005), subgroup_size: 4..=128, transient_saves_memory: None, limit_bucket: None
+2026-11-23T12:29:37.460827Z  WARN egui_winit::clipboard: Failed to initialize arboard clipboard: Unknown error while interacting with the clipboard: X11 server connection timed out because it was unreachable
+rustode-gui: first frame presented 142110 us after main
+rustode-gui: bench search: files=3002 matches=10436 limit_hit=false state=Done first_result_us=95855 complete_us=95855

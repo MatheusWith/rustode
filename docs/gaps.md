@@ -1,6 +1,6 @@
 # Gaps and open questions
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-17 · **Change:** minor (G17 and G18 note the TUI's current choices) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-23 · **Change:** minor (G22 and G24 updated, G25 and G26 added) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
 
 This page lists what is still unknown or has not been measured, in priority order: first the study (G1–G12), then the editor (G13 on). The hour figures are estimates, not measurements. When a gap is resolved:
 - record the finding in `09-findings/`;
@@ -139,13 +139,15 @@ Editor (rustode, Phase 1):
 - **Missing:** the App-side signal that marks two things:
   - the first frame at startup (ADR 0024, "startup to first frame"). The QA startup benchmark measures "workbench ready" instead (README, "Tests");
   - the frame that shows a typed key (ADR 0025). The decision names "a CDP frame trace event" but not which one.
-- **Impact:** without it, the App side of the typing-latency and first-frame scenarios has no end point. *Update 2026-11-19:* the startup half is bracketed, not resolved (G22); the typing half waits for ADR 0028.
+- **Impact:** without it, the App side of the typing-latency and first-frame scenarios has no end point. *Update 2026-11-19:* the startup half is bracketed, not resolved (G22); the typing half waits for ADR 0028. *Update 2026-11-23:* the startup half has an event, the end of the first `Display::DrawAndSwap` after the first line is in the DOM (G22, [finding 0004](../09-findings/0004-full-app-suite.md)); the typing half still waits.
 - **Approach:** record a CDP trace (`Tracing.start`) while keys are injected on the virtual display, and match the frame events against screenshots. **2–4 h.**
 
 ## G22. Which first-frame events make the App comparison like for like?
 
 - **Missing:** the App has no event that equals rustode's "the first wgpu present returned" (G15's question, for startup). The first comparison ([`09-findings/0003`](../09-findings/0003-first-app-comparison.md)) brackets it: rustode's `first frame presented` line against the App's Chromium first contentful paint (read over CDP as a wall-clock time) and the first fixture line seen in the DOM (polled every 10 ms). The three are not the same event, so no ratio is claimed.
-- **Approach:** a CDP trace with `Tracing.start` and the `viz` frame events (`DrawFrame` or `SwapBuffers` with the workbench's first content) could give the App's first composited frame. It needs a prototype and a check of its overhead on the virtual display. **1 day.** Typing latency stays unmeasured until the owner accepts [ADR 0028](adr/0028-virtual-display-input.md).
+- **Update 2026-11-23 (ticket 42, [finding 0004](../09-findings/0004-full-app-suite.md)):** the prototype works. With `trace = true` each App launch records a Chromium trace (categories `viz` and `blink.user_timing`), a `MutationObserver` marks the first line entering the DOM, and the end of the first `Display::DrawAndSwap` after the mark is the App's first presented frame (`bench/launch.cjs`, `finishTrace`); the trace and `process.hrtime` share a clock. The report now has "launch to first swap" and "launch to second swap" next to rustode's "launch to first frame", and a control run without the trace bounds its cost (about 37 ms at p50 in the one pair of runs).
+- **Still missing:** a check that the first swap already shows the first line (the second swap bounds it), the trace's cost on more than one pair of runs, and the same event for a typed key, which waits for [ADR 0028](adr/0028-virtual-display-input.md).
+- **Approach:** compare each swap with a screencast frame (`Page.startScreencast`, which carries timestamps) and repeat the control pair three times. **0.5 day.**
 
 ## G23. The QA harness's App runs may have used the GPU
 
@@ -155,7 +157,17 @@ Editor (rustode, Phase 1):
 ## G24. `rustode-gui` exits with code 0 and no message when it finds no graphics adapter
 
 - **Missing:** a GUI that cannot create its wgpu adapter logs the error through the `log` crate, which `rustode-trace` did not forward, and exits with status 0 (eframe turns the error into an exit of the event loop). Found while building the benchmark runner: on the virtual display with the machine's default EGL driver, `rustode-gui` returned after 70 ms with nothing on stderr. `tracing-subscriber`'s `tracing-log` feature is now on, so `RUSTODE_LOG=info` prints eframe's "Exiting because of error: WGPU error: No suitable graphics adapter found". The exit status is still 0.
-- **Approach:** have `rustode_gui::run` return an error when the window never presented a frame (for example, when `FirstFrame` never fired before the loop exited), so `main` prints it and exits with 1 (§11.7.1: an error the user can act on). **0.5 day.**
+- **Closed 2026-11-23 (ticket 42):** `rustode_gui::run` returns an error when the event loop ends before any frame was presented, so `main` prints it and exits with 1 (`crates/gui/src/run.rs`, `ended`; test `a_loop_that_ended_without_a_frame_is_an_error_with_a_hint`). Measured on the virtual display with the machine's default EGL driver: `error: app creation error: the window closed before it presented a frame: no usable graphics adapter (run with RUSTODE_LOG=info for the graphics error)`, exit status 1 ([finding 0004](../09-findings/0004-full-app-suite.md), `0004-attachments/g24-check.txt`).
+
+## G25. The edit scenario does not separate the App's model from its view
+
+- **Missing:** `edit-undo-10k` applies 10k single inserts through the App's `TextModel` with the editor open, and through rustode's `Workspace::replace`; the App takes about 9.3 s and rustode about 14 ms ([finding 0004](../09-findings/0004-full-app-suite.md)). Each App insert fires the content-change events of the open editor, minimap, bracket matching and tokenization, and takes a line and column from `getPositionAt`; rustode's GUI redraws once after the script. How much of the App's time is the model and how much the view is unknown (hypothesis: mostly the view and its listeners, 0.9 ms per insert).
+- **Approach:** run the same seeded edits on a `TextModel` with no editor attached (a second model created from the same text through the model service), and as one batched `pushEditOperations` of 10k operations against rustode's `replace_ranges` (one undo step); report both next to the current rows. **0.5 day.** Typing latency stays unmeasured until the owner accepts [ADR 0028](adr/0028-virtual-display-input.md).
+
+## G26. The search scenario is warm, small and has a coarse clock for rustode
+
+- **Missing:** `search-monorepo` runs on a generated tree of 5,626 files (91.8 MB) that is in the page cache, with one regex; rustode's first result and its end fall in the same presented frame (96.7 ms both at p50), so its streaming latency is not seen. A cold-cache search, a tree ten times larger, a plain-text query and a query that hits the 20,000-result limit are not measured, and ripgrep's own options in the App (`search.useRipgrep`, `search.followSymlinks`) are at their defaults.
+- **Approach:** add `cache = "cold"` to the scenario (the eviction helper already drops a folder's files), a second list entry with 50,000 files, and an in-process `Workspace::start_search` timing with the first poll's own clock for rustode. **0.5 day.**
 
 ## G16. The App lost the first injected keystroke once
 
@@ -207,6 +219,7 @@ Editor (rustode, Phase 1):
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-23 | minor | G22: the App's first presented frame from a Chromium trace; G24 closed; G25 and G26: the edit and search scenarios' limits (ticket 42, finding 0004) |
 | 2026-11-19 | minor | G21: editor groups against VS Code's |
 | 2026-11-19 | minor | G20: replace across files against VS Code's; owner decision: save only clean files |
 | 2026-11-19 | minor | G22–G24: first-frame events, the QA harness's GPU, the GUI's silent exit without an adapter |

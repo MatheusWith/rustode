@@ -1,0 +1,82 @@
+rustode bench report
+
+run         2026-11-23-122212-open-file-1mb
+status      ok
+command     <target>/release/rustode bench open-file-1mb --scenarios bench/scenarios.toml --project <project> --out <runs> --app-copy-dir <copies> --gui-bin <target>/release/rustode-gui
+folder      <clone>
+run folder  <runs>/2026-11-23-122212-open-file-1mb
+scenario    open-file-1mb: Open a 1 MiB text file (bench/scenarios.toml, list version 3)
+time        2026-11-23T12:22:12Z to 2026-11-23T12:23:21Z (UTC)
+
+inputs (from the scenario list; not results)
+  fixture     fixtures/open-file-1mb.txt: 1048576 bytes, numbered ASCII lines of 80 bytes with LF; sha256 54a80bcaaef88ce7a953f7e80fa88b70d61a67936038e8fe64eabff7707ada26
+  rustode     1 warm-up + 20 recorded in-process opens
+  rustode GUI 1 warm-up + 5 recorded launches; timeout 60 s each
+  App         1 warm-up + 5 recorded launches; timeout 60 s each; first line checked every 10 ms
+  guards      the App starts only with MemAvailable >= 2000 MB; the QA watchdog aborts it below 700 MB, or with PSI some avg10 > 40 for 5 samples
+
+environment (measured at the start of the run)
+  rustode     0.1.0, git 6d7b04e50f98 (clean), release build
+  App         1.147.0, commit 22d8dccf0f29c4c824501c342e4d3c8a69776214, x64 (02-package-analysis/version.txt)
+  machine     Linux 7.3.4-arch1-2; 11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz; 12 CPUs; MemTotal 7708 MB; MemAvailable 3559 MB
+
+rustode GUI (measured)
+  binary      <target>/release/rustode-gui (release build, from its path); rustode-gui 0.1.0; sha256 3f3a3e96b70e13fd2c534090af7f7f2c345035a5570d9a4904680b5a7715ea95
+  rendering   WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe VK_ICD_FILENAMES=/nonexistent
+  driver      Node v24.22.1; status ok
+
+App integrity (<project>/01-app/VSCode-linux-x64 against <project>/02-package-analysis/manifest-sha256.txt; measured)
+  before      ok: 3008 listed files match, 0 files outside the manifest
+  copy        ok: 3008 listed files match, 0 files outside the manifest (<copies>/rustode-bench-app.ccbcd44ff9665459/VSCode-linux-x64)
+  after       ok: 3008 listed files match, 0 files outside the manifest
+  The App ran from a verified copy outside 01-app/, deleted after the run.
+  The App added 0 files to its copy during the run (measured; app/copy-writes.txt).
+  rendering   gl_renderer=ANGLE (Mesa, llvmpipe (LLVM 23.1.4 256 bits), OpenGL ES 3.2 Mesa 26.2.7-arch1.1); gl_implementation=(gl=egl-angle,angle=opengl); gpu_compositing=disabled_software; opengl=unavailable_off; vulkan=disabled_off
+  driver      Node v24.22.1, playwright-core 1.61.0-alpha-2026-06-04; status ok
+
+results (nearest-rank percentiles)
+  side     metric                     unit   n        min        p50        p95        max  label
+  rustode  Workspace::open            ms    20      1.169      1.202      1.284      1.573  measured
+  rustode  launch to first frame      ms     5        150        151        151        151  measured
+  rustode  main to first frame        ms     5        147        148        149        149  measured
+  rustode  shutdown after SIGTERM     ms     5         61         62         64         64  measured
+  rustode  peak RSS, all processes    MB     5         78         79         79         79  measured
+  rustode  RSS at first frame         MB     5        133        134        134        134  measured
+  rustode  PSS at first frame         MB     5        108        108        108        108  measured
+  App      launch to CDP endpoint     ms     5        211        215        282        282  measured
+  App      launch to first paint      ms     5       1800       1813       1817       1817  measured
+  App      launch to workbench        ms     5       1788       1801       1804       1804  measured
+  App      launch to first line shown ms     5       1917       1922       1935       1935  measured
+  App      launch to first swap       ms     5       1918       1931       1933       1933  measured
+  App      launch to second swap      ms     5       1924       1938       1943       1943  measured
+  App      first swap after DOM mark  ms     5         15         17         17         17  measured
+  App      workbench to first line    ms     5        119        128        130        130  measured
+  App      shutdown after SIGTERM     ms     5        188        329        345        345  measured
+  App      peak RSS, all processes    MB     5       1402       1421       1425       1425  measured
+  App      RSS at first line          MB     5       1339       1362       1393       1393  measured
+  App      PSS at first line          MB     5        611        622        638        638  measured
+
+what the results measure
+  - rustode Workspace::open: `Workspace::open` on a fresh `Workspace` in this process: read the file, detect encoding and line endings, build the buffer, hash the bytes for external-change detection and start watching the file; no window and no rendering (rustode has no GUI until M3); clock: `std::time::Instant`
+  - rustode launch to first frame: from spawning `rustode-gui` (release build, the fixture on its command line, a fresh profile folder, software rendering) to the arrival of the line the GUI prints after returning from its first `RedrawRequested` (eframe has painted and called `wgpu::Queue::present`); the driver's clock, the same one the App's times use. The file is already open in that frame, because the GUI opens its arguments before it creates the window
+  - rustode main to first frame: the GUI's own `Instant`: from `rustode_trace::init_from_env` (the first thing `main` does) to the same first present; it leaves out exec, dynamic linking and the driver's pipe
+  - rustode shutdown after SIGTERM: SIGTERM to the GUI process until no process of its tree is left (SIGKILL after 10 s)
+  - rustode peak RSS, all processes: the largest total RSS of the GUI's process tree in the QA watchdog's 1 s samples (collectors/sampler.py); the GUI is stopped as soon as its first frame arrives, so this is usually one sample taken at the start: prefer the RSS at the first frame
+  - rustode RSS at first frame: summed `Rss` of the GUI's process tree from /proc/<pid>/smaps_rollup right after the first-frame line arrived: the memory of the open file and the first frame
+  - rustode PSS at first frame: summed `Pss` of the same processes at the same moment
+  - App launch to CDP endpoint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to its CDP endpoint answering `/json/version`, checked every 25 ms
+  - App launch to first paint: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to Chromium's first contentful paint in the workbench page (`performance` paint timing, a wall-clock time read over CDP, minus the wall-clock time of the spawn): the first frame with content that Chromium painted, which can be before the editor is usable
+  - App launch to workbench: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the workbench's editor part existing (`.monaco-workbench .part.editor`), checked every 25 ms over CDP: the QA startup benchmark's "workbench ready"
+  - App launch to first line shown: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the fixture's first line rendered in an editor `.view-line`, checked every 10 ms over CDP; includes Electron and workbench startup, reading the file and rendering it on the virtual display
+  - App launch to first swap: from spawning the App (the QA launcher's `systemd-run --scope` memory cap, then the copy's codium with a fresh profile and the fixture on its command line) to the end of the first `Display::DrawAndSwap` that the display compositor began after the fixture's first line entered the DOM (a Chromium trace with categories viz and blink.user_timing, started right after the CDP connection; a MutationObserver in the page marks the moment the line is in the DOM; `process.hrtime` and the trace share CLOCK_MONOTONIC): the App's first presented frame that can show the file, the counterpart of rustode's first present (G22). It may be one frame early, if that frame was drawn from content committed before the line; the second swap bounds it from above
+  - App launch to second swap: the end of the second `Display::DrawAndSwap` after the mark: the upper bound of 'the first frame that shows the first line'
+  - App first swap after DOM mark: from the first line entering the DOM to the end of the first swap after it: what the page spends rendering and presenting the line
+  - App workbench to first line: the two previous times subtracted, per launch: what the App spends after its editor part exists until the first line shows
+  - App shutdown after SIGTERM: SIGTERM to the App's main process until no process of its profile is left (SIGKILL after 10 s), as the QA startup benchmark does
+  - App peak RSS, all processes: the largest total RSS of the App's processes in the QA watchdog's 1 s samples (collectors/sampler.py); the App is stopped about a second after its first line, so this is one to three samples: prefer the RSS at the first line
+  - App RSS at first line: summed `Rss` of every process of the App's profile, read from /proc/<pid>/smaps_rollup right after the first line was seen (the App is still starting some processes then); shared pages are counted once per process
+  - App PSS at first line: summed `Pss` of the same processes at the same moment
+
+notes
+  - (estimated) Each App time is late by up to one polling interval plus one CDP round trip: about 10 ms for the first line and 25 ms for the CDP endpoint and the workbench (estimated from the polling intervals, not measured).
+  - rustode's in-process `Workspace::open` has no process start, window or rendering and is not comparable with any App number. Compare the GUI's "launch to first frame" with the App's "launch to first paint" and "launch to first line shown" (a bracket, not one number): the GUI's first frame already shows the file, Chromium's first paint is not tied to the file, and the first line is polled over CDP. The two editors have no common 'first frame' event: rustode's is the return from its first wgpu present, the App's closest events are Chromium's first contentful paint and the first fixture line seen in the DOM (polled over CDP). The comparison is therefore approximate: read the rustode number against the interval between the App's two, and do not divide one by the other. When the App launches were traced (rows 'launch to first swap' and 'launch to second swap'), the first swap is the closest counterpart of rustode's first frame: the display compositor's first drawn-and-swapped frame after the first line entered the DOM (gaps.md G22); say which event a ratio uses, and that the swap may be one frame early (the second swap bounds it).
