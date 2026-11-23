@@ -10,6 +10,7 @@
 //! is checked before it is fetched, redirects included, and Marketplace
 //! hosts are refused.
 
+use super::error::Failure;
 use super::{ExtensionError, ExtensionSummary};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -56,7 +57,8 @@ pub(crate) struct Release {
 pub(crate) struct Registry {
     base: String,
     plain: OnceLock<Agent>,
-    tls: OnceLock<Result<Agent, String>>,
+    /// The HTTPS agent, or how many errors loading root certificates gave.
+    tls: OnceLock<Result<Agent, usize>>,
 }
 
 /// Why a URL is not fetched.
@@ -244,7 +246,7 @@ impl Registry {
         &self,
         text: &str,
         size: usize,
-    ) -> Result<(Vec<ExtensionSummary>, u64), String> {
+    ) -> Result<(Vec<ExtensionSummary>, u64), Failure> {
         let url = format!(
             "{}/api/-/search?query={}&size={size}&offset=0&sortBy=relevance&sortOrder=desc",
             self.base,
@@ -273,7 +275,7 @@ impl Registry {
 
     /// The latest release for this platform: the latest one when it is
     /// universal or for linux-x64, else the latest linux-x64 build.
-    pub(crate) fn release(&self, namespace: &str, name: &str) -> Result<Release, String> {
+    pub(crate) fn release(&self, namespace: &str, name: &str) -> Result<Release, Failure> {
         let latest = self.release_at(
             &format!("{}/api/{namespace}/{name}", self.base),
             namespace,
@@ -283,37 +285,50 @@ impl Registry {
             return Ok(latest);
         }
         let url = format!("{}/api/{namespace}/{name}/{PLATFORM}", self.base);
-        let release = self
-            .release_at(&url, namespace, name)
-            .map_err(|err| format!("{namespace}.{name} has no {PLATFORM} build: {err}"))?;
+        let release =
+            self.release_at(&url, namespace, name)
+                .map_err(|err| Failure::NoPlatformBuild {
+                    id: format!("{namespace}.{name}"),
+                    platform: PLATFORM,
+                    reason: Some(Box::new(err)),
+                })?;
         if release.target_platform == UNIVERSAL || release.target_platform == PLATFORM {
             Ok(release)
         } else {
-            Err(format!("{namespace}.{name} has no {PLATFORM} build"))
+            Err(Failure::NoPlatformBuild {
+                id: format!("{namespace}.{name}"),
+                platform: PLATFORM,
+                reason: None,
+            })
         }
     }
 
-    fn release_at(&self, url: &str, namespace: &str, name: &str) -> Result<Release, String> {
+    fn release_at(&self, url: &str, namespace: &str, name: &str) -> Result<Release, Failure> {
         let raw: RawExtension = self.json(url)?;
         let id = format!("{namespace}.{name}");
         if !raw.namespace.eq_ignore_ascii_case(namespace) || !raw.name.eq_ignore_ascii_case(name) {
-            return Err(format!(
-                "{url}: the registry answered for {}.{}, not {id}",
-                raw.namespace, raw.name
-            ));
+            return Err(Failure::WrongExtension {
+                url: url.to_owned(),
+                found: format!("{}.{}", raw.namespace, raw.name),
+                id,
+            });
         }
         if !is_version(&raw.version) {
-            return Err(format!("{id}: invalid version {:?}", raw.version));
+            return Err(Failure::BadVersion {
+                id,
+                version: raw.version,
+            });
         }
         let mut files = raw.files;
         let download = files
             .remove("download")
-            .ok_or_else(|| format!("{id} {} has no download", raw.version))?;
-        let sha256 = files.remove("sha256").ok_or_else(|| {
-            format!(
-                "{id} {}: Open VSX published no SHA-256, so the download cannot be checked",
-                raw.version
-            )
+            .ok_or_else(|| Failure::NoDownload {
+                id: id.clone(),
+                version: raw.version.clone(),
+            })?;
+        let sha256 = files.remove("sha256").ok_or_else(|| Failure::NoChecksum {
+            id: id.clone(),
+            version: raw.version.clone(),
         })?;
         Ok(Release {
             namespace: raw.namespace,
@@ -329,13 +344,13 @@ impl Registry {
 
     /// Downloads `release` into `out` and checks it against the SHA-256 that
     /// the registry publishes. Returns the size in bytes.
-    pub(crate) fn download(&self, release: &Release, out: &mut impl Write) -> Result<u64, String> {
+    pub(crate) fn download(&self, release: &Release, out: &mut impl Write) -> Result<u64, Failure> {
         let expected = self.text(&release.sha256)?;
         let expected = expected
             .split_whitespace()
             .next()
             .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| format!("{}: not a SHA-256", release.sha256))?
+            .ok_or_else(|| Failure::BadChecksum(release.sha256.clone()))?
             .to_ascii_lowercase();
         let mut response = self.get(&release.download, "application/octet-stream")?;
         let mut reader = response.body_mut().with_config().limit(MAX_VSIX).reader();
@@ -343,39 +358,47 @@ impl Registry {
         let mut buffer = vec![0; 64 * 1024];
         let mut size = 0;
         loop {
-            let read = reader
-                .read(&mut buffer)
-                .map_err(|err| format!("{}: {err}", release.download))?;
+            let read = reader.read(&mut buffer).map_err(|err| Failure::Network {
+                url: release.download.clone(),
+                reason: err.to_string(),
+            })?;
             if read == 0 {
                 break;
             }
             hasher.update(&buffer[..read]);
             out.write_all(&buffer[..read])
-                .map_err(|err| err.to_string())?;
+                .map_err(|source| Failure::Save {
+                    url: release.download.clone(),
+                    source,
+                })?;
             size += read as u64;
         }
         let actual = hex(&hasher.finalize());
         if actual == expected {
             Ok(size)
         } else {
-            Err(format!(
-                "{}: the download's SHA-256 is {actual}, but Open VSX published {expected}",
-                release.download
-            ))
+            Err(Failure::ChecksumMismatch {
+                url: release.download.clone(),
+                actual,
+                expected,
+            })
         }
     }
 
-    fn text(&self, url: &str) -> Result<String, String> {
+    fn text(&self, url: &str) -> Result<String, Failure> {
         let mut response = self.get(url, "text/plain")?;
         response
             .body_mut()
             .with_config()
             .limit(MAX_JSON)
             .read_to_string()
-            .map_err(|err| format!("{url}: {err}"))
+            .map_err(|err| Failure::Network {
+                url: url.to_owned(),
+                reason: err.to_string(),
+            })
     }
 
-    fn json<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T, String> {
+    fn json<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T, Failure> {
         let text = {
             let mut response = self.get(url, "application/json")?;
             response
@@ -383,42 +406,54 @@ impl Registry {
                 .with_config()
                 .limit(MAX_JSON)
                 .read_to_string()
-                .map_err(|err| format!("{url}: {err}"))?
+                .map_err(|err| Failure::Network {
+                    url: url.to_owned(),
+                    reason: err.to_string(),
+                })?
         };
-        serde_json::from_str(&text).map_err(|err| format!("{url}: unexpected answer: {err}"))
+        serde_json::from_str(&text).map_err(|err| Failure::BadAnswer {
+            url: url.to_owned(),
+            reason: err.to_string(),
+        })
     }
 
     /// GET with redirects followed by hand, each target checked first.
-    fn get(&self, url: &str, accept: &str) -> Result<Response<ureq::Body>, String> {
+    fn get(&self, url: &str, accept: &str) -> Result<Response<ureq::Body>, Failure> {
         let mut url = url.to_owned();
         for _ in 0..=MAX_REDIRECTS {
-            check_url(&url).map_err(|problem| problem.to_string())?;
+            check_url(&url).map_err(ExtensionError::from)?;
             let response = self
                 .agent(&url)?
                 .get(&url)
                 .header("Accept", accept)
                 .call()
-                .map_err(|err| format!("{url}: {err}"))?;
+                .map_err(|err| Failure::Network {
+                    url: url.clone(),
+                    reason: err.to_string(),
+                })?;
             let status = response.status();
             if status.is_redirection() {
                 let location = response
                     .headers()
                     .get("location")
                     .and_then(|value| value.to_str().ok())
-                    .ok_or_else(|| format!("{url}: redirect without a location"))?;
+                    .ok_or_else(|| Failure::RedirectWithoutLocation(url.clone()))?;
                 url = resolve(&url, location);
                 continue;
             }
             if !status.is_success() {
-                return Err(format!("{url}: HTTP {}", status.as_u16()));
+                return Err(Failure::Http {
+                    url,
+                    status: status.as_u16(),
+                });
             }
             return Ok(response);
         }
-        Err(format!("{url}: too many redirects"))
+        Err(Failure::TooManyRedirects(url))
     }
 
     /// The agent for `url`: TLS for `https`, plain for `http` on loopback.
-    fn agent(&self, url: &str) -> Result<&Agent, String> {
+    fn agent(&self, url: &str) -> Result<&Agent, Failure> {
         if url.starts_with("http://") {
             return Ok(self
                 .plain
@@ -427,7 +462,7 @@ impl Registry {
         self.tls
             .get_or_init(tls_agent)
             .as_ref()
-            .map_err(Clone::clone)
+            .map_err(|errors| Failure::NoRootCertificates { errors: *errors })
     }
 }
 
@@ -443,13 +478,10 @@ fn config() -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
 }
 
 /// An HTTPS agent trusting the system's root certificates.
-fn tls_agent() -> Result<Agent, String> {
+fn tls_agent() -> Result<Agent, usize> {
     let roots = rustls_native_certs::load_native_certs();
     if roots.certs.is_empty() {
-        return Err(format!(
-            "no root certificates found on this system ({} errors)",
-            roots.errors.len()
-        ));
+        return Err(roots.errors.len());
     }
     let certs: Vec<Certificate<'static>> = roots
         .certs

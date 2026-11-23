@@ -45,6 +45,66 @@ fn pattern_bug(err: &regex::Error) -> ManifestProblem {
     ))
 }
 
+/// Why `package.json` text is not a manifest.
+#[derive(Debug)]
+pub enum ManifestError {
+    /// The text is JSON, but not an object.
+    NotAnObject,
+    /// The text is not JSON.
+    NotJson(serde_json::Error),
+}
+
+impl std::fmt::Display for ManifestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAnObject => f.write_str("the manifest is not a JSON object"),
+            Self::NotJson(err) => write!(f, "the manifest is not valid JSON: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for ManifestError {}
+
+/// Why `engines.vscode` does not accept the API.
+#[derive(Debug, PartialEq, Eq)]
+enum EngineError {
+    /// Not a version requirement.
+    Unparsable(String),
+    /// Names too little of the version (`before_one`: below 1.0.0).
+    NotSpecific { engine: String, before_one: bool },
+    /// Asks for another API than rustode's.
+    Unsupported { engine: String, version: String },
+    /// A built-in pattern does not compile.
+    Pattern(String),
+}
+
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unparsable(engine) => write!(
+                f,
+                "cannot parse `engines.vscode` value {engine}; use, for example, ^1.22.0 or ^1.22.x"
+            ),
+            Self::NotSpecific {
+                engine,
+                before_one: true,
+            } => write!(
+                f,
+                "`engines.vscode` ({engine}) is not specific enough: before 1.0.0, name at least the major and minor version, e.g. ^0.10.0 or 0.10.x"
+            ),
+            Self::NotSpecific { engine, .. } => write!(
+                f,
+                "`engines.vscode` ({engine}) is not specific enough: name at least the major version, e.g. ^1.10.0, 1.10.x or 1.x.x"
+            ),
+            Self::Unsupported { engine, version } => write!(
+                f,
+                "the extension needs VS Code {engine}; rustode's extension API is VS Code {version}"
+            ),
+            Self::Pattern(message) => f.write_str(message),
+        }
+    }
+}
+
 /// Something validation found in a manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestProblem {
@@ -105,11 +165,11 @@ impl ExtensionManifest {
     ///
     /// # Errors
     /// When it is not JSON, or not a JSON object.
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub fn parse(text: &str) -> Result<Self, ManifestError> {
         match serde_json::from_str::<Value>(text) {
             Ok(Value::Object(fields)) => Ok(Self { fields }),
-            Ok(_) => Err("the manifest is not a JSON object".to_owned()),
-            Err(err) => Err(format!("the manifest is not valid JSON: {err}")),
+            Ok(_) => Err(ManifestError::NotAnObject),
+            Err(err) => Err(ManifestError::NotJson(err)),
         }
     }
 
@@ -374,9 +434,9 @@ fn validate(fields: &Map<String, Value>, location: &Path) -> Vec<ManifestProblem
     }
     let engine = fields["engines"]["vscode"].as_str().unwrap_or_default();
     if has_code(fields)
-        && let Err(message) = check_engine(engine, VSCODE_API_VERSION, VSCODE_API_DATE)
+        && let Err(err) = check_engine(engine, VSCODE_API_VERSION, VSCODE_API_DATE)
     {
-        problems.push(ManifestProblem::error(message));
+        problems.push(ManifestProblem::error(err.to_string()));
     }
     problems
 }
@@ -542,33 +602,35 @@ fn satisfies(product: [u64; 3], date: [u32; 6], wanted: Requirement) -> bool {
 
 /// Checks `engines.vscode` against the API `version` of `date`
 /// (`isVersionValid`, `extensionValidator.ts:348-379`).
-fn check_engine(engine: &str, version: &str, date: [u32; 6]) -> Result<(), String> {
-    let wanted = parse_requirement(engine).map_err(|err| pattern_bug(&err).message)?;
+fn check_engine(engine: &str, version: &str, date: [u32; 6]) -> Result<(), EngineError> {
+    let wanted =
+        parse_requirement(engine).map_err(|err| EngineError::Pattern(pattern_bug(&err).message))?;
     let Some(wanted) = wanted.map(normalized) else {
-        return Err(format!(
-            "cannot parse `engines.vscode` value {engine}; use, for example, ^1.22.0 or ^1.22.x"
-        ));
+        return Err(EngineError::Unparsable(engine.to_owned()));
     };
     let [(major, major_eq), (_, minor_eq), _] = wanted.parts;
     if major == 0 && !(major_eq && minor_eq) {
-        return Err(format!(
-            "`engines.vscode` ({engine}) is not specific enough: before 1.0.0, name at least the major and minor version, e.g. ^0.10.0 or 0.10.x"
-        ));
+        return Err(EngineError::NotSpecific {
+            engine: engine.to_owned(),
+            before_one: true,
+        });
     }
     if major != 0 && !major_eq {
-        return Err(format!(
-            "`engines.vscode` ({engine}) is not specific enough: name at least the major version, e.g. ^1.10.0, 1.10.x or 1.x.x"
-        ));
+        return Err(EngineError::NotSpecific {
+            engine: engine.to_owned(),
+            before_one: false,
+        });
     }
     let product = parse_requirement(version)
-        .map_err(|err| pattern_bug(&err).message)?
+        .map_err(|err| EngineError::Pattern(pattern_bug(&err).message))?
         .map_or([0; 3], |p| p.parts.map(|(n, _)| n));
     if satisfies(product, date, wanted) {
         Ok(())
     } else {
-        Err(format!(
-            "the extension needs VS Code {engine}; rustode's extension API is VS Code {version}"
-        ))
+        Err(EngineError::Unsupported {
+            engine: engine.to_owned(),
+            version: version.to_owned(),
+        })
     }
 }
 
@@ -616,11 +678,14 @@ mod tests {
     fn engines_must_be_specific_enough() {
         for engine in ["*", "x.x.x", "^0.x.0", "0.x.x"] {
             let err = check_engine(engine, "1.147.0", DATE).expect_err(engine);
-            assert!(err.contains("not specific enough"), "{engine}: {err}");
+            assert!(
+                err.to_string().contains("not specific enough"),
+                "{engine}: {err}"
+            );
         }
         for engine in ["", "1.2", "latest", "~1.2.3", "^1.2.3.4"] {
             let err = check_engine(engine, "1.147.0", DATE).expect_err(engine);
-            assert!(err.contains("cannot parse"), "{engine}: {err}");
+            assert!(err.to_string().contains("cannot parse"), "{engine}: {err}");
         }
     }
 
