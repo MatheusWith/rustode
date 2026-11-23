@@ -44,6 +44,7 @@ use eframe::egui::{
     self, Color32, Context, FontId, Id, Label, Rect, RichText, Sense, UiBuilder, Vec2,
     ViewportCommand,
 };
+use rustode_workspace::bench;
 use rustode_workspace::{
     Document, DocumentId, Error, Event, ExtensionEvent, GroupId, NOT_LOADED, Problem, Range,
     SearchEvent, ServerState, Workspace,
@@ -128,6 +129,12 @@ pub struct EditorApp {
     language: language::Picker,
     /// The list of locations and the rename box.
     navigator: navigate::Navigator,
+    /// The benchmark script the window runs on itself, if one was asked for
+    /// (`RUSTODE_BENCH_SCRIPT`); shared with [`crate::run`], which tells it
+    /// when each frame was presented.
+    bench: Option<Rc<RefCell<bench::Driver>>>,
+    /// The report line the benchmark script ended with, once it has.
+    bench_report: Option<String>,
 }
 
 fn file_name(document: &Document) -> String {
@@ -219,6 +226,51 @@ impl EditorApp {
             quick: None,
             find: find::Find::default(),
             confirm_quit: false,
+            bench: None,
+            bench_report: None,
+        }
+    }
+
+    /// Has the window run `script` on itself, one step per frame, once its
+    /// first frame was presented: the workspace's benchmark hook
+    /// ([`rustode_workspace::bench`]). The report line goes to stderr.
+    pub fn run_bench_script(&mut self, script: bench::Script) {
+        self.bench = Some(Rc::new(RefCell::new(bench::Driver::new(script))));
+    }
+
+    /// The benchmark driver, for [`crate::run`] to time each presented frame
+    /// (and for a test to play the part of the window system).
+    #[must_use]
+    pub fn bench_driver(&self) -> Option<Rc<RefCell<bench::Driver>>> {
+        self.bench.clone()
+    }
+
+    /// The line the benchmark script reported, once it is over.
+    #[must_use]
+    pub fn bench_report(&self) -> Option<&str> {
+        self.bench_report.as_deref()
+    }
+
+    /// One step of the benchmark script, if there is one: the workspace's
+    /// driver decides, the window starts a search the way its Search view
+    /// does and prints the report.
+    fn bench_step(&mut self, ctx: &Context) {
+        let Some(driver) = self.bench.clone() else {
+            return;
+        };
+        let step = driver.borrow_mut().before_frame(&mut self.workspace);
+        match step {
+            bench::Step::Wait => ctx.request_repaint(),
+            bench::Step::StartSearch(script) => {
+                self.search.run_script(&mut self.workspace, &script);
+                ctx.request_repaint();
+            }
+            bench::Step::Report(line) => {
+                eprintln!("{line}");
+                self.bench_report = Some(line);
+                ctx.request_repaint();
+            }
+            bench::Step::Finished => {}
         }
     }
 
@@ -983,6 +1035,7 @@ impl eframe::App for EditorApp {
         if self.workspace.poll_replace(Some(REPLACE_SLICE)) {
             ctx.request_repaint();
         }
+        self.bench_step(&ctx);
         self.note();
         let tab = focus::tab_pressed(&ctx);
         // Before the editor, which also reads Ctrl+K for Ctrl+K Ctrl+I.

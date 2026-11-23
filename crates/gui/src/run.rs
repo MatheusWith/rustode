@@ -5,6 +5,7 @@
 use crate::EditorApp;
 use crate::latency::PresentLatency;
 use eframe::UserEvent;
+use rustode_workspace::bench::Driver;
 use rustode_workspace::trace::{FirstFrame, LatencyReport};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -38,7 +39,8 @@ pub fn run(mut app: EditorApp) -> eframe::Result<Option<LatencyReport>> {
     let latency = Rc::new(RefCell::new(PresentLatency::new()));
     app.time_frames(Rc::clone(&latency));
     let title = app.window_title();
-    run_timed(app, &title, &latency)?;
+    let bench = app.bench_driver();
+    run_with(app, &title, &latency, bench)?;
     let report = latency.borrow().report();
     Ok(report)
 }
@@ -54,6 +56,22 @@ pub fn run_timed(
     app: impl eframe::App + 'static,
     title: &str,
     latency: &Rc<RefCell<PresentLatency>>,
+) -> eframe::Result {
+    run_with(app, title, latency, None)
+}
+
+/// [`run_timed`], also telling the benchmark driver (if any) when each frame
+/// was presented.
+///
+/// # Errors
+/// When the event loop or the window cannot be created, or when the loop
+/// ends before the window presented a frame (no usable graphics adapter,
+/// which eframe reports as a clean exit).
+fn run_with(
+    app: impl eframe::App + 'static,
+    title: &str,
+    latency: &Rc<RefCell<PresentLatency>>,
+    bench: Option<Rc<RefCell<Driver>>>,
 ) -> eframe::Result {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     let mut options = native_options();
@@ -71,9 +89,26 @@ pub fn run_timed(
         eframe,
         latency: Rc::clone(latency),
         first_frame: FirstFrame::requested().then(FirstFrame::since_process_start),
+        bench,
+        presented: false,
     };
     event_loop.run_app(&mut timed)?;
-    Ok(())
+    ended(timed.presented)
+}
+
+/// How a window's event loop ended: eframe turns "no usable graphics adapter"
+/// into a clean exit, which would be a silent success (gaps.md G24), so a loop
+/// that ends before any frame was presented is an error the user can act on.
+fn ended(presented: bool) -> eframe::Result {
+    if presented {
+        Ok(())
+    } else {
+        Err(eframe::Error::AppCreation(
+            "the window closed before it presented a frame: no usable graphics adapter \
+             (run with RUSTODE_LOG=info for the graphics error)"
+                .into(),
+        ))
+    }
 }
 
 /// eframe's handler, with key presses and presented frames timed.
@@ -83,6 +118,10 @@ struct Timed<'a> {
     /// Set when `RUSTODE_REPORT_FIRST_FRAME` is: prints the first presented
     /// frame's time once, for `rustode bench` (startup scenarios).
     first_frame: Option<FirstFrame>,
+    /// The benchmark script's driver, told of each presented frame.
+    bench: Option<Rc<RefCell<Driver>>>,
+    /// Whether any frame was presented.
+    presented: bool,
 }
 
 impl ApplicationHandler<UserEvent> for Timed<'_> {
@@ -107,6 +146,10 @@ impl ApplicationHandler<UserEvent> for Timed<'_> {
         if redraw {
             let at = Instant::now();
             self.latency.borrow_mut().presented(at);
+            self.presented = true;
+            if let Some(bench) = &self.bench {
+                bench.borrow_mut().after_present(at);
+            }
             if let Some(elapsed) = self.first_frame.as_mut().and_then(|f| f.presented(at)) {
                 eprintln!("{}", FirstFrame::line(elapsed));
             }
@@ -140,5 +183,19 @@ fn is_typing(event: &WindowEvent) -> bool {
         WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Pressed,
         WindowEvent::Ime(Ime::Commit(_)) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ended;
+
+    #[test]
+    fn a_loop_that_ended_without_a_frame_is_an_error_with_a_hint() {
+        assert!(ended(true).is_ok());
+        let error = ended(false).expect_err("no frame, no success");
+        let text = error.to_string();
+        assert!(text.contains("no usable graphics adapter"), "{text}");
+        assert!(text.contains("RUSTODE_LOG=info"), "{text}");
     }
 }
