@@ -1,6 +1,6 @@
 # Gaps and open questions
 
-> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-23 · **Change:** minor (G22 and G24 updated, G25 and G26 added) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
+> **Last reviewed:** 2026-11-17 · **Last updated:** 2026-11-23 · **Change:** minor (G19 closed, G22 and G24 updated, G25 and G26 added) · **Target:** local VSCodium 1.147.0 and the rustode editor, Phase 1
 
 This page lists what is still unknown or has not been measured, in priority order: first the study (G1–G12), then the editor (G13 on). The hour figures are estimates, not measurements. When a gap is resolved:
 - record the finding in `09-findings/`;
@@ -32,7 +32,7 @@ Editor (rustode, Phase 1):
 | G16 | The App lost the first injected keystroke once | benchmark method | typing latency ([ADR 0025](adr/0025-typing-latency-injected-input.md)) | 1–2 h |
 | G17 | The TUI layout from 60 to 79 columns is undefined | specification | no; the TUI made a provisional choice (M2) | — |
 | G18 | Dark Modern or the App's default theme, and may theme colors be reused? | specification, license | the TUI uses Dark Modern provisionally (M2); GUI colors (M3), token colors (M4) | — |
-| G19 | Is branch protection available for the private repository? | repository | no | 15 min |
+| G19 | Is branch protection available for the repository? (closed 2026-11-23; the required-checks decision is open) | repository | no | — |
 
 ## G1. No bundle → source-module map
 
@@ -191,8 +191,8 @@ Editor (rustode, Phase 1):
 
 ## G19. Is branch protection available for the private repository?
 
-- **Missing:** whether the owner's plan offers server-side protection of `main` for a private repository ([ADR 0022](adr/0022-commits-branches-pull-requests.md)). Nothing can be checked yet: the repository has not been pushed (measured on 2026-11-17: `git status -sb` shows `## main` with no upstream).
-- **Approach:** after the first push (**owner decision**), read the branch settings on the remote, for example with `gh api repos/<owner>/<repo>/branches/main/protection`. If protection is not available, ADR 0022 records "no push to main" as a convention, enforced by the pre-push hook and CI only. **15 min.**
+- **Closed 2026-11-23 (ticket 43):** the repository was pushed, and protection exists on `main`. Measured on 2026-11-23: `gh api repos/<owner>/<repo>/branches/main/protection` returns linear history required, force pushes and deletions refused, administrators included (`enforce_admins`), strict status checks, 0 required approving reviews, and an **empty list of required status checks**; `gh repo view --json visibility` reports the repository as public, so the question about a private repository no longer applies.
+- **Still open (owner decision):** whether the CI jobs (`checks`, `coverage`, `security`, `bench-gate`, `conventions`) should be required checks on `main`; today the squash merge is gated by convention and by the owner, not by the server ([finding 0005](../09-findings/0005-phase-1-report.md)).
 
 ## G20. Replace across files: how far it is from VS Code
 
@@ -219,6 +219,7 @@ Editor (rustode, Phase 1):
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-23 | minor | G19 closed (branch protection exists on `main`; required checks are the owner's decision; ticket 43) |
 | 2026-11-23 | minor | G22: the App's first presented frame from a Chromium trace; G24 closed; G25 and G26: the edit and search scenarios' limits (ticket 42, finding 0004) |
 | 2026-11-19 | minor | G21: editor groups against VS Code's |
 | 2026-11-19 | minor | G20: replace across files against VS Code's; owner decision: save only clean files |
