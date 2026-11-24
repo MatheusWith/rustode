@@ -235,7 +235,7 @@ impl fmt::Display for Error {
                 "{name} changed on disk under unsaved edits; overwrite or revert it first"
             ),
             Self::NoConflict { name, .. } => write!(f, "{name} has no conflict to resolve"),
-            Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
+            Self::UnknownLanguage(id) => write!(f, "no language \"{id}\""),
             Self::Debug(err) => err.fmt(f),
             Self::UnknownGroup(_) => write!(f, "that editor group no longer exists"),
         }

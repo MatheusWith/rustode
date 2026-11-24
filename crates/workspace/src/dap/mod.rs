@@ -259,7 +259,13 @@ impl Workspace {
     /// sentence each.
     #[must_use]
     pub fn debug_problems(&self) -> Vec<String> {
-        let mut problems = self.dap.launch.problems.clone();
+        let mut problems: Vec<String> = self
+            .dap
+            .launch
+            .problems
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         problems.extend(self.dap.problems.iter().cloned());
         problems
     }

@@ -429,7 +429,7 @@ Where each kind of editor record goes is in §9.
 
 These rules come from the owner's filmcraft project (its `AGENTS.md` §0 and `docs/architecture.md` §1–3), rewritten for an editor; [ADR 0032](docs/adr/0032-adopt-filmcrafts-design-rules.md) records that filmcraft is the reference and which rules are adopted, with the source of each. Each rule here says where rustode already applies it and what is **not applied yet**, with the ticket of the design-rules plan that applies it (the plan is a local, unversioned scratch area: `.scratch/design-rules-adoption/`). A rule that is not applied yet is a gap to close, never a licence to add more of what it forbids. Review checks new code against all of them. A rule moves from "not applied yet" to "applied" only in the change that applies it, and that change cites the file.
 
-Every citation below was re-measured at `8c3c9ab` on 2026-11-23 and each path checked with `test -e`. Lines drift: re-measure when you touch one (§0.3, §11.6).
+Every citation below was re-measured on 2026-11-23, at `8c3c9ab` for the original text and again once tickets 01 to 10 and the typed-error follow-ups were all on one tree (branch `fix/typed-errors`, on `3daf3a5`), and each path checked with `test -e`. Lines drift: re-measure when you touch one (§0.3, §11.6).
 
 #### 11.7.1 Never crash
 
@@ -439,8 +439,7 @@ A malformed `settings.json`, a bad command argument, a language server that dies
    - an edit past the end of the buffer returns `EditError::OutOfRange` (`crates/core/src/editor.rs:64-80`);
    - a bad `settings.json` becomes diagnostics with a line and a column ("Nothing here fails on bad input", `crates/config/src/lib.rs:8`).
 2. **F0.2: no panicking shortcut outside tests.** No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` in production code. Use `?`, `ok_or(..)?`, `let Some(x) = .. else { return Err(..) }` or `if let`. A fallback is allowed only when it is truly correct: **a fallback never silently corrupts a document, a settings file or extension state**. An unfinished feature returns an "unsupported" error. A call that is provably infallible from local code alone may keep one, under a single-item `#[allow(...)]` whose reason is on the same line (§11.3.4).
-   - Applied: `unwrap_used` and `todo` are warned (`Cargo.toml:83-84`), which `-D warnings` turns into errors in the hooks and CI.
-   - Not applied yet (ticket 07): `expect_used`, `panic`, `unreachable` and `unimplemented`, and the per-crate-root attribute of F0.9. Four `unreachable!` sit in production code, measured at `8c3c9ab` with `grep -rn "unreachable!" crates xtask --include=*.rs` outside `tests/`: `crates/workspace/src/extensions.rs:465` (Open VSX's constant URL) and `crates/workspace/src/extensions/manifest.rs:400`, `:428`, `:432` (patterns that always compile). They become `Result`s.
+   - Applied: `unwrap_used` and `todo` are warned (`Cargo.toml:83-84`), which `-D warnings` turns into errors in the hooks and CI. Ticket 07 denies the whole family (`unwrap_used`, `expect_used`, `panic`, `unreachable`, `unimplemented`, `todo`) in production code with the attribute of rule 8 at every crate root, and `xtask/tests/lint_attributes.rs` fails when a root lacks it. The four `unreachable!` that sat in production code (Open VSX's constant URL and three manifest patterns) are `Result`s now: `grep -rn "unreachable!" crates xtask --include=*.rs`, outside `tests/`, prints nothing (re-measured on the same tree).
 3. **F0.4: every number that comes from input is hostile.** Input means a file, a language server, a debug adapter, an extension package, a keystroke or a window size.
    - Use `get()` instead of `[i]`, and `checked_*` or `saturating_*` arithmetic.
    - **Slice strings only at char boundaries** (`char_indices`, `is_char_boundary`); a byte offset from outside is not one.
@@ -452,9 +451,9 @@ A malformed `settings.json`, a bad command argument, a language server that dies
 4. **Bound recursion and loops on input.** Use a depth limit for nested JSONC and `when` clauses, and a seen-set when walking through symlinks.
    - Not applied yet: a deeply nested `when` clause overflows the stack, which aborts the process (the audit of 2026-11-19; ticket 18 adds the limit and its test).
 5. **F0.6: don't cascade.**
-   - Recover a poisoned lock with `lock().unwrap_or_else(PoisonError::into_inner)` (for example `crates/workspace/src/search/replace.rs:201`).
+   - Recover a poisoned lock with `lock().unwrap_or_else(PoisonError::into_inner)` (for example `crates/workspace/src/search/replace.rs:202`).
    - **Every thread or job runs under `catch_unwind` and reports its failure as an error**: a dead worker must never leave a language server "running", an extension "busy", a search "running" or file watching silently stopped. A second barrier sits in every consumer: a channel poll tells "disconnected" from "empty" and treats disconnection as a failure.
-   - Applied in part: the extensions worker is started again when the next job cannot be sent (`crates/workspace/src/extensions.rs:486-498`), but the job that was running when it died is not reported; a crashed language server is restarted up to four times in three minutes, then stays down until it is restarted by hand (`crates/workspace/src/lsp/server.rs:4-8`, `:18-21`).
+   - Applied in part: the extensions worker is started again when the next job cannot be sent, and a job that no worker can take is reported as `Failure::NoWorker` (`crates/workspace/src/extensions.rs:491-519`), but the job that was running when it died is not reported; a crashed language server is restarted up to four times in three minutes, then stays down until it is restarted by hand (`crates/workspace/src/lsp/server.rs:4-8`, `:19-22`).
    - Not applied yet: `catch_unwind` anywhere in production (measured at `8c3c9ab`: `grep -rn "catch_unwind" crates xtask` finds nothing). A new L1 crate, `rustode-guard`, owns it: `spawn_worker(name, job, on_failure)` runs the job under `catch_unwind`, and on a panic logs and sends the worker's terminal failure event. It also supervises child processes (reader and writer threads under `spawn_worker`, send errors surfaced, a half-started process killed and reaped). Tickets 14 (extension jobs), 15 (text search and file watching) and 16 (language servers and debug adapters).
 6. **Never lose work (A3.9).** A save is atomic and durable: write a temporary sibling created exclusively under a unique name, `sync_all` it, keep the target's permissions, rename it over the target, **fsync the folder** on Unix, remove the temporary file on any error, and write through a symlink to the file it points to (to be confirmed against VS Code's source before it is built, §11.1.3).
    - Applied in part: a document save (`crates/workspace/src/lib.rs:494`) goes through one helper, `write_atomic` (`crates/fs/src/atomic.rs:49-59`): links resolved with a hop limit (`:63-83`), a temporary sibling created with `create_new` under a unique name (`:87-108`), the target's permissions set, written, `sync_all` and renamed (`:112-120`), the temporary file removed on any error (`:52-55`), and the folder fsynced on Unix (`:126-134`). Its behavior is tested at the workspace API in `crates/workspace/tests/atomic_save.rs`; the two fsyncs are not observable in a test and are covered by review. A state file that cannot be read is reported and never overwritten (`crates/workspace/src/extensions/state.rs:16-19`).
@@ -465,10 +464,13 @@ A malformed `settings.json`, a bad command argument, a language server that dies
    - **Level 2: what the user types** gets hostile-parameter tests: globs, regexes, find and replace text, quick open queries, log filters, command arguments (uninstall, disable and extension search included), CLI arguments and benchmark scenarios.
    - Not applied yet: all of it (tickets 18, 19 and 20 for level 1; ticket 21 for level 2). The existing seed-driven tests (for example `crates/workspace/tests/stress.rs`) are not mutation tests.
 8. **F0.9: the rules are enforced, not remembered.** Every crate root carries `#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable, clippy::unimplemented, clippy::todo))]`, and `clippy::string_slice` and `clippy::indexing_slicing` once their sites are fixed. Test doubles are included. `cfg_attr(not(test), …)` leaves unit tests, integration tests and their helpers alone: a failing test should fail loudly. An xtask test fails when a crate root lacks the attribute. `arithmetic_side_effects` stays off.
-   - Not applied yet (ticket 07 for the panic family; tickets 11 to 13 for the other two).
+   - Applied for the panic family (ticket 07): all 15 crate roots carry the six-lint `cfg_attr` (for example `crates/workspace/src/lib.rs:3`, `xtask/src/main.rs:3`), and `xtask/tests/lint_attributes.rs` reads every lib and bin target from `cargo metadata` and fails when a root lacks the attribute or one of the lints. The lint set is per package (`required` in that file), so `string_slice` and `indexing_slicing` join it when their sites are fixed.
+   - Not applied yet: `indexing_slicing` and `string_slice` (tickets 11 to 13).
 9. **Errors the user can act on.** A message says what happened, to which item (the file, command, extension or server involved), and what to do when something can be done. Context is added at the layer that knows it. A message never shows `{:?}`, a Rust type name (`DocumentId(0)`) or an I/O error without its path. A frontend never swallows the error of a user action (switching tabs, finding, picking a language); it shows it. Errors are typed, with `Display`, and a `when` or JSONC error carries a line and a column.
-   - Applied in part: configuration problems carry a line and a column (`crates/config/src/lib.rs:8`).
-   - Not applied yet: typed errors for the helpers that return `String` (extensions: ticket 08); item names in messages and errors never swallowed, with a semgrep rule against `{:?}` of errors in frontend code (ticket 09); a disk conflict is a choice the user makes, through commands, in both frontends (ticket 10).
+   - Applied: configuration problems carry a line and a column (`crates/config/src/lib.rs:8`), and so does a `when` clause error (ticket 09).
+   - Applied (ticket 08): the extension helpers return typed errors with `Display` (`crates/workspace/src/extensions/error.rs`, `Failure`), plus `ManifestError` and `SettingValueError`; every variant names the extension, file or URL and says what to do where something can be done.
+   - Applied (ticket 09): `Dirty`, `Conflict` and `NoConflict` carry the document's file name, and the two "unknown" errors say the document or group is no longer there; both frontends show the error of a tab click, a find jump, the match count and the language picker; the semgrep rule `rustode.debug-format-of-error-in-frontend` (`.semgrep/rust.yml:42`, fixture `.semgrep/rust.rs`, tested by `semgrep scan --test`) keeps `{:?}` of an error out of `crates/tui/src/`, `crates/gui/src/` and `crates/cli/src/`.
+   - Applied (ticket 10): a disk conflict is a choice the user makes, through the commands `workbench.files.action.saveIgnoreModifiedSince` ("File: Overwrite") and `workbench.files.action.revertLocalChanges` ("File: Discard Your Changes and Revert to File Contents"), registered in `crates/workspace/src/commands.rs:161`, settled in `crates/workspace/src/external.rs`, and offered by both frontends when a save hits the conflict. "Compare" (`workbench.files.action.resolveConflict`) needs a diff editor and is not registered.
 
 #### 11.7.2 Defense in depth: the last-resort rule
 
@@ -477,7 +479,7 @@ Each layer catches what the one before it let through, from the earliest to the 
 1. **Compile time:** the lints of §11.7.1 rules 2, 3 and 8, and `unsafe_code = "forbid"` (`Cargo.toml:74`).
 2. **The input boundary:** parsers report problems and never panic (§11.7.1 rules 3–4).
 3. **Load:** invariants are checked when data enters (§11.7.6).
-4. **Each command:** `Workspace::execute` and `execute_with` (`crates/workspace/src/commands.rs:679`, `:755`) run under `catch_unwind`. A panic becomes an error for that command.
+4. **Each command:** `Workspace::execute` and `execute_with` (`crates/workspace/src/commands.rs:695`, `:771`) run under `catch_unwind`. A panic becomes an error for that command.
 5. **Each worker:** a panicked thread is replaced and its failure reported (§11.7.1 rule 5).
 6. **Each frame:** each frontend frame runs under `catch_unwind`. A panic hook logs the message, `file:line`, thread and backtrace to a crash log and keeps the last summary, and the frontend shows an error window.
 7. **Process death:** atomic saves and the backup of unsaved documents (§11.7.1 rule 6).
@@ -496,11 +498,12 @@ Some rules read like product or legal policy, but a tool keeps them, so they can
 | Every direct dependency has a row in `ATTRIBUTION.md`, with its kind, and the row's users are true | a paperwork rule | `xtask/tests/attribution.rs`, against `cargo metadata` |
 | Commits, branches and pull requests follow the conventions (§11.4) | a team habit | `xtask/src/conventions.rs`, run by the hooks and CI |
 | Frontends hold no logic (§11.1.1–2) | an architecture wish | `xtask/tests/frontend_deps.rs` |
-| A document with unsaved changes is never reloaded from disk | a product decision taken from VS Code | `crates/workspace/src/external.rs:6-7`, tested in `crates/workspace/tests/external_changes.rs` |
+| A document with unsaved changes is never reloaded from disk | a product decision taken from VS Code | `crates/workspace/src/external.rs:7-8`, tested in `crates/workspace/tests/external_changes.rs` |
 | Large files stay fast | a product promise | the stress budgets (`crates/workspace/tests/stress.rs:85-110`) and the micro-benchmark gate (§11.3.6) |
-| Extensions come from Open VSX, never the Microsoft Marketplace (§1.2) | a license rule | the default registry is `OPEN_VSX` (`crates/workspace/src/extensions.rs:60`), and tests use a local stand-in with no network (§11.2.3). Not applied yet: a test that no other registry is contacted by default |
+| Extensions come from Open VSX, never the Microsoft Marketplace (§1.2) | a license rule | the default registry is `OPEN_VSX` (`crates/workspace/src/extensions.rs:64`), and tests use a local stand-in with no network (§11.2.3). Not applied yet: a test that no other registry is contacted by default |
 | Behavior studied in VS Code is credited (§11.1.3) | a license rule | not applied yet. A candidate check: every file whose comments cite `src/vs/` has a row in `ATTRIBUTION.md` |
-| Every crate root denies the panic family in production code (§11.7.1 rule 8) | a quality wish | not applied yet (ticket 07): an xtask test |
+| Every crate root denies the panic family in production code (§11.7.1 rule 8) | a quality wish | `xtask/tests/lint_attributes.rs` (ticket 07) |
+| No production file passes 800 lines (§11.7.4 rule 7) | a readability wish | `xtask/tests/file_size.rs` (ticket 05). Its `TEMPORARY_ALLOW` lists the 15 files already over the limit, each annotated with ticket 34, which removes them; the list only shrinks |
 
 #### 11.7.4 Architecture principles
 
@@ -511,7 +514,7 @@ Some rules read like product or legal policy, but a tool keeps them, so they can
      - a palette label with its category;
      - a scope;
      - a default key.
-   - It is registered in `COMMANDS` (`crates/workspace/src/commands.rs:145-569`) and run by id with `Workspace::execute` or `execute_with` (`:679`, `:755`). The palette, keybindings and tests all reach a command by its id.
+   - It is registered in `COMMANDS` (`crates/workspace/src/commands.rs:154-585`) and run by id with `Workspace::execute` or `execute_with` (`:695`, `:771`). The palette, keybindings and tests all reach a command by its id.
    - Not applied yet (ticket 28): the category on every palette label, argument documentation, the extension commands that take an argument registered like the others, and an `enabled` predicate that returns the reason a command is disabled. The palette would show that reason, and running the command anyway would return it as the error.
 3. **Exact positions.** This is the editor's version of filmcraft's "exact time".
    - The model counts in integers: char offsets in the buffer (`crates/core/src/buffer.rs:6-7`) and zero-based lines and columns.
@@ -522,16 +525,16 @@ Some rules read like product or legal policy, but a tool keeps them, so they can
    - No `f32` or `f64` in workspace or core logic.
    - Times are `Duration` and `Instant`, never float seconds; floats appear only in reports.
 4. **Versions instead of locks.** This is the editor's version of filmcraft's copy-on-write snapshots.
-   - Every text state has a version (`crates/core/src/editor.rs:118-119`), and every change sent to a language server carries one (`crates/workspace/src/lsp/mod.rs:370-379`).
+   - Every text state has a version (`crates/core/src/editor.rs:118-119`), and every change sent to a language server carries one (`crates/workspace/src/lsp/mod.rs:370-376`).
    - Background work (search, highlighting, language servers) holds a cheap copy of the text or its version, takes no lock on the document, and drops a result whose version is stale.
    - Undo is a history of changes grouped like VS Code (`crates/core/src/history.rs`), not a stack of snapshots.
 5. **A reference path checks the fast path.** When a fast path exists, the simple path is the oracle, and a test compares the two. Applied:
-   - an incremental reparse must produce the tree of a fresh parse (`crates/syntax/src/lib.rs:252`);
+   - an incremental reparse must produce the tree of a fresh parse (`crates/syntax/src/lib.rs:264`);
    - incremental document sync must leave the language server with the same text as a full sync (`crates/workspace/tests/lsp.rs:253`).
 
    GPU rendering and any cache added later follow the same rule.
 6. **Pure Rust, clean-room.** Behavior is reimplemented, never translated (§11.1.3). `unsafe` is forbidden, and dependency licenses are checked (§11.1.4).
-7. **Workspace-owned state.** The workspace owns every decision and every piece of shared state: layout (side bar visibility, active view, Activity Bar location, focus order of the parts), view-models (quick lists, the explorer view, the find session, the search form, extension rows, the status model, the dirty close and quit confirmation) and the keymap. Frontends draw it and forward input; widths in points and columns stay in each frontend ([ADR 0014](docs/adr/0014-in-process-frontends.md), [ADR 0033](docs/adr/0033-activity-bar-and-side-bar-location.md)). Not applied yet: the TUI and the GUI each hold their own key tables, state and wording (tickets 29 to 36). No production file above about 800 lines, checked by a test (ticket 05; ticket 34 splits the large ones).
+7. **Workspace-owned state.** The workspace owns every decision and every piece of shared state: layout (side bar visibility, active view, Activity Bar location, focus order of the parts), view-models (quick lists, the explorer view, the find session, the search form, extension rows, the status model, the dirty close and quit confirmation) and the keymap. Frontends draw it and forward input; widths in points and columns stay in each frontend ([ADR 0014](docs/adr/0014-in-process-frontends.md), [ADR 0033](docs/adr/0033-activity-bar-and-side-bar-location.md)). Not applied yet: the TUI and the GUI each hold their own key tables, state and wording (tickets 29 to 36). No production file above 800 lines, checked by `xtask/tests/file_size.rs` (ticket 05, applied, with a temporary allow-list until ticket 34 splits the 15 large ones).
 8. **Each crate has one role.** File I/O is in `rustode-fs`, HTTP in `rustode-net`, child processes and guarded threads in `rustode-guard`, test doubles in test crates, and benchmark tooling outside the shipped binary. Not applied yet: the workspace does raw file I/O (ticket 23), HTTP (ticket 24) and process spawning (ticket 16), and the extension registry stand-in and the benchmark harness ship inside the user's binaries (tickets 25 and 26).
 
 #### 11.7.5 Layers with automatic verification
@@ -547,14 +550,15 @@ The crates form layers, and a dependency only points to a lower layer:
 | tools | `xtask`, `test-lsp`, `test-dap`, `test-registry` (not created yet: ticket 25), `rustode-bench` (not created yet: ticket 26); all `publish = false`, and none of them ships in the editor's binaries |
 
 - Applied: frontends depend on no rustode crate but the workspace, checked by `xtask/tests/frontend_deps.rs` through `cargo metadata`.
-- Not applied yet (ticket 04): a table-driven check that fails on:
+- Applied (ticket 04): `xtask/tests/layers.rs` checks the table against `cargo metadata` and fails on:
   - an upward edge;
   - a crate with no layer;
-  - a same-layer edge that is not in an explicit allow-list (for example `rustode-guard` to `rustode-trace`);
-  - I/O crates (`notify`, `ignore`, `ureq`, `zip`) in L0;
-  - UI crates (`ratatui`, `eframe`, `egui`, `winit`) below L3.
+  - a same-layer edge that is not in the explicit `SAME_LAYER` allow-list (for example `rustode-guard` to `rustode-trace`);
+  - I/O crates (`notify`, `ignore`, `ureq`, `zip`) among the normal or build dependencies of an L0 crate;
+  - UI crates (`ratatui`, `eframe`, `egui`, `winit`, `egui_kittest`) below L3, in any dependency kind (`egui_kittest` is a UI crate);
+  - a normal or build dependency on a tools crate.
 
-  Until it exists, a pull request that adds a dependency between rustode crates states its layer.
+  Dev-dependencies count as edges between workspace crates (a dev-dependency cannot reach upward or sideways) but not for the I/O rule, and a crate's dev-dependency on itself is not an edge. Entries for crates not in the tree yet (`rustode-guard`, `rustode-net`, `test-registry`, `rustode-bench`) are ignored until they exist.
 
 #### 11.7.6 Data model: validated invariants, simple serialization
 

@@ -31,8 +31,8 @@ pub use diagnostic::{Diagnostic, DiagnosticKind, Location, Severity};
 pub use jsonc::{JsonError, Value};
 pub use keybindings::{Chord, Keybinding, Keybindings, parse_key, parse_keybindings};
 pub use settings::{
-    Schema, SettingSchema, SettingType, Settings, SettingsFile, override_languages, parse_settings,
-    validate,
+    Schema, SettingSchema, SettingType, SettingValueError, Settings, SettingsFile,
+    override_languages, parse_settings, validate,
 };
 pub use when::{ContextValue, When, WhenError, parse_when};
 

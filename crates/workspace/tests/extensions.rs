@@ -1181,6 +1181,84 @@ fn state_written_by_vs_code_is_read_and_its_other_rows_are_kept() {
 }
 
 #[test]
+fn an_unreadable_obsolete_file_is_reported_and_never_overwritten() {
+    let stand_in = StandIn::start().expect("the stand-in starts");
+    let (mut ws, dir) = with_hello("bad-obsolete", &stand_in);
+    let folder = dir.join("acme.hello-1.0.0-universal");
+    let index_before = std::fs::read_to_string(dir.join("extensions.json")).expect("index");
+    for bad in [
+        "{ not json",
+        "[]",
+        r#"{"acme.hello-1.0.0-universal":"yes"}"#,
+    ] {
+        std::fs::write(dir.join(".obsolete"), bad).expect(".obsolete");
+        // A listing still works: the file is not needed to list.
+        ws.refresh_extensions().expect("refresh");
+        let events = settle(&mut ws);
+        assert!(
+            events.contains(&ExtensionEvent::Listed),
+            "{bad}: {events:?}"
+        );
+        // Changing the folder is refused, naming the file and saying what to do.
+        ws.uninstall_extension("acme.hello").expect("queued");
+        let message = failure(&settle(&mut ws));
+        assert!(message.contains(".obsolete"), "{bad}: {message}");
+        assert!(message.contains("left unchanged"), "{bad}: {message}");
+        assert!(!message.contains("{:?}"), "{message}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".obsolete")).expect("read"),
+            bad
+        );
+        assert!(folder.is_dir(), "{bad}: the folder stays");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("extensions.json")).expect("index"),
+            index_before,
+            "{bad}: the index stays"
+        );
+    }
+}
+
+#[test]
+fn an_unusable_obsolete_file_is_reported_by_a_listing_and_left_unchanged() {
+    let stand_in = StandIn::start().expect("the stand-in starts");
+    let (mut ws, dir) = with_hello("bad-obsolete-listing", &stand_in);
+    for bad in [
+        "{ not json",
+        "[]",
+        r#"{"acme.hello-1.0.0-universal":"yes"}"#,
+    ] {
+        std::fs::write(dir.join(".obsolete"), bad).expect(".obsolete");
+        ws.refresh_extensions().expect("refresh");
+        let events = settle(&mut ws);
+        let notice = events.iter().find_map(|e| match e {
+            ExtensionEvent::ObsoleteFailed { message } => Some(message.clone()),
+            _ => None,
+        });
+        let message = notice.unwrap_or_else(|| panic!("{bad}: no notice in {events:?}"));
+        assert!(message.contains(".obsolete"), "{bad}: {message}");
+        assert!(message.contains("left unchanged"), "{bad}: {message}");
+        assert!(message.contains("Fix or delete"), "{bad}: {message}");
+        assert!(
+            events.contains(&ExtensionEvent::Listed),
+            "{bad}: {events:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".obsolete")).expect("read"),
+            bad
+        );
+    }
+    std::fs::remove_file(dir.join(".obsolete")).expect("remove");
+    ws.refresh_extensions().expect("refresh");
+    let events = settle(&mut ws);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ExtensionEvent::ObsoleteFailed { .. })),
+        "a good listing has no notice: {events:?}"
+    );
+}
+
+#[test]
 fn an_unreadable_state_file_is_reported_and_never_overwritten() {
     let stand_in = StandIn::start().expect("the stand-in starts");
     let (mut ws, dir) = with_hello("bad-state", &stand_in);
@@ -1208,6 +1286,19 @@ fn an_unreadable_state_file_is_reported_and_never_overwritten() {
         assert!(message.contains("left unchanged"), "{message}");
         assert_eq!(state(&dir).as_deref(), Some(bad));
     }
+}
+
+#[test]
+fn errors_name_the_item_and_say_what_to_do() {
+    let no_folder = ExtensionError::NoLocation.to_string();
+    assert!(no_folder.contains("RUSTODE_EXTENSIONS_DIR"), "{no_folder}");
+    let bad_id = ExtensionError::InvalidId("nope".into()).to_string();
+    assert!(bad_id.contains("nope"), "{bad_id}");
+    let mut ws = Workspace::new();
+    assert_eq!(
+        ws.install_extension("acme.hello"),
+        Err(ExtensionError::NoLocation)
+    );
 }
 
 #[test]
