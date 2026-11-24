@@ -101,6 +101,8 @@ pub struct EditorApp {
     confirm_close: Option<DocumentId>,
     /// The open disk-conflict prompt (`conflict.rs`).
     conflict: Option<rustode_workspace::ConflictPrompt>,
+    /// The open comparison of a disk conflict (`compare.rs`).
+    compare: Option<crate::compare::State>,
     /// The title last sent to the window.
     title: Option<String>,
     /// Set when the window runs under [`crate::run`], to time frames.
@@ -215,6 +217,7 @@ impl EditorApp {
             notice: None,
             confirm_close: None,
             conflict: None,
+            compare: None,
             title: None,
             latency: None,
             extensions: extensions::Panel::default(),
@@ -342,6 +345,16 @@ impl EditorApp {
     fn note(&mut self) {
         for event in self.workspace.take_events() {
             self.notice = match event {
+                Event::CompareConflict { id } => {
+                    match self.workspace.conflict_compare(id) {
+                        Ok(model) => {
+                            self.conflict = None;
+                            self.compare = Some(crate::compare::State::new(model));
+                        }
+                        Err(err) => self.message = Some(err.to_string()),
+                    }
+                    continue;
+                }
                 Event::Conflict { .. } => Some(
                     "The file changed on disk; saving will ask whether to overwrite it.".to_owned(),
                 ),
@@ -1137,9 +1150,9 @@ fn extension_notice(event: &ExtensionEvent) -> Option<String> {
         }
         ExtensionEvent::Disabled { id } => format!("Disabled {id}."),
         ExtensionEvent::Failed { id, message } => format!("{id}: {message}"),
-        ExtensionEvent::ListFailed { message } | ExtensionEvent::StateFailed { message } => {
-            message.clone()
-        }
+        ExtensionEvent::ListFailed { message }
+        | ExtensionEvent::StateFailed { message }
+        | ExtensionEvent::ObsoleteFailed { message } => message.clone(),
         _ => return None,
     })
 }

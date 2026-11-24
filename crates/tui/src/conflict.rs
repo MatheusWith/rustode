@@ -4,7 +4,7 @@
 //! ([`Workspace::conflict_prompt`](rustode_workspace::Workspace::conflict_prompt));
 //! each choice is a registered command, so the palette and a user's
 //! `keybindings.json` reach them too. The first letter of a choice's label
-//! is its key.
+//! is its key (Compare, Overwrite, Revert).
 
 use crate::app::App;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -90,10 +90,17 @@ impl App {
         let Some(choice) = choice else { return };
         self.conflict = None;
         self.message = None;
-        self.run_id(choice.command);
-        if self.message.is_none() {
+        self.run_conflict_command(choice.command);
+    }
+
+    /// Runs a conflict command and says what it did, unless it said
+    /// something itself (an error, or the comparison opening).
+    pub(crate) fn run_conflict_command(&mut self, command: &str) {
+        self.run_id(command);
+        // Compare says nothing: the comparison opens when the event arrives.
+        if self.message.is_none() && command != "workbench.files.action.resolveConflict" {
             self.message = Some(
-                if choice.command == "workbench.files.action.saveIgnoreModifiedSince" {
+                if command == "workbench.files.action.saveIgnoreModifiedSince" {
                     "Saved".to_owned()
                 } else {
                     "Reverted to the file's contents".to_owned()

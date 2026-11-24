@@ -22,7 +22,7 @@
 //! `workbench.files.action.saveIgnoreModifiedSince` at `:387`,
 //! `…acceptLocalChanges` and `…revertLocalChanges` in `fileActions.contribution.ts:199-200`). rustode raises
 //! the conflict as soon as the watcher reports the change, and resolves it
-//! with the same two choices.
+//! with the same choices plus Revert; Compare is in `compare.rs`.
 //!
 //! "Changed" always means the bytes differ from the ones last read or
 //! written, so a touch, or rustode's own save, is never an external change.
@@ -61,12 +61,15 @@ pub struct ConflictPrompt {
     /// The document in conflict.
     pub document: DocumentId,
     /// VS Code's "Failed to save" sentence (`staleSaveError`,
-    /// `textFileSaveErrorHandler.ts:129`), without the compare choice.
+    /// `textFileSaveErrorHandler.ts:129`).
     pub message: String,
     /// The choices, in VS Code's order.
     pub choices: Vec<ConflictChoice>,
 }
 
+/// VS Code's "Compare" (`ResolveSaveConflictAction`,
+/// `textFileSaveErrorHandler.ts:247`); the comparison is `compare.rs`.
+pub(crate) const COMPARE: &str = "workbench.files.action.resolveConflict";
 /// VS Code's "Overwrite" (`SaveModelIgnoreModifiedSinceAction`,
 /// `textFileSaveErrorHandler.ts:387`).
 pub(crate) const OVERWRITE: &str = "workbench.files.action.saveIgnoreModifiedSince";
@@ -76,20 +79,25 @@ pub(crate) const REVERT: &str = "workbench.files.action.revertLocalChanges";
 
 impl Workspace {
     /// The prompt for a document whose file changed under unsaved edits, or
-    /// `None` when it has no conflict. Compare (VS Code's
-    /// `workbench.files.action.resolveConflict`) needs a diff editor, which
-    /// rustode does not have, so it is not offered.
+    /// `None` when it has no conflict. The choices are VS Code's Compare and
+    /// Overwrite, in its order, then Revert, which VS Code offers from the
+    /// comparison; Compare is [`Workspace::conflict_compare`].
     #[must_use]
     pub fn conflict_prompt(&self, id: DocumentId) -> Option<ConflictPrompt> {
         let document = self.document(id).filter(|d| d.has_conflict())?;
         Some(ConflictPrompt {
             document: id,
             message: format!(
-                "Failed to save '{}': The content of the file is newer. Please overwrite the \
-                 content of the file with your changes or revert to the file contents.",
+                "Failed to save '{}': The content of the file is newer. Please compare your \
+                 version with the file contents or overwrite the content of the file with your \
+                 changes.",
                 document.name()
             ),
             choices: vec![
+                ConflictChoice {
+                    command: COMPARE,
+                    label: "Compare",
+                },
                 ConflictChoice {
                     command: OVERWRITE,
                     label: "Overwrite",

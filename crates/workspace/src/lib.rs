@@ -16,6 +16,7 @@ pub mod bench;
 mod bulk_edit;
 mod child;
 mod commands;
+mod compare;
 mod config;
 mod dap;
 mod document;
@@ -39,6 +40,10 @@ pub use config::{
 };
 
 pub use commands::{COMMANDS, CommandInfo, CommandMatch, CommandScope};
+pub use compare::{
+    COMPARE_LINE_CHARS, COMPARE_MAX_BYTES, COMPARE_MAX_CHANGES, COMPARE_MAX_LINES, ConflictCompare,
+    DiffKind, DiffLine, SideBySide, SideCell, SideRow,
+};
 pub use dap::{
     BreakpointDraft, BreakpointInfo, BreakpointInput, BreakpointKind, BreakpointSpec,
     CONTINUE_COMMAND, ConsoleKind, ConsoleLine, DebugError, DebugState, DebugStatus, DebugTree,
@@ -154,6 +159,13 @@ pub enum Event {
         /// The document.
         id: DocumentId,
     },
+    /// `workbench.files.action.resolveConflict` ran: show the comparison of
+    /// the document's file with its unsaved text
+    /// ([`Workspace::conflict_compare`]).
+    CompareConflict {
+        /// The document in conflict.
+        id: DocumentId,
+    },
     /// A document's language changed: the user picked one, or
     /// `files.associations` now says another. Its highlights changed too.
     LanguageChanged {
@@ -235,7 +247,7 @@ impl fmt::Display for Error {
                 "{name} changed on disk under unsaved edits; overwrite or revert it first"
             ),
             Self::NoConflict { name, .. } => write!(f, "{name} has no conflict to resolve"),
-            Self::UnknownLanguage(id) => write!(f, "no language {id:?}"),
+            Self::UnknownLanguage(id) => write!(f, "no language \"{id}\""),
             Self::Debug(err) => err.fmt(f),
             Self::UnknownGroup(_) => write!(f, "that editor group no longer exists"),
         }

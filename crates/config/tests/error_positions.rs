@@ -30,3 +30,14 @@ fn an_invalid_when_is_reported_at_its_place_in_the_file() {
     assert!(text.starts_with("2:"), "{text}");
     assert!(!text.contains("offset"), "{text}");
 }
+
+#[test]
+fn a_diagnostic_prints_its_severity_as_a_word() {
+    let parsed = parse_keybindings("[\n  { \"key\": \"ctrl+s\" \"command\": \"x\" }\n]");
+    let error = parsed.diagnostics.first().expect("a diagnostic");
+    let text = error.to_string();
+    assert!(text.contains(": error: "), "{text}");
+    assert!(!text.contains("Error"), "{text}");
+    assert_eq!(rustode_config::Severity::Warning.to_string(), "warning");
+    assert_eq!(rustode_config::Severity::Hint.to_string(), "hint");
+}

@@ -48,5 +48,6 @@ Decided by the owner in the Phase 1 grilling session (2026-11-16), except where 
 | [0031](0031-editor-groups.md) | Editor groups are a tree of splits in the workspace; one document and one undo history, and a cursor set for each view that follows every edit | accepted (2026-11-19, ticket 35) |
 | [0032](0032-adopt-filmcrafts-design-rules.md) | rustode adopts filmcraft's never-crash and design rules (F0.2, F0.4, F0.6 to F0.9, the atomic save and the error-message rule), enforced by lints and tests | accepted (2026-11-19, owner; recorded 2026-11-23); implemented ticket by ticket |
 | [0033](0033-activity-bar-and-side-bar-location.md) | Both frontends get an Activity Bar (Explorer, Search, Run and Debug, Extensions) and a configurable side bar, replacing ADR 0017's "no activity bar" | accepted (2026-11-19, owner; recorded 2026-11-23); not implemented |
+| [0034](0034-compare-for-disk-conflicts.md) | "Compare" for a disk conflict is a line diff computed in the workspace and drawn read-only by each frontend, with a hand-written Myers diff, size limits and no new dependency | accepted (2026-11-23, owner: build it now) |
 
 Possible statuses: `proposed`, `accepted`, `superseded by ADR NNNN`. The date and who decided go in parentheses. "Proposed — owner's decision" marks a proposal that only the owner can accept, because it changes an inviolable rule.

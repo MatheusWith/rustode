@@ -12,7 +12,9 @@
 
 use rustode_config::jsonc::{self, Node, NodeKind};
 use serde_json::{Map, Value};
-use std::path::Path;
+use std::fmt;
+use std::io;
+use std::path::{Path, PathBuf};
 
 /// Strings and nesting deeper than this are not substituted into.
 const MAX_DEPTH: usize = 64;
@@ -34,30 +36,112 @@ pub struct LaunchConfiguration {
 #[derive(Debug, Default)]
 pub(crate) struct Launch {
     pub configurations: Vec<LaunchConfiguration>,
-    pub problems: Vec<String>,
+    pub problems: Vec<LaunchProblem>,
+}
+
+/// What is wrong with an entry of `configurations`.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EntryProblem {
+    NotAnObject,
+    Empty(&'static str),
+    NotAString(&'static str),
+    Missing(&'static str),
+}
+
+impl fmt::Display for EntryProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAnObject => f.write_str("it must be an object"),
+            Self::Empty(key) => write!(f, "\"{key}\" is empty"),
+            Self::NotAString(key) => write!(f, "\"{key}\" must be a string"),
+            Self::Missing(key) => write!(f, "\"{key}\" is missing"),
+        }
+    }
+}
+
+/// One problem of `launch.json`. Every variant names the file; the entry
+/// that is skipped is named by its position.
+#[derive(Debug)]
+pub(crate) enum LaunchProblem {
+    /// The file exists but cannot be read.
+    Unreadable { path: PathBuf, source: io::Error },
+    /// A syntax error, with its line.
+    Syntax {
+        path: PathBuf,
+        line: String,
+        message: String,
+    },
+    /// The top level is not an object.
+    NotAnObject(PathBuf),
+    /// `configurations` is not an array.
+    ConfigurationsNotAnArray(PathBuf),
+    /// An entry of `configurations` is skipped.
+    Entry {
+        path: PathBuf,
+        index: usize,
+        problem: EntryProblem,
+    },
+}
+
+impl fmt::Display for LaunchProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unreadable { path, source } => {
+                write!(f, "cannot read {}: {source}", path.display())
+            }
+            Self::Syntax {
+                path,
+                line,
+                message,
+            } => write!(f, "{}:{line}: {message}", path.display()),
+            Self::NotAnObject(path) => {
+                write!(f, "{}: the top level must be an object", path.display())
+            }
+            Self::ConfigurationsNotAnArray(path) => {
+                write!(f, "{}: \"configurations\" must be an array", path.display())
+            }
+            Self::Entry {
+                path,
+                index,
+                problem,
+            } => write!(
+                f,
+                "{}: configurations[{index}] is skipped: {problem}",
+                path.display()
+            ),
+        }
+    }
 }
 
 /// Reads the file; a missing one is no configurations and no problem.
 pub(crate) fn load(path: &Path) -> Launch {
     match std::fs::read(path) {
-        Ok(bytes) => parse(&String::from_utf8_lossy(&bytes)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Launch::default(),
-        Err(err) => Launch {
+        Ok(bytes) => parse(path, &String::from_utf8_lossy(&bytes)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Launch::default(),
+        Err(source) => Launch {
             configurations: Vec::new(),
-            problems: vec![format!("cannot read launch.json: {err}")],
+            problems: vec![LaunchProblem::Unreadable {
+                path: path.to_owned(),
+                source,
+            }],
         },
     }
 }
 
-/// The configurations in `text`, and a sentence for each problem.
-pub(crate) fn parse(text: &str) -> Launch {
+/// The configurations in `text` (read from `path`), and a problem for each
+/// thing wrong with it.
+pub(crate) fn parse(path: &Path, text: &str) -> Launch {
     let parsed = jsonc::parse(text);
     let mut launch = Launch {
         configurations: Vec::new(),
         problems: parsed
             .errors
             .iter()
-            .map(|e| format!("launch.json:{}: {}", line_of(text, e.span.start), e.error))
+            .map(|e| LaunchProblem::Syntax {
+                path: path.to_owned(),
+                line: line_of(text, e.span.start),
+                message: e.error.to_string(),
+            })
             .collect(),
     };
     let Some(root) = parsed.root else {
@@ -66,7 +150,7 @@ pub(crate) fn parse(text: &str) -> Launch {
     let NodeKind::Object(properties) = &root.kind else {
         launch
             .problems
-            .push("launch.json: the top level must be an object".to_owned());
+            .push(LaunchProblem::NotAnObject(path.to_owned()));
         return launch;
     };
     let configurations = properties
@@ -79,15 +163,17 @@ pub(crate) fn parse(text: &str) -> Launch {
             for (index, item) in items.iter().enumerate() {
                 match entry(item) {
                     Ok(configuration) => launch.configurations.push(configuration),
-                    Err(why) => launch
-                        .problems
-                        .push(format!("launch.json: configurations[{index}]: {why}")),
+                    Err(problem) => launch.problems.push(LaunchProblem::Entry {
+                        path: path.to_owned(),
+                        index,
+                        problem,
+                    }),
                 }
             }
         }
         Some(_) => launch
             .problems
-            .push("launch.json: \"configurations\" must be an array".to_owned()),
+            .push(LaunchProblem::ConfigurationsNotAnArray(path.to_owned())),
         None => {}
     }
     launch
@@ -104,17 +190,17 @@ fn line_of(text: &str, offset: usize) -> String {
     format!("{line}:{column}")
 }
 
-fn entry(node: &Node) -> Result<LaunchConfiguration, String> {
+fn entry(node: &Node) -> Result<LaunchConfiguration, EntryProblem> {
     let NodeKind::Object(_) = &node.kind else {
-        return Err("must be an object".to_owned());
+        return Err(EntryProblem::NotAnObject);
     };
     let body = to_json(&node.to_value());
-    let field = |key: &str| -> Result<String, String> {
+    let field = |key: &'static str| -> Result<String, EntryProblem> {
         match body.get(key) {
             Some(Value::String(text)) if !text.is_empty() => Ok(text.clone()),
-            Some(Value::String(_)) => Err(format!("\"{key}\" is empty")),
-            Some(_) => Err(format!("\"{key}\" must be a string")),
-            None => Err(format!("\"{key}\" is missing")),
+            Some(Value::String(_)) => Err(EntryProblem::Empty(key)),
+            Some(_) => Err(EntryProblem::NotAString(key)),
+            None => Err(EntryProblem::Missing(key)),
         }
     };
     Ok(LaunchConfiguration {
@@ -188,6 +274,7 @@ mod tests {
     #[test]
     fn comments_trailing_commas_and_bad_entries() {
         let launch = parse(
+            Path::new("launch.json"),
             r#"{
               // VS Code's own file has comments
               "version": "0.2.0",
@@ -207,9 +294,19 @@ mod tests {
 
     #[test]
     fn broken_files_are_problems() {
-        assert_eq!(parse("").problems.len(), 0);
-        assert_ne!(parse("{ \"configurations\": [ {").problems.len(), 0);
-        assert_eq!(parse("[1]").problems.len(), 1);
-        assert_eq!(parse(r#"{"configurations": 3}"#).problems.len(), 1);
+        assert_eq!(parse(Path::new("l"), "").problems.len(), 0);
+        assert_ne!(
+            parse(Path::new("l"), "{ \"configurations\": [ {")
+                .problems
+                .len(),
+            0
+        );
+        assert_eq!(parse(Path::new("l"), "[1]").problems.len(), 1);
+        assert_eq!(
+            parse(Path::new("l"), r#"{"configurations": 3}"#)
+                .problems
+                .len(),
+            1
+        );
     }
 }

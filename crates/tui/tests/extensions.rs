@@ -356,3 +356,21 @@ fn a_running_operation_is_labelled_until_it_is_polled() {
     assert!(shown.contains("Uninstalling"), "{shown}");
     settle(&mut app, &mut terminal);
 }
+
+#[test]
+fn an_unusable_obsolete_file_is_reported_in_the_status_bar_by_a_listing() {
+    let stand_in = StandIn::start().expect("the stand-in starts");
+    let (mut app, extensions) = app("obsolete", &stand_in);
+    std::fs::create_dir_all(&extensions).expect("extensions folder");
+    std::fs::write(extensions.join(".obsolete"), "{ not json").expect(".obsolete");
+    let mut terminal = Terminal::new(TestBackend::new(200, 12)).expect("terminal");
+    send(&mut app, &mut terminal, &[ctrl_shift_x()]);
+    settle(&mut app, &mut terminal);
+    let shown = screen(&terminal);
+    assert!(shown.contains(".obsolete"), "{shown}");
+    assert!(shown.contains("left unchanged"), "{shown}");
+    assert_eq!(
+        std::fs::read_to_string(extensions.join(".obsolete")).expect("read"),
+        "{ not json"
+    );
+}

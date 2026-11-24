@@ -180,6 +180,8 @@ pub struct App {
     pub(crate) confirm_close: Option<DocumentId>,
     /// The open disk-conflict prompt (`conflict.rs`).
     pub(crate) conflict: Option<rustode_workspace::ConflictPrompt>,
+    /// The open comparison of a disk conflict (`compare.rs`).
+    pub(crate) compare: Option<crate::compare::CompareView>,
     quit: bool,
     latency: LatencyRecorder,
 }
@@ -237,6 +239,7 @@ impl App {
             confirm_quit: false,
             confirm_close: None,
             conflict: None,
+            compare: None,
             quit: false,
             latency: LatencyRecorder::new(),
         })
@@ -361,7 +364,11 @@ impl App {
         self.workspace.poll_language_servers();
         self.workspace.poll_debug();
         self.refresh_conflict_prompt();
+        self.refresh_compare();
         match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release && self.compare.is_some() => {
+                self.compare_key(*key);
+            }
             Event::Key(key) if key.kind != KeyEventKind::Release && self.conflict.is_some() => {
                 self.conflict_key(*key);
             }
@@ -1233,6 +1240,10 @@ impl App {
         let events = self.workspace.take_events();
         for event in &events {
             let message = match event {
+                WorkspaceEvent::CompareConflict { id } => {
+                    self.open_compare(*id);
+                    continue;
+                }
                 WorkspaceEvent::Conflict { .. } => {
                     "The file changed on disk: Ctrl+S asks whether to overwrite it, F5 loads the disk version"
                         .to_owned()

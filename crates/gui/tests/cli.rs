@@ -71,3 +71,66 @@ fn several_paths_are_opened_and_each_must_exist() {
         "{stderr}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_path_that_is_not_utf8_is_an_error_not_a_crash() {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::OsStr::from_bytes(b"/nonexistent/\xff.txt");
+    let out = Command::new(env!("CARGO_BIN_EXE_rustode-gui"))
+        .arg(path)
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .output()
+        .expect("rustode-gui runs");
+    assert_eq!(out.status.code(), Some(1), "{:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_flag_that_is_not_utf8_is_a_usage_error_not_a_crash() {
+    use std::os::unix::ffi::OsStrExt;
+    let flag = std::ffi::OsStr::from_bytes(b"--\xff");
+    let out = Command::new(env!("CARGO_BIN_EXE_rustode-gui"))
+        .arg(flag)
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .output()
+        .expect("rustode-gui runs");
+    assert_eq!(out.status.code(), Some(2), "{:?}", out.status);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+}
+
+#[test]
+fn hostile_arguments_and_log_filters_are_errors_not_crashes() {
+    let long = "x".repeat(100_000);
+    for arg in ["", " ", "-", "--", "\n", long.as_str()] {
+        let out = Command::new(env!("CARGO_BIN_EXE_rustode-gui"))
+            .arg(arg)
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DISPLAY")
+            .output()
+            .expect("rustode-gui runs");
+        let code = out.status.code();
+        assert!(
+            matches!(code, Some(1 | 2)),
+            "{:?}: {:?}",
+            arg.len(),
+            out.status
+        );
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+    }
+    for filter in ["=====", "[[[", "debug,,,", "a=b=c", "💥"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_rustode-gui"))
+            .arg("--version")
+            .env("RUSTODE_LOG", filter)
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DISPLAY")
+            .output()
+            .expect("rustode-gui runs");
+        assert!(out.status.success(), "{filter:?}: {:?}", out.status);
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+    }
+}

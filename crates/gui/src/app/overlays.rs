@@ -156,6 +156,7 @@ impl EditorApp {
             }
         }
         changed |= self.show_conflict(&ctx);
+        changed |= self.show_compare(&ctx);
         changed
     }
 
@@ -182,6 +183,37 @@ impl EditorApp {
             }
             crate::conflict::Reply::Run(command) => {
                 self.conflict = None;
+                self.run_command(ctx, command);
+                self.focus_editor(ctx);
+                true
+            }
+        }
+    }
+
+    /// The comparison of a disk conflict, while the document still has the
+    /// conflict it was opened for.
+    fn show_compare(&mut self, ctx: &Context) -> bool {
+        if let Some(state) = &self.compare
+            && !self
+                .workspace
+                .document(state.document())
+                .is_some_and(Document::has_conflict)
+        {
+            self.compare = None;
+            self.focus_editor(ctx);
+        }
+        let Some(state) = self.compare.as_mut() else {
+            return false;
+        };
+        match crate::compare::show(ctx, state) {
+            crate::compare::Reply::None => false,
+            crate::compare::Reply::Close => {
+                self.compare = None;
+                self.focus_editor(ctx);
+                true
+            }
+            crate::compare::Reply::Run(command) => {
+                self.compare = None;
                 self.run_command(ctx, command);
                 self.focus_editor(ctx);
                 true

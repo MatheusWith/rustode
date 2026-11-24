@@ -125,8 +125,12 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame) {
         } else {
             editor
         };
-        draw_editor_area(app, frame, editor);
-        if app.find_visible {
+        if app.compare.is_some() {
+            crate::compare::draw(app, frame, editor);
+        } else {
+            draw_editor_area(app, frame, editor);
+        }
+        if app.find_visible && app.compare.is_none() {
             draw_find(app, frame, editor);
         }
     }

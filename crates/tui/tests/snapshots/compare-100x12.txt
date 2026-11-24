@@ -1,0 +1,12 @@
+ f.txt (in file) ↔ f.txt (in rustode) - Resolve save conflict  +1 -1  change 1/1                    
+     1       - theirs                                                                               
+           1 + mine one                                                                             
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ n/p next/previous change   o Overwrite   r Revert   Esc close                                      
+ f.txt ●                                                         Ln 2, Col 1  UTF-8  LF  Plain Text 

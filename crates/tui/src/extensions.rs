@@ -211,9 +211,9 @@ pub(crate) fn message(event: &ExtensionEvent) -> Option<String> {
         }
         ExtensionEvent::Disabled { id } => format!("Disabled {id}"),
         ExtensionEvent::Failed { id, message } => format!("{id}: {message}"),
-        ExtensionEvent::ListFailed { message } | ExtensionEvent::StateFailed { message } => {
-            message.clone()
-        }
+        ExtensionEvent::ListFailed { message }
+        | ExtensionEvent::StateFailed { message }
+        | ExtensionEvent::ObsoleteFailed { message } => message.clone(),
         _ => return None,
     })
 }

@@ -30,6 +30,7 @@
 //!   folders still marked obsolete (`extensionManagementService.ts:561-567`,
 //!   `:959-1000`).
 
+use super::error::Failure;
 use super::manifest::{ExtensionManifest, ManifestProblem};
 use super::registry::{Release, UNIVERSAL};
 use super::state::Identifier;
@@ -57,20 +58,16 @@ fn now_millis() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
-fn io_error(path: &Path, err: &io::Error) -> String {
-    format!("{}: {err}", path.display())
-}
-
 /// Writes `bytes` to `path` through a temporary file and a rename.
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
     let name = path
         .file_name()
         .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
     let temp = path.with_file_name(format!(".{name}.{}.tmp", random_hex()));
-    fs::write(&temp, bytes).map_err(|err| io_error(&temp, &err))?;
+    fs::write(&temp, bytes).map_err(|err| Failure::io("write", &temp, err))?;
     fs::rename(&temp, path).map_err(|err| {
         let _ = fs::remove_file(&temp);
-        io_error(path, &err)
+        Failure::io("write", path, err)
     })
 }
 
@@ -100,6 +97,13 @@ pub(crate) struct Staged {
     pub size: u64,
 }
 
+/// What a listing found.
+pub(crate) struct Scanned {
+    pub(crate) list: Vec<InstalledExtension>,
+    /// Why the `.obsolete` file could not be used, if it could not.
+    pub(crate) obsolete_problem: Option<Failure>,
+}
+
 /// The extensions folder.
 pub(crate) struct Store<'a> {
     pub dir: &'a Path,
@@ -113,18 +117,12 @@ impl Store<'_> {
     }
 
     /// The index entries; an empty list when there is no index yet.
-    fn read_index(&self) -> Result<Vec<Value>, String> {
+    fn read_index(&self) -> Result<Vec<Value>, Failure> {
         let path = self.dir.join(INDEX);
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(io_error(&path, &err)),
-        };
-        let invalid = || {
-            format!(
-                "{} is not a valid extensions index; it was left unchanged",
-                path.display()
-            )
+            Err(err) => return Err(Failure::io("read", &path, err)),
         };
         if text.trim().is_empty() {
             return Ok(Vec::new());
@@ -137,12 +135,12 @@ impl Store<'_> {
             {
                 Ok(entries)
             }
-            _ => Err(invalid()),
+            _ => Err(Failure::InvalidIndex(path)),
         }
     }
 
-    fn write_index(&self, entries: &[Value]) -> Result<(), String> {
-        let bytes = serde_json::to_vec(entries).map_err(|err| err.to_string())?;
+    fn write_index(&self, entries: &[Value]) -> Result<(), Failure> {
+        let bytes = serde_json::to_vec(entries)?;
         write_atomic(&self.dir.join(INDEX), &bytes)
     }
 
@@ -165,15 +163,27 @@ impl Store<'_> {
         path.parent() == Some(self.dir)
     }
 
-    fn obsolete(&self) -> Map<String, Value> {
-        fs::read_to_string(self.dir.join(OBSOLETE))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Map<String, Value>>(&text).ok())
-            .unwrap_or_default()
+    /// The folders marked obsolete; none when there is no file. A file that
+    /// cannot be read or is not a map of names to `true` is an error: it is
+    /// never replaced.
+    fn obsolete(&self) -> Result<Map<String, Value>, Failure> {
+        let path = self.dir.join(OBSOLETE);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Map::new()),
+            Err(err) => return Err(Failure::io("read", &path, err)),
+        };
+        if text.trim().is_empty() {
+            return Ok(Map::new());
+        }
+        match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Object(marked)) if marked.values().all(Value::is_boolean) => Ok(marked),
+            _ => Err(Failure::InvalidObsolete(path)),
+        }
     }
 
-    fn set_obsolete(&self, key: &str, obsolete: bool) -> Result<(), String> {
-        let mut marked = self.obsolete();
+    fn set_obsolete(&self, key: &str, obsolete: bool) -> Result<(), Failure> {
+        let mut marked = self.obsolete()?;
         if obsolete {
             marked.insert(key.to_owned(), Value::Bool(true));
         } else if marked.remove(key).is_none() {
@@ -182,37 +192,46 @@ impl Store<'_> {
         let path = self.dir.join(OBSOLETE);
         if marked.is_empty() {
             return match fs::remove_file(&path) {
-                Err(err) if err.kind() != io::ErrorKind::NotFound => Err(io_error(&path, &err)),
+                Err(err) if err.kind() != io::ErrorKind::NotFound => {
+                    Err(Failure::io("delete", &path, err))
+                }
                 _ => Ok(()),
             };
         }
-        let bytes = serde_json::to_vec(&marked).map_err(|err| err.to_string())?;
+        let bytes = serde_json::to_vec(&marked)?;
         write_atomic(&path, &bytes)
     }
 
     /// Deletes an extension folder the way VS Code does: marked obsolete,
     /// renamed aside, deleted, unmarked. An interruption leaves it marked
     /// for the next listing to finish.
-    fn delete_folder(&self, folder: &Path) -> Result<(), String> {
+    fn delete_folder(&self, folder: &Path) -> Result<(), Failure> {
         let Some(key) = folder.file_name().map(|n| n.to_string_lossy().into_owned()) else {
             return Ok(());
         };
         self.set_obsolete(&key, true)?;
         let aside = folder.with_file_name(format!("{key}.{}{DELETED}", random_hex()));
-        fs::rename(folder, &aside).map_err(|err| io_error(folder, &err))?;
-        fs::remove_dir_all(&aside).map_err(|err| io_error(&aside, &err))?;
+        fs::rename(folder, &aside).map_err(|err| Failure::io("delete", folder, err))?;
+        fs::remove_dir_all(&aside).map_err(|err| Failure::io("delete", &aside, err))?;
         self.set_obsolete(&key, false)
     }
 
-    /// Removes what interrupted deletions left behind.
-    fn clean_up(&self, entries: &[Value]) {
+    /// Removes what interrupted deletions left behind. An unusable
+    /// `.obsolete` file is returned, so the listing can tell the user; it is
+    /// never rewritten, and a change that needs it is refused.
+    fn clean_up(&self, entries: &[Value]) -> Option<Failure> {
         self.remove_deleted_folders();
         let used: Vec<PathBuf> = entries.iter().filter_map(|e| self.location(e)).collect();
-        for key in self.obsolete().keys() {
-            if let Err(err) = self.finish_obsolete(key, &used) {
-                tracing::warn!(%key, %err, "cannot remove an obsolete extension");
+        let result = self.obsolete().map(|marked| {
+            for key in marked.keys() {
+                if let Err(err) = self.finish_obsolete(key, &used) {
+                    tracing::warn!(%key, %err, "cannot remove an obsolete extension");
+                }
             }
-        }
+        });
+        result.err().inspect(|err| {
+            tracing::warn!(%err, "cannot finish deleting obsolete extensions");
+        })
     }
 
     /// Deletes the `.vsctmp` folders left by interrupted deletions
@@ -234,7 +253,7 @@ impl Store<'_> {
 
     /// Deletes a folder marked obsolete unless the index still uses it;
     /// unmarks it once it is gone.
-    fn finish_obsolete(&self, key: &str, used: &[PathBuf]) -> Result<(), String> {
+    fn finish_obsolete(&self, key: &str, used: &[PathBuf]) -> Result<(), Failure> {
         let Some(relative) = super::vsix::safe_path(key) else {
             return Ok(());
         };
@@ -252,9 +271,12 @@ impl Store<'_> {
     /// their enablement given the globally `disabled` ones. An extension
     /// whose manifest cannot be read is listed as invalid, as VS Code lists
     /// it (`extensionsScannerService.ts:677-700`).
-    pub(crate) fn scan(&self, disabled: &[Identifier]) -> Result<Vec<InstalledExtension>, String> {
+    ///
+    /// The second value is the problem with the `.obsolete` file, if it is
+    /// unusable: the listing still works, and the file is left unchanged.
+    pub(crate) fn scan(&self, disabled: &[Identifier]) -> Result<Scanned, Failure> {
         let entries = self.read_index()?;
-        self.clean_up(&entries);
+        let obsolete_problem = self.clean_up(&entries);
         let mut list: Vec<InstalledExtension> = entries
             .iter()
             .filter_map(|entry| {
@@ -263,7 +285,10 @@ impl Store<'_> {
             })
             .collect();
         list.sort_by_key(|e| (e.display_name.to_lowercase(), e.id.clone()));
-        Ok(list)
+        Ok(Scanned {
+            list,
+            obsolete_problem,
+        })
     }
 
     /// The installed extension `id` and its identifier, if it is installed.
@@ -271,7 +296,7 @@ impl Store<'_> {
         &self,
         id: &str,
         disabled: &[Identifier],
-    ) -> Result<Option<(InstalledExtension, Identifier)>, String> {
+    ) -> Result<Option<(InstalledExtension, Identifier)>, Failure> {
         let entries = self.read_index()?;
         Ok(entries.iter().find_map(|entry| {
             let identifier = identifier(entry).filter(|i| i.id == id)?;
@@ -281,7 +306,7 @@ impl Store<'_> {
     }
 
     /// The installed version of `id`, if any; fails when the index is invalid.
-    pub(crate) fn installed_version(&self, id: &str) -> Result<Option<String>, String> {
+    pub(crate) fn installed_version(&self, id: &str) -> Result<Option<String>, Failure> {
         let entries = self.read_index()?;
         Ok(entries
             .iter()
@@ -293,10 +318,12 @@ impl Store<'_> {
 
     /// Puts a staged extension in place and indexes it, replacing any other
     /// version of it.
-    pub(crate) fn add(&self, staged: &Staged) -> Result<(), String> {
+    pub(crate) fn add(&self, staged: &Staged) -> Result<(), Failure> {
         let release = &staged.release;
         let id = format!("{}.{}", release.namespace, release.name).to_ascii_lowercase();
         let mut entries = self.read_index()?;
+        // Refused before anything changes if the obsolete list cannot be used.
+        self.obsolete()?;
         check_manifest(&staged.folder, &id, &release.version)?;
         write_manifest_metadata(&staged.folder, release, staged.size)?;
         let key = format!("{id}-{}-{}", release.version, release.target_platform);
@@ -304,7 +331,8 @@ impl Store<'_> {
         if target.exists() {
             self.delete_folder(&target)?;
         }
-        fs::rename(&staged.folder, &target).map_err(|err| io_error(&target, &err))?;
+        fs::rename(&staged.folder, &target)
+            .map_err(|err| Failure::io("install into", &target, err))?;
         let (old, kept): (Vec<Value>, Vec<Value>) = entries
             .drain(..)
             .partition(|e| entry_id(e).as_deref() == Some(id.as_str()));
@@ -320,13 +348,15 @@ impl Store<'_> {
     }
 
     /// Removes `id` from the index, then deletes its folders.
-    pub(crate) fn remove(&self, id: &str) -> Result<(), String> {
+    pub(crate) fn remove(&self, id: &str) -> Result<(), Failure> {
         let entries = self.read_index()?;
+        // Refused before the index changes if the obsolete list cannot be used.
+        self.obsolete()?;
         let (removed, kept): (Vec<Value>, Vec<Value>) = entries
             .into_iter()
             .partition(|e| entry_id(e).as_deref() == Some(id));
         if removed.is_empty() {
-            return Err(format!("{id} is not installed"));
+            return Err(Failure::NotInstalled(id.to_owned()));
         }
         self.write_index(&kept)?;
         let used: Vec<PathBuf> = kept.iter().filter_map(|e| self.location(e)).collect();
@@ -356,7 +386,7 @@ fn identifier(entry: &Value) -> Option<Identifier> {
 fn read_manifest(id: &str, entry: &Value, location: &Path) -> (ExtensionManifest, Option<String>) {
     let path = location.join("package.json");
     let read = fs::read_to_string(&path)
-        .map_err(|err| format!("cannot read {}: {err}", path.display()))
+        .map_err(|err| Failure::io("read", &path, err).to_string())
         .and_then(|text| {
             ExtensionManifest::parse(&text).map_err(|err| format!("{}: {err}", path.display()))
         });
@@ -420,12 +450,13 @@ fn read_extension(entry: &Value, location: &Path, disabled: &[Identifier]) -> In
 /// The extracted package.json must name the extension and version asked
 /// for, as VS Code checks the gallery's identity against the manifest
 /// (`extensionManagementService.ts:309-311`).
-fn check_manifest(folder: &Path, id: &str, version: &str) -> Result<(), String> {
+fn check_manifest(folder: &Path, id: &str, version: &str) -> Result<(), Failure> {
     let path = folder.join("package.json");
-    let text = fs::read_to_string(&path)
-        .map_err(|_| "the VSIX has no extension/package.json".to_owned())?;
-    let manifest = ExtensionManifest::parse(&text)
-        .map_err(|err| format!("the VSIX's package.json is not valid: {err}"))?;
+    let text = fs::read_to_string(&path).map_err(|_| Failure::NoManifest { id: id.to_owned() })?;
+    let manifest = ExtensionManifest::parse(&text).map_err(|source| Failure::BadManifest {
+        id: id.to_owned(),
+        source,
+    })?;
     let found = format!(
         "{}.{}",
         manifest.publisher().unwrap_or_default(),
@@ -434,9 +465,12 @@ fn check_manifest(folder: &Path, id: &str, version: &str) -> Result<(), String> 
     .to_ascii_lowercase();
     let found_version = manifest.version().unwrap_or_default();
     if found != id || found_version != version {
-        return Err(format!(
-            "the VSIX holds {found} {found_version}, not {id} {version}"
-        ));
+        return Err(Failure::WrongPackage {
+            found,
+            found_version: found_version.to_owned(),
+            id: id.to_owned(),
+            version: version.to_owned(),
+        });
     }
     Ok(())
 }
@@ -447,12 +481,19 @@ fn check_manifest(folder: &Path, id: &str, version: &str) -> Result<(), String> 
 /// writes it (`JSON.stringify(manifest, null, '\t')`,
 /// `extensionsScannerService.ts:304-311`; keys in the order of
 /// `extensionManagementService.ts:654-657`).
-fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Result<(), String> {
+fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Result<(), Failure> {
     let path = folder.join("package.json");
-    let text = fs::read_to_string(&path).map_err(|err| io_error(&path, &err))?;
-    let mut manifest: Value = serde_json::from_str(&text).map_err(|err| err.to_string())?;
+    let id = format!("{}.{}", release.namespace, release.name);
+    let text = fs::read_to_string(&path).map_err(|err| Failure::io("read", &path, err))?;
+    let mut manifest: Value = serde_json::from_str(&text).map_err(|err| Failure::BadManifest {
+        id: id.clone(),
+        source: super::manifest::ManifestError::NotJson(err),
+    })?;
     let Some(object) = manifest.as_object_mut() else {
-        return Err("the VSIX's package.json is not an object".to_owned());
+        return Err(Failure::BadManifest {
+            id,
+            source: super::manifest::ManifestError::NotAnObject,
+        });
     };
     let metadata = object
         .entry("__metadata")
@@ -471,10 +512,8 @@ fn write_manifest_metadata(folder: &Path, release: &Release, size: u64) -> Resul
     let mut bytes = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"\t");
     let mut serializer = serde_json::Serializer::with_formatter(&mut bytes, formatter);
-    manifest
-        .serialize(&mut serializer)
-        .map_err(|err| err.to_string())?;
-    fs::write(&path, bytes).map_err(|err| io_error(&path, &err))
+    manifest.serialize(&mut serializer)?;
+    fs::write(&path, bytes).map_err(|err| Failure::io("write", &path, err))
 }
 
 /// The metadata VS Code records for an install from the gallery, in its

@@ -107,6 +107,7 @@ Check a message before committing: `committed --commit-file <file>` and `cargo x
 ### Branches
 
 - Never push to `main`; every change reaches `main` through a pull request, squash-merged, so the pull request title becomes the commit and must itself be a valid commit message.
+- Pull request titles are at most 66 characters: GitHub appends ` (#<number>)` to the squash commit, and CI checks the title with that suffix, so the commit on `main` stays within 72.
 - Branch names start with a commit type and a slash: `feat/…`, `fix/…`, `perf/…`, `refactor/…`, `test/…`, `docs/…`, `build/…`, `ci/…`, `chore/…`, `revert/…`, followed by words of lower-case letters and digits joined by `-` (for example `feat/rope-buffer-2`).
 
 ### What runs when

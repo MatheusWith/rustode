@@ -15,6 +15,7 @@
 )]
 
 use rustode_workspace::bench::{SCRIPT_ENV, Script};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -29,16 +30,20 @@ enum Command {
     Usage(String),
 }
 
-fn parse(args: impl Iterator<Item = String>) -> Command {
-    let args: Vec<String> = args.collect();
-    match args.first().map(String::as_str) {
-        None => return Command::Usage("missing PATH".to_owned()),
+/// Paths stay `OsString`s: a path need not be UTF-8.
+fn parse(args: impl Iterator<Item = OsString>) -> Command {
+    let args: Vec<OsString> = args.collect();
+    match args.first().and_then(|arg| arg.to_str()) {
+        None if args.is_empty() => return Command::Usage("missing PATH".to_owned()),
         Some("--version" | "-V") if args.len() == 1 => return Command::Version,
         Some("--help" | "-h") if args.len() == 1 => return Command::Help,
         _ => {}
     }
-    if let Some(flag) = args.iter().find(|arg| arg.starts_with('-')) {
-        return Command::Usage(format!("unexpected argument '{flag}'"));
+    if let Some(flag) = args
+        .iter()
+        .find(|arg| arg.to_string_lossy().starts_with('-'))
+    {
+        return Command::Usage(format!("unexpected argument '{}'", flag.to_string_lossy()));
     }
     Command::Open(args.into_iter().map(PathBuf::from).collect())
 }
@@ -47,7 +52,7 @@ fn main() -> ExitCode {
     if let Err(err) = rustode_workspace::trace::init_from_env() {
         eprintln!("warning: {err}");
     }
-    match parse(std::env::args().skip(1)) {
+    match parse(std::env::args_os().skip(1)) {
         Command::Version => {
             println!("rustode-gui {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS

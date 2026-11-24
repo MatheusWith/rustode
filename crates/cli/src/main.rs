@@ -14,6 +14,7 @@
 
 mod bench;
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -29,12 +30,18 @@ enum Command {
     Unknown(String),
 }
 
-fn parse(mut args: impl Iterator<Item = String>) -> Command {
-    match args.next().as_deref() {
+/// An argument that is not UTF-8 is shown lossily and is never a crash.
+fn parse(mut args: impl Iterator<Item = OsString>) -> Command {
+    let Some(first) = args.next() else {
+        return Command::Help;
+    };
+    match first.to_str() {
         Some("--version" | "-V") => Command::Version,
-        None | Some("--help" | "-h") => Command::Help,
-        Some("bench") => Command::Bench(args.collect()),
-        Some(other) => Command::Unknown(other.to_owned()),
+        Some("--help" | "-h") => Command::Help,
+        Some("bench") => {
+            Command::Bench(args.map(|arg| arg.to_string_lossy().into_owned()).collect())
+        }
+        _ => Command::Unknown(first.to_string_lossy().into_owned()),
     }
 }
 
@@ -42,7 +49,7 @@ fn main() -> ExitCode {
     if let Err(err) = rustode_workspace::trace::init_from_env() {
         eprintln!("warning: {err}");
     }
-    let command = parse(std::env::args().skip(1));
+    let command = parse(std::env::args_os().skip(1));
     tracing::debug!(command = ?command, "cli started");
     match command {
         Command::Version => {
