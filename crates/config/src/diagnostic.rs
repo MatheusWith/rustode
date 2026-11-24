@@ -33,6 +33,16 @@ pub enum Severity {
     Hint,
 }
 
+impl fmt::Display for Severity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Hint => "hint",
+        })
+    }
+}
+
 /// What kind of problem a diagnostic describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticKind {
@@ -67,11 +77,7 @@ pub struct Diagnostic {
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}: {:?}: {}",
-            self.position, self.severity, self.message
-        )
+        write!(f, "{}: {}: {}", self.position, self.severity, self.message)
     }
 }
 

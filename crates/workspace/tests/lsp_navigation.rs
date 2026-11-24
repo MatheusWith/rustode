@@ -467,6 +467,12 @@ fn an_edit_for_another_version_or_with_file_operations_or_overlaps_changes_nothi
             notice.starts_with("The rename was not applied:") && notice.contains(why),
             "{mode}: {notice}"
         );
+        if mode != "fileop" {
+            assert!(
+                notice.contains(".rs"),
+                "{mode}: the file is named: {notice}"
+            );
+        }
         assert_eq!(text(&ws, a), A, "{mode}");
         for tab in ws.tabs().to_vec() {
             assert!(!ws.document(tab).expect("doc").is_dirty(), "{mode}");

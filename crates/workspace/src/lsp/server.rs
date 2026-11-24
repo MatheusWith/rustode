@@ -254,7 +254,7 @@ impl Server {
             Ok(options) => options,
             Err(why) => {
                 self.state = ServerState::Crashed;
-                self.message = Some(why);
+                self.message = Some(why.to_string());
                 return;
             }
         };
@@ -287,7 +287,7 @@ impl Server {
 
     /// The `initializationOptions` to send: the configured ones, and for the
     /// built-in TypeScript server the `tsserver.path` it must run on.
-    fn initialization_options(&self) -> Result<Option<Value>, String> {
+    fn initialization_options(&self) -> Result<Option<Value>, super::tsserver::NoTsserver> {
         let Some(rule) = &self.config.typescript else {
             return Ok(self.config.initialization_options.clone());
         };
