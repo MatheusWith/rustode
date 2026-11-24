@@ -39,11 +39,12 @@
 //! results after a partial replace follow the text that moved.
 
 use super::{FileResult, SearchEvent, SearchMatch, SearchQuery, SearchResults};
-use crate::bulk_edit::follow;
+use crate::bulk_edit::{EditsError, follow};
 use crate::{DocumentId, Event, Position, Range, Workspace};
 use rustode_core::Buffer;
 use std::collections::HashMap;
 use std::fmt::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -205,16 +206,39 @@ impl ReplaceState {
     }
 }
 
+/// Why a file's text could not be loaded to preview or plan a replace.
+#[derive(Debug)]
+enum LoadError {
+    Read { path: PathBuf, source: io::Error },
+    TooLarge(PathBuf),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
+            Self::TooLarge(path) => write!(
+                f,
+                "{} is too large to replace in ({MAX_SCAN_BYTES} bytes at most)",
+                path.display()
+            ),
+        }
+    }
+}
+
 /// The current text of `path`: the open document's, else the file's.
-fn load(workspace: &Workspace, path: &Path) -> Result<Buffer, String> {
+fn load(workspace: &Workspace, path: &Path) -> Result<Buffer, LoadError> {
     if let Some(id) = workspace.find_open(path)
         && let Some(document) = workspace.document(id)
     {
         return Ok(document.editor().buffer().clone());
     }
-    let bytes = rustode_fs::read_file(path).map_err(|err| err.to_string())?;
+    let bytes = rustode_fs::read_file(path).map_err(|source| LoadError::Read {
+        path: path.to_owned(),
+        source,
+    })?;
     if bytes.len() > MAX_SCAN_BYTES {
-        return Err("the file is too large".to_owned());
+        return Err(LoadError::TooLarge(path.to_owned()));
     }
     Ok(Buffer::from_text(&rustode_fs::decode_owned(bytes).text))
 }
@@ -375,7 +399,10 @@ impl Workspace {
         let scanned = if let Some(scanned) = cached {
             scanned
         } else {
+            // A file that cannot be loaded previews as no match; planning
+            // the replace reports it as changed since the search.
             let built = load(self, &result.path)
+                .inspect_err(|err| tracing::warn!(%err, "no replace preview"))
                 .map(|buffer| scan(&buffer, query, &self.search.replace.text))
                 .unwrap_or_default();
             let built = Arc::new(built);
@@ -578,7 +605,7 @@ impl Workspace {
             match self.apply_file(&mut job) {
                 Ok(()) => false,
                 Err(why) => {
-                    self.search.replace.outcome = Some(Err(ReplaceError::Failed(why)));
+                    self.search.replace.outcome = Some(Err(ReplaceError::Failed(why.to_string())));
                     true
                 }
             }
@@ -612,9 +639,13 @@ impl Workspace {
         let at = job.planned;
         job.planned += 1;
         let (result, indexes) = &job.chosen[at];
-        let Ok(buffer) = load(self, &result.path) else {
-            job.stale.push(result.path.clone());
-            return;
+        let buffer = match load(self, &result.path) {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                tracing::warn!(%err, "a file is stale for the replace");
+                job.stale.push(result.path.clone());
+                return;
+            }
         };
         let scanned = scan(&buffer, &job.query, &job.replacement);
         let mut edits = Vec::with_capacity(indexes.len());
@@ -649,13 +680,13 @@ impl Workspace {
     }
 
     /// Edits one planned file, saves it when it was clean, and brings the results up to date.
-    fn apply_file(&mut self, job: &mut Job) -> Result<(), String> {
+    fn apply_file(&mut self, job: &mut Job) -> Result<(), EditsError> {
         let at = job.applied;
         job.applied += 1;
         let plan = &job.plans[at];
         let path = plan.result.path.clone();
         let was_open = self.find_open(&path).is_some();
-        let id = self.open(&path).map_err(|err| err.to_string())?;
+        let id = self.open(&path).map_err(EditsError::Open)?;
         let same = self
             .document(id)
             .is_some_and(|d| d.editor().buffer().text() == plan.buffer.text());

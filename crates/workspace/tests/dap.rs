@@ -203,6 +203,44 @@ fn launch_json_is_read_in_vs_codes_format_and_problems_are_reported() {
 }
 
 #[test]
+fn every_launch_json_problem_names_the_file() {
+    let f = Fixture::new("launch-json-names-file");
+    let file = f.project().join(".vscode/launch.json");
+    for text in [
+        r#"{ "configurations": [ { "name": "A", "request": "launch" } ] }"#,
+        r#"{ "configurations": [ 5 ] }"#,
+        r#"{ "configurations": 3 }"#,
+        "[1]",
+        r#"{ "configurations": [ { "name": "", "type": "t", "request": "r" } ] }"#,
+        r#"{ "configurations": [ { "name": 1, "type": "t", "request": "r" } ] }"#,
+        r#"{ "configurations": [ "#,
+    ] {
+        f.launch_json(text);
+        let ws = f.workspace(&[]);
+        let problems = ws.debug_problems();
+        assert!(!problems.is_empty(), "{text}");
+        for problem in &problems {
+            assert!(
+                problem.contains(&file.display().to_string()),
+                "{text}: {problem}"
+            );
+            assert!(!problem.contains("{:?}"), "{problem}");
+        }
+    }
+    // A launch.json that cannot be read names the file too.
+    std::fs::remove_file(&file).expect("remove");
+    std::fs::create_dir(&file).expect("a folder in its place");
+    let ws = f.workspace(&[]);
+    let problems = ws.debug_problems();
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains(&file.display().to_string()) && p.contains("cannot read")),
+        "{problems:?}"
+    );
+}
+
+#[test]
 fn a_missing_launch_json_is_no_configuration_and_no_problem() {
     let f = Fixture::new("no-launch-json");
     let mut ws = f.workspace(&[]);

@@ -391,7 +391,12 @@ fn write_config(plan: &Plan, copy: &Copy) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
     fs::write(plan.driver_config(), text + "\n")
         .and_then(|()| fs::copy(plan.settings(), out.join("settings.json")).map(drop))
-        .map_err(|err| format!("cannot write the driver config: {err}"))
+        .map_err(|err| {
+            format!(
+                "cannot write the driver config {}: {err}",
+                display::path(&plan.driver_config())
+            )
+        })
 }
 
 /// The driver configuration the two targets share.
@@ -454,9 +459,18 @@ pub(super) fn run_driver(
     (what, deadline): (&str, Duration),
 ) -> Result<(ExitStatus, Option<DriverResults>), String> {
     let log_path = out.join("driver.log");
-    let log =
-        File::create(&log_path).map_err(|err| format!("cannot create the driver log: {err}"))?;
-    let err_log = log.try_clone().map_err(|err| err.to_string())?;
+    let log = File::create(&log_path).map_err(|err| {
+        format!(
+            "cannot create the driver log {}: {err}",
+            display::path(&log_path)
+        )
+    })?;
+    let err_log = log.try_clone().map_err(|err| {
+        format!(
+            "cannot share the driver log {}: {err}",
+            display::path(&log_path)
+        )
+    })?;
     let command = plan.launch_command(config);
     eprintln!(
         "bench: launching {what} on the virtual display (log: {})",
@@ -494,7 +508,10 @@ fn wait(
 ) -> Result<ExitStatus, String> {
     let deadline = Instant::now() + allowed;
     loop {
-        if let Some(exit) = child.try_wait().map_err(|err| err.to_string())? {
+        if let Some(exit) = child
+            .try_wait()
+            .map_err(|err| format!("cannot check on the driver: {err}"))?
+        {
             return Ok(exit);
         }
         if Instant::now() >= deadline {
@@ -610,8 +627,12 @@ impl Copy {
     fn create(plan: &Plan) -> Result<Self, String> {
         fs::create_dir_all(&plan.copy_parent)
             .map_err(|err| format!("cannot create {}: {err}", display::path(&plan.copy_parent)))?;
-        let root = temp_dir(&plan.copy_parent, "rustode-bench-app.")
-            .map_err(|err| format!("cannot create the copy folder: {err}"))?;
+        let root = temp_dir(&plan.copy_parent, "rustode-bench-app.").map_err(|err| {
+            format!(
+                "cannot create the copy folder in {}: {err}",
+                display::path(&plan.copy_parent)
+            )
+        })?;
         let reaper = start_reaper(plan, &root);
         let copy = Self { root, reaper };
         eprintln!(
@@ -627,8 +648,12 @@ impl Copy {
         if !copied.success() {
             return Err(format!("cp -a of the App failed ({copied})"));
         }
-        fs::create_dir(copy.profiles())
-            .map_err(|err| format!("cannot create the profiles folder: {err}"))?;
+        fs::create_dir(copy.profiles()).map_err(|err| {
+            format!(
+                "cannot create the profiles folder {}: {err}",
+                display::path(&copy.profiles())
+            )
+        })?;
         Ok(copy)
     }
 
