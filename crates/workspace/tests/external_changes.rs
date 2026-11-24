@@ -330,19 +330,20 @@ fn the_prompt_for_a_conflict_offers_the_commands_and_nothing_overwrites_before_a
     let prompt = ws.conflict_prompt(id).expect("prompt");
     assert_eq!(
         prompt.message,
-        "Failed to save 'f.txt': The content of the file is newer. Please overwrite the content \
-         of the file with your changes or revert to the file contents."
+        "Failed to save 'f.txt': The content of the file is newer. Please compare your version \
+         with the file contents or overwrite the content of the file with your changes."
     );
     let ids: Vec<_> = prompt.choices.iter().map(|c| c.command).collect();
     assert_eq!(
         ids,
         [
+            "workbench.files.action.resolveConflict",
             "workbench.files.action.saveIgnoreModifiedSince",
             "workbench.files.action.revertLocalChanges"
         ]
     );
     let names: Vec<_> = prompt.choices.iter().map(|c| c.label).collect();
-    assert_eq!(names, ["Overwrite", "Revert"]);
+    assert_eq!(names, ["Compare", "Overwrite", "Revert"]);
     assert_eq!(std::fs::read(&path).expect("read"), b"theirs\n");
     ws.resolve_conflict(id, Resolution::KeepMine).expect("keep");
     assert!(ws.conflict_prompt(id).is_none(), "resolved: no prompt");

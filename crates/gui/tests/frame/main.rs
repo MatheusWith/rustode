@@ -8,6 +8,7 @@
 //! `UPDATE_SNAPSHOTS=1 cargo nextest run -p rustode-gui`.
 
 mod bench;
+mod compare;
 mod conflict;
 mod debug;
 mod editor;
