@@ -214,7 +214,11 @@ fn parse(input: &str) -> Result<When, WhenError> {
         });
     }
     let tokens = scan(input)?;
-    let mut parser = Parser { tokens, current: 0 };
+    let mut parser = Parser {
+        tokens,
+        current: 0,
+        depth: 0,
+    };
     let expr = parser.or()?;
     let next = parser.peek();
     if next.kind != Tok::Eof {
@@ -467,9 +471,18 @@ fn regex_end(input: &str, start: usize) -> Option<usize> {
     Some(end)
 }
 
+/// How deep parentheses may nest. The parser recurses once per level, so an
+/// unbounded clause (a corrupted `keybindings.json` can hold 100,000 of
+/// them) would overflow the stack and abort the process; the limit matches
+/// the depth limit of the debug launch files (`crates/workspace/src/dap/launch.rs`)
+/// and is far beyond anything a person writes.
+const MAX_DEPTH: usize = 64;
+
 struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    /// How many parentheses are open at this point.
+    depth: usize,
 }
 
 impl Parser {
@@ -509,6 +522,24 @@ impl Parser {
         } else {
             Err(self.expected(what))
         }
+    }
+
+    /// The expression inside a pair of parentheses, whose `(` was just read,
+    /// up to and including the `)`. Refuses to nest deeper than [`MAX_DEPTH`].
+    fn parenthesized(&mut self, open: usize) -> Result<When, WhenError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(WhenError {
+                offset: open,
+                message: format!("Too many nested parentheses (more than {MAX_DEPTH})."),
+                ..WhenError::default()
+            });
+        }
+        self.depth += 1;
+        let inner = self.or();
+        self.depth -= 1;
+        let inner = inner?;
+        self.expect(&Tok::RParen, "closing parenthesis ')'")?;
+        Ok(inner)
     }
 
     /// `_or` (`contextkey.ts:239`).
@@ -558,10 +589,8 @@ impl Parser {
                 Ok(When::True)
             }
             Tok::LParen => {
-                self.advance();
-                let inner = self.or()?;
-                self.expect(&Tok::RParen, "closing parenthesis ')'")?;
-                Ok(When::Negate(Box::new(inner)))
+                let open = self.advance().offset;
+                Ok(When::Negate(Box::new(self.parenthesized(open)?)))
             }
             Tok::Str(key) => {
                 self.advance();
@@ -583,10 +612,8 @@ impl Parser {
                 Ok(When::False)
             }
             Tok::LParen => {
-                self.advance();
-                let inner = self.or()?;
-                self.expect(&Tok::RParen, "closing parenthesis ')'")?;
-                Ok(inner)
+                let open = self.advance().offset;
+                self.parenthesized(open)
             }
             Tok::Str(key) => {
                 self.advance();

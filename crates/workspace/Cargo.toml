@@ -32,6 +32,8 @@ stand-in = []
 [dev-dependencies]
 # The crate's own tests use the stand-in too.
 rustode-workspace = { path = ".", features = ["stand-in"] }
+# Seeded mutation tests of the config and launch files (F0.8).
+proptest.workspace = true
 
 [lints]
 workspace = true

@@ -19,6 +19,9 @@ rustode-workspace = { path = "crates/workspace" }
 # Micro-benchmarks (ADR 0026): no plotters and no rayon; the gate reads the
 # estimates, not the charts.
 criterion = { version = "0.8.2", default-features = false }
+# Seeded mutation tests of the config and launch parsers (F0.8): no default
+# features, so neither fork nor timeout nor the regex-syntax strategies.
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 # GUI: eframe on wgpu (no glow) with AccessKit. winit is the version eframe
 # uses; the GUI wraps eframe's event handler to time input-to-present.
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "wayland", "wgpu", "x11"] }
