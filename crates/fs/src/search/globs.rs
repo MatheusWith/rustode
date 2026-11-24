@@ -44,6 +44,11 @@ impl fmt::Display for GlobError {
 
 impl std::error::Error for GlobError {}
 
+/// The deepest `{}` nesting a glob may have. The glob parser recurses into
+/// each brace, so a typed glob of thousands of them would overflow the
+/// stack, which aborts the process; a person writes two or three.
+const MAX_BRACE_DEPTH: usize = 32;
+
 /// What the walk lets through.
 #[derive(Debug)]
 pub(super) struct Filter {
@@ -130,6 +135,12 @@ fn set(globs: impl Iterator<Item = (String, String)>) -> Result<Option<GlobSet>,
     let mut builder = GlobSetBuilder::new();
     let mut any = false;
     for (typed, glob) in globs {
+        if brace_depth(&glob) > MAX_BRACE_DEPTH {
+            return Err(GlobError {
+                pattern: typed,
+                message: format!("braces nested more than {MAX_BRACE_DEPTH} deep"),
+            });
+        }
         let compiled = GlobBuilder::new(&glob)
             .literal_separator(true)
             .backslash_escape(false)
@@ -148,6 +159,22 @@ fn set(globs: impl Iterator<Item = (String, String)>) -> Result<Option<GlobSet>,
         pattern: err.glob().unwrap_or_default().to_owned(),
         message: err.kind().to_string(),
     })
+}
+
+/// How deep the `{}` of a glob nest, counting an unclosed brace as open.
+fn brace_depth(glob: &str) -> usize {
+    let (mut depth, mut deepest) = (0_usize, 0_usize);
+    for c in glob.chars() {
+        match c {
+            '{' => {
+                depth = depth.saturating_add(1);
+                deepest = deepest.max(depth);
+            }
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// VS Code's `splitGlobAware`: splits at `split` outside `{}` and `[]`.
@@ -273,6 +300,14 @@ mod tests {
         assert_eq!(globs("sub/../x"), ["**/sub/../x/**", "**/sub/../x"]);
         assert!(expand(Some(Path::new("/w")), "../elsewhere").is_err());
         assert!(expand(Some(Path::new("/w")), "/elsewhere").is_err());
+    }
+
+    #[test]
+    fn deeply_nested_braces_are_an_error_not_a_stack_overflow() {
+        let nested = "{".repeat(10_000) + &"}".repeat(10_000);
+        let err = Filter::new(None, &nested, "", &[]).expect_err("too deep");
+        assert!(err.to_string().contains("nested"), "{err}");
+        Filter::new(None, "{a,{b,{c,d}}}", "", &[]).expect("a person's nesting is fine");
     }
 
     #[test]

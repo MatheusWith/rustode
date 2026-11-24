@@ -80,3 +80,27 @@ fn a_path_that_is_not_utf8_is_not_a_crash() {
         .expect("the rustode-tui binary runs");
     assert_eq!(out.status.code(), Some(1));
 }
+
+#[test]
+fn hostile_arguments_and_log_filters_are_errors_not_crashes() {
+    let long = "x".repeat(100_000);
+    for arg in ["", " ", "-", "--", "\n", long.as_str()] {
+        let out = tui(&[arg]);
+        assert!(
+            matches!(out.status.code(), Some(1 | 2)),
+            "{}: {:?}",
+            arg.len(),
+            out.status
+        );
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+    }
+    for filter in ["=====", "[[[", "debug,,,", "a=b=c", "💥"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_rustode-tui"))
+            .arg("--version")
+            .env("RUSTODE_LOG", filter)
+            .output()
+            .expect("the rustode-tui binary runs");
+        assert!(out.status.success(), "{filter:?}: {:?}", out.status);
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+    }
+}
